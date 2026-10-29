@@ -5341,6 +5341,24 @@ lives above both, so they still pick the same Krylov dimension and the
 same sub-steps. v3's `applyExp` is vendored ITensor and keeps its absolute
 goal.
 
+**A non-Hermitian H takes the Arnoldi exponentiator.** The Lanczos route
+keeps only `Re<q|A|q>`, and its full reorthogonalization removes the
+projections of `A q` on the older basis vectors without writing them into
+the tridiagonal matrix. For a Hermitian A both are rounding; for a
+non-Hermitian one they break the Krylov relation `A Q = Q T + f e_k^T`,
+and two-site TDVP was 3.6e-3 off the exact evolution on a 4-site chain
+with `0.7i Sz_0` (v3, a three-term recursion with no reorthogonalization
+and so an exact oblique relation, was 9e-7 off). `_arnoldi_expm_multiply`
+records the whole column, so `T` is the Hessenberg `Q^† A Q`, and it keeps
+the Lanczos route's stopping test, exhaustion test and sub-stepping with
+`h_{k+1,k}` in place of `β_k`. `tdvp_step(hermitian=None)` picks the route
+from the operator through `mpsalgebra.mpo_is_hermitian`, the relative
+Frobenius norm of `H - H^†` read off a canonicalized direct sum (no
+cancellation, threshold 1e-12), never from `dt`: METTS and TDZ pass an
+imaginary or complex `dt` with a Hermitian H and stay on Lanczos. The
+chain loops decide once before stepping. Pinned by
+`tests/test_nh_time_evolution.py`.
+
 **Truncation via the smaller Gram matrix (`pyitensor/svd.py`).** Every
 truncation in the pure-Python engine is "reshape across an index partition,
 factorize, keep the largest singular values". Those matrices are strongly

@@ -270,6 +270,54 @@ def traceC(mpo):
     return env.scalar()
 
 
+def mpo_dagger(A):
+    """A^dagger for an MPO: every tensor conjugated, with its two Site
+    legs swapped."""
+    from .tensor import dag, swapPrime
+    out = A.copy()
+    for j in range(1, out.length() + 1):
+        out.set_A(j, dag(swapPrime(out.A(j), 0, 1, "Site")))
+    return out
+
+
+def _mpo_frobenius_norm(M):
+    """||M||_F = sqrt(Tr M^dagger M), read off the orthogonality center
+    after one lossless right-to-left sweep. The sweep is forced from the
+    far end, since a chain fresh out of sum_many() claims center=n while
+    being in no canonical form at all; from there every site it passes is
+    right-orthogonalized whatever its gauge (_shift_right's argument in
+    mpscontainer.py)."""
+    out = M.copy()
+    n = out.length()
+    out.center = n
+    out.position(1)
+    return float(bk.to_host(bk.xp().linalg.norm(out.A(1).array)))
+
+
+# Relative size of H - H^dagger below which an MPO counts as Hermitian.
+# The norm of the difference is computed without cancellation (see
+# mpo_is_hermitian), so its rounding floor is ~1e-15 times ||H||_F, and
+# this sits three orders above it -- the level of
+# multioperator.clean_threshold.
+_HERMITIAN_RTOL = 1e-12
+
+
+def mpo_is_hermitian(H, rtol=_HERMITIAN_RTOL):
+    """Whether ||H - H^dagger||_F <= rtol * ||H||_F for an MPO H.
+
+    The difference is built as an exact direct sum and canonicalized, so
+    its norm comes from the center tensor rather than from 2 Tr(H^dag H) -
+    2 Re Tr(H H), a difference of two numbers of order ||H||_F^2 that
+    would only resolve the ratio down to ~1e-8. The cost is one SVD sweep
+    over an MPO of twice H's bond dimension, far below one TDVP step.
+    An exact zero operator counts as Hermitian."""
+    scale = _mpo_frobenius_norm(H)
+    if scale == 0.0:
+        return True
+    D = sum_many([H, mpo_dagger(H) * (-1.0)])
+    return _mpo_frobenius_norm(D) <= rtol * scale
+
+
 def _bond_dims(chain):
     """{k: dim of the Link between site k and k+1} for k=1..N-1."""
     n = chain.length()

@@ -1194,3 +1194,27 @@ a 1e-8 residual stop. The spectral-bound solve is unchanged.
 So the energy is unchanged at its convergence. The eigenvector of an exact
 state is converged a little less, to about 1e-6 in norm, since each bond
 stops once its energy is stable. A truncation-limited state is unchanged.
+
+## The 2026-10-29 non-Hermitian real-time evolution on `"python"`
+
+Real-time evolution on `"python"` with a non-Hermitian Hamiltonian was
+wrong. Every TDVP route exponentiated the local generator with a Lanczos
+recursion, and that recursion is correct only for a Hermitian operator.
+This covers two-site TDVP, `tevol_method="TDVP_GSE"`, and `Chain.tdvp_step`
+as TDZ and the two-time Kondo construction use it. Now a non-Hermitian MPO
+takes an Arnoldi exponentiator. A Hermitian Hamiltonian still takes the
+Lanczos one, so its results do not change. Measured on a 4-site Heisenberg
+chain with $0.5 S^x_0 + 0.7i S^z_0$ added, $dt=0.05$, 40 steps, as the
+largest error of $\langle S^z_2(t)\rangle$ against the exact normalized
+evolution:
+
+| backend | before | now |
+|---|---|---|
+| `"python"`, two-site TDVP | 3.6e-3 | 9.0e-7 |
+| `itensor_version=3`, two-site TDVP | 9.0e-7 | 9.0e-7 |
+
+The remaining 9e-7 is the time-step error that the two backends share.
+`mode="ED"` returns the unnormalized $\langle\psi|O|\psi\rangle$ for a
+non-Hermitian $H$, while both DMRG backends normalize the state after each
+step. So ED and DMRG still answer different quantities there; this is not
+changed yet.

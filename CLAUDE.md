@@ -491,7 +491,12 @@ Do not undo one without reading its finding first.
   it that way if either changes. Every `evolve_and_measure_*` loop on every
   backend restores the input norm `norm0` after each step, and
   `gse.global_subspace_expand` normalizes each Krylov vector
-  (`test_pyitensor_time_evolution_review.py`). `TDVP_GSE` stops growing the
+  (`test_pyitensor_time_evolution_review.py`). A non-Hermitian MPO takes
+  `tdvp._arnoldi_expm_multiply` instead, chosen in `tdvp_step` by
+  `mpsalgebra.mpo_is_hermitian(H)` and never by `dt` (METTS and TDZ pass an
+  imaginary `dt` with a Hermitian H); the Lanczos route was 3.6e-3 off on a
+  non-Hermitian H, since it drops `Im<q|A|q>` and the projections its
+  reorthogonalization removes (`test_nh_time_evolution.py`). `TDVP_GSE` stops growing the
   bond dimension after `tdvp_gse_sweeps` steps, so a growing-entanglement
   quench saturates; recorded, not changed.
 - **`mode="ED"` real-time routes are `expm_multiply`**, start from the

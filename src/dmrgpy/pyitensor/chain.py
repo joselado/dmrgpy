@@ -22,7 +22,7 @@ from .dmrg import dmrg, dmrg_excited, dmrg_generalized
 from .mpobuilder import to_mpo
 from .mpsalgebra import applyMPO, inner, nmultMPO, BatchedBras
 from .mpsalgebra import sum as mps_sum
-from .mpsalgebra import randomMPS, traceC
+from .mpsalgebra import randomMPS, traceC, mpo_dagger, mpo_is_hermitian
 from .mpsalgebra import _fresh_link_copy
 from .metts import metts_thermal_average as _metts_thermal_average
 from .metts import metts_dynamical_correlator as _metts_dynamical_correlator
@@ -926,14 +926,14 @@ class Chain:
                     maxdim=(maxdim if maxdim > 0 else None),
                     bond_maxdim=self.maxm)
 
-    def _tdvp_onesite_step(self, psi, H, dt):
+    def _tdvp_onesite_step(self, psi, H, dt, hermitian=None):
         """One one-site TDVP step (mutating psi, as _tdvp_step_fn does)
         with `backend.set_pad_bonds` suspended -- the per-step half of
         quench_tdvp_gse()/evolve_and_measure_tdvp_gse()'s exemption from
         padding, see `_strip_bond_padding` for the other half."""
         with _bk.pad_bonds_suspended():
             return _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm,
-                    niter=50, num_center=1)
+                    niter=50, num_center=1, hermitian=hermitian)
 
     def evolve_taylor_step(self, H, wf, z):
         """Applies one Taylor-expanded exp(z*H) step (_evoloperator()
@@ -959,10 +959,7 @@ class Chain:
         return traceC(A)
 
     def hermitian_operator(self, A):
-        out = A.copy()
-        for j in range(1, out.length() + 1):
-            out.set_A(j, dag(swapPrime(out.A(j), 0, 1, "Site")))
-        return out
+        return mpo_dagger(A)
 
     def overlap_aMb_operator(self, wf1, A, wf2):
         return inner(wf1, A, wf2)
@@ -1032,13 +1029,15 @@ class Chain:
         psi1 = self._apply_mpo(A1, self.wf0)
         psi2 = self._apply_mpo(A2, self.wf0)
         norm0 = np.sqrt(inner(psi1, psi1))
+        herm = mpo_is_hermitian(Hshift)  # once, not per step; see tdvp_step
         correlator = []
         for _ in range(nt):
             # Measure before evolving, so correlator[k] is C(k*dt),
             # matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
             # pairs it with -- see evolution_dmrg_DC()'s own comment there.
             correlator.append(inner(psi2, psi1))
-            psi1 = _tdvp_step_fn(psi1, Hshift, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
+            psi1 = _tdvp_step_fn(psi1, Hshift, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50,
+                                 hermitian=herm)
             psi1.normalize()
             psi1 = psi1 * norm0
         return correlator, psi1
@@ -1067,13 +1066,15 @@ class Chain:
         A = self._mpo(terms_op)
         psi = wf.copy()
         norm0 = np.sqrt(abs(inner(psi, psi)))
+        herm = mpo_is_hermitian(H)  # once, not per step; see tdvp_step
         correlator = []
         for _ in range(nt):
             # Measure before evolving, so correlator[k] is C(k*dt),
             # matching the ts=[0,dt,...,(nt-1)*dt] grid timedependent.py
             # pairs it with -- see evolution_dmrg_DC()'s own comment there.
             correlator.append(inner(psi, A, psi))
-            psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50)
+            psi = _tdvp_step_fn(psi, H, dt, cutoff=self.cutoff, maxdim=self.maxm, niter=50,
+                                hermitian=herm)
             psi = _renormalized(psi, norm0)
         return correlator, psi
 
@@ -1104,6 +1105,7 @@ class Chain:
         psi2 = self._apply_mpo(A2, self.wf0)
         psi1 = _strip_bond_padding(psi1)
         norm0 = np.sqrt(inner(psi1, psi1))
+        herm = mpo_is_hermitian(Hshift)  # once, not per step; see tdvp_step
         correlator = []
         for it in range(nt):
             # Measure before evolving, so correlator[k] is C(k*dt),
@@ -1112,7 +1114,7 @@ class Chain:
             correlator.append(inner(psi2, psi1))
             if it < gse_sweeps:
                 psi1 = self.global_subspace_expand(Hshift, psi1, krylov_order, gse_cutoff)
-            psi1 = self._tdvp_onesite_step(psi1, Hshift, dt)
+            psi1 = self._tdvp_onesite_step(psi1, Hshift, dt, hermitian=herm)
             psi1.normalize()
             psi1 = psi1 * norm0
         return correlator, psi1
@@ -1128,6 +1130,7 @@ class Chain:
         A = self._mpo(terms_op)
         psi = _strip_bond_padding(wf.copy())
         norm0 = np.sqrt(abs(inner(psi, psi)))
+        herm = mpo_is_hermitian(H)  # once, not per step; see tdvp_step
         correlator = []
         for it in range(nt):
             # Measure before evolving, so correlator[k] is C(k*dt),
@@ -1136,7 +1139,7 @@ class Chain:
             correlator.append(inner(psi, A, psi))
             if it < gse_sweeps:
                 psi = self.global_subspace_expand(H, psi, krylov_order, gse_cutoff)
-            psi = self._tdvp_onesite_step(psi, H, dt)
+            psi = self._tdvp_onesite_step(psi, H, dt, hermitian=herm)
             # One-site TDVP does not truncate, so this is a roundoff-level
             # correction here; kept for the symmetry with
             # evolve_and_measure_tdvp() and with v3's copy of this loop.

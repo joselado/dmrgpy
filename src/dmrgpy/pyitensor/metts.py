@@ -61,7 +61,7 @@ import numpy as np
 from . import backend as bk
 from .index import Index, reseed_id_counter_past
 from .mpscontainer import MPS
-from .mpsalgebra import applyMPO, inner
+from .mpsalgebra import applyMPO, inner, mpo_is_hermitian
 from .tdvp import tdvp_step
 from .tensor import ITensor, noPrime
 
@@ -225,16 +225,21 @@ def collapse_to_cps(psi, sites, opname, rng, eigcache=None):
     return new_cps, outcomes
 
 
-def imaginary_time_evolve(psi, H, dbeta_half, nsteps, cutoff, maxdim, niter=30):
+def imaginary_time_evolve(psi, H, dbeta_half, nsteps, cutoff, maxdim, niter=30,
+                          hermitian=None):
     """Evolve psi by e^{-dbeta_half*H}, via nsteps of imaginary-time TDVP
     (dt=-1j*(dbeta_half/nsteps) passed to tdvp_step's own -i*dt real-time
     convention -- see this module's docstring for why that gives genuine
     decay rather than rotation), renormalizing after every step since
     imaginary-time evolution isn't norm-preserving (unlike the real-time
-    case tdvp_step was originally written for)."""
+    case tdvp_step was originally written for). `hermitian` is
+    tdvp_step's, decided here once for all nsteps when None."""
+    if hermitian is None:
+        hermitian = mpo_is_hermitian(H)
     dt = -1j * (dbeta_half / nsteps)
     for _ in range(nsteps):
-        psi = tdvp_step(psi, H, dt, cutoff=cutoff, maxdim=maxdim, niter=niter)
+        psi = tdvp_step(psi, H, dt, cutoff=cutoff, maxdim=maxdim, niter=niter,
+                        hermitian=hermitian)
         psi.normalize()
     return psi
 
@@ -257,8 +262,10 @@ def _metts_single_chain(H, sites, ops, beta, nsamples, nwarmup,
     nbasis = len(basis_ops)
     samples = [[] for _ in ops]
     total_iters = nwarmup + nsamples
+    herm = mpo_is_hermitian(H)  # once, not per step; see tdvp_step
     for it in range(total_iters):
-        phi = imaginary_time_evolve(cps, H, beta_half, nsteps, cutoff, maxdim, niter=niter)
+        phi = imaginary_time_evolve(cps, H, beta_half, nsteps, cutoff, maxdim, niter=niter,
+                                    hermitian=herm)
         if it >= nwarmup:
             for j, A in enumerate(ops):
                 samples[j].append(inner(phi, A, phi))
@@ -501,8 +508,10 @@ def _metts_dynamical_single_chain(H, sites, A, B, beta, nt, dt, nsamples,
     samples = np.zeros((nsamples, nt), dtype=complex)
     kept = 0
     total_iters = nwarmup + nsamples
+    herm = mpo_is_hermitian(H)  # once, not per step; see tdvp_step
     for it in range(total_iters):
-        phi = imaginary_time_evolve(cps, H, beta_half, nsteps, cutoff, maxdim, niter=niter)
+        phi = imaginary_time_evolve(cps, H, beta_half, nsteps, cutoff, maxdim, niter=niter,
+                                    hermitian=herm)
         if it >= nwarmup:
             v = applyMPO(B, phi, cutoff=tdvp_cutoff, maxdim=tdvp_maxdim)
             v.noPrime("Site")
@@ -510,8 +519,10 @@ def _metts_dynamical_single_chain(H, sites, A, B, beta, nt, dt, nsamples,
             for k in range(nt):
                 samples[kept, k] = inner(w, A, v)
                 if k < nt - 1:
-                    v = tdvp_step(v, H, dt, cutoff=tdvp_cutoff, maxdim=tdvp_maxdim, niter=tdvp_niter)
-                    w = tdvp_step(w, H, dt, cutoff=tdvp_cutoff, maxdim=tdvp_maxdim, niter=tdvp_niter)
+                    v = tdvp_step(v, H, dt, cutoff=tdvp_cutoff, maxdim=tdvp_maxdim, niter=tdvp_niter,
+                                  hermitian=herm)
+                    w = tdvp_step(w, H, dt, cutoff=tdvp_cutoff, maxdim=tdvp_maxdim, niter=tdvp_niter,
+                                  hermitian=herm)
             kept += 1
         basis = basis_ops[it % nbasis]
         cps, _ = collapse_to_cps(phi, sites, basis, rng, eigcache)

@@ -69,14 +69,14 @@ TDVP/tdvp.h+TDVP/basisextension.h's own NumCenter=1 + addBasis() pairing.
 """
 
 import numpy as np
-from scipy.linalg import eigh_tridiagonal
+from scipy.linalg import eigh_tridiagonal, expm
 
 from . import backend as bk
 from .dmrg import (_all_left_environments, _all_right_environments,
                     _block_reorthogonalize, _extend_left, _extend_right,
                     _lanczos_residual, one_site_heff, two_site_heff,
                     zero_site_heff)
-from .mpsalgebra import _link_at
+from .mpsalgebra import _link_at, mpo_is_hermitian
 from .svd import qr_split, svd
 from .tensor import ITensor
 
@@ -542,33 +542,165 @@ def _eigh_tridiagonal_robust(alphas, betas):
         return eigh_tridiagonal(alphas, betas, lapack_driver="stebz")
 
 
-def _evolve_two_site(L, Lbra, H, ket, i, R, Rbra, tau, niter):
+def _arnoldi_expm_multiply(matvec, v0, coeff, niter=30, tol=1e-12,
+                           errgoal=_KRYLOV_ERRGOAL):
+    """expm(coeff * A) @ v0 for a general, possibly non-Hermitian linear
+    operator A: the Arnoldi counterpart of _lanczos_expm_multiply, used by
+    tdvp_step() whenever its MPO is not Hermitian.
+
+    The Lanczos routine cannot simply be fed a non-Hermitian matvec. A
+    Krylov exponential is only as good as the relation A Q_k = Q_k T_k +
+    f e_k^T it rests on, and the Lanczos code breaks that relation for a
+    non-Hermitian A in two places: it keeps only the real part of
+    <q|A|q>, and its full reorthogonalization removes the components of
+    A q along the older basis vectors without recording them anywhere in
+    the tridiagonal T_k. For a Hermitian A both are zero up to rounding.
+    For a non-Hermitian one they are not, and two-site TDVP came out
+    3.6e-3 off the exact normalized evolution on a 4-site Heisenberg
+    chain with 0.7i*Sz_0 added, where v3 is 9e-7 off. (v3's applyExp is a
+    three-term recursion with no reorthogonalization, so its oblique
+    basis keeps the relation exact and it is right for that reason.)
+
+    Here the whole projection column h = Q_k^dagger A q is recorded,
+    which makes T_k the upper Hessenberg matrix Q_k^dagger A Q_k and the
+    relation exact with an orthonormal basis. The column is taken in two
+    classical Gram-Schmidt passes, the same two products the Lanczos
+    route's reorthogonalization forms, so a matvec costs the same. The
+    stopping test, the exhaustion test and the sub-stepping are the
+    Lanczos route's, with h_{k+1,k} in place of beta_k: Saad's estimate
+    |coeff| h_{k+1,k} |e_k^T exp(coeff T_k) e_1| holds for any such
+    Krylov decomposition, Hermitian or not.
+
+    On a device the basis stays there and the k numbers of each new
+    column come home once per iteration, a synchronization the Lanczos
+    route's deferred path avoids; the k x k exponential is host work in
+    both. Nothing in this routine assumes A is non-Hermitian: on a
+    Hermitian A it agrees with the Lanczos route to rounding."""
+    _xp = bk.xp()
+    beta0 = float(bk.to_host(_xp.linalg.norm(v0)))
+    if beta0 == 0:
+        return v0.copy()
+
+    n = v0.size
+    m = min(niter, n)
+    v = v0
+    remaining = 1.0
+    frac = 1.0
+    for _ in range(_KRYLOV_MAX_SUBSTEPS):
+        basis = _KrylovBasis(v / beta0, m)
+        Qk, Hk, hnext, k, converged, c = _arnoldi_run(
+                matvec, basis, coeff * frac, m, n, tol, errgoal)
+        if not converged:
+            frac, c = _arnoldi_converged_substep(Hk, hnext, coeff, frac,
+                                                 errgoal)
+        v = beta0 * (Qk @ bk.asarray(c))
+        if converged and frac >= remaining:
+            return v
+        remaining -= frac
+        frac = min(frac, remaining)
+        beta0 = float(bk.to_host(_xp.linalg.norm(v)))
+        if beta0 == 0:
+            return v
+    raise RuntimeError(
+        "Krylov exponentiator: the step |coeff|=%.3g needed more than %d "
+        "sub-steps of niter=%d Arnoldi iterations each; the time step is "
+        "far too long for the operator's spectral width -- reduce dt"
+        % (abs(coeff), _KRYLOV_MAX_SUBSTEPS, niter))
+
+
+def _hessenberg_exp_first_column(Hk, coeff):
+    """First column of exp(coeff * Hk) for the small k x k Hessenberg
+    matrix of _arnoldi_run, on the host."""
+    if Hk.shape[0] == 1:
+        return np.array([np.exp(coeff * Hk[0, 0])], dtype=complex)
+    return expm(coeff * Hk)[:, 0]
+
+
+def _arnoldi_run(matvec, basis, coeff, m, n, tol, errgoal):
+    """The Arnoldi loop of _arnoldi_expm_multiply. Returns (Q, Hk, hnext,
+    k, converged, c): the k basis vectors kept, the k x k Hessenberg
+    matrix, h_{k+1,k}, and the stopping verdict, tested exactly as
+    _krylov_verdict tests the Lanczos one."""
+    _xp = bk.xp()
+    Hm = np.zeros((m + 1, m), dtype=complex)
+    scale = 0.0
+    for it in range(m):
+        q = basis.column(it)
+        w = matvec(q)
+        Qk = basis.matrix()
+        h = Qk.conj().T @ w
+        w = w - Qk @ h
+        h2 = Qk.conj().T @ w  # second pass, as _block_reorthogonalize's two
+        w = w - Qk @ h2
+        hcol = np.asarray(bk.to_host(h + h2))
+        hnext = float(bk.to_host(_xp.linalg.norm(w)))
+        k = it + 1
+        Hm[:k, it] = hcol
+        Hm[k, it] = hnext
+        scale = max(scale, float(np.max(np.abs(hcol))), hnext)
+
+        Hk = Hm[:k, :k]
+        c = _hessenberg_exp_first_column(Hk, coeff)
+        if hnext <= tol * scale or k >= n:
+            return Qk, Hk, hnext, k, True, c
+        if abs(coeff) * hnext * abs(c[-1]) < errgoal:
+            return Qk, Hk, hnext, k, True, c
+        if k == m:
+            return Qk, Hk, hnext, k, False, c
+        basis.append(w / hnext)
+
+    raise AssertionError("unreachable: the k == m verdict always returns")
+
+
+def _arnoldi_converged_substep(Hk, hnext, coeff, frac, errgoal):
+    """_largest_converged_substep for the Hessenberg matrix of
+    _arnoldi_run: the largest frac/2^j (j >= 1) whose error estimate
+    converges on the Krylov space already built."""
+    s = frac
+    for _ in range(60):
+        s = s / 2.0
+        c = _hessenberg_exp_first_column(Hk, coeff * s)
+        if abs(coeff * s) * hnext * abs(c[-1]) < errgoal:
+            return s, c
+    raise RuntimeError("Krylov exponentiator: no sub-step of the "
+                       "unconverged Krylov space meets the error goal")
+
+
+def _krylov_expm(hermitian):
+    """The local exponentiator for a generator that is (True) or is not
+    (False) Hermitian; see tdvp_step's `hermitian`."""
+    return _lanczos_expm_multiply if hermitian else _arnoldi_expm_multiply
+
+
+def _evolve_two_site(L, Lbra, H, ket, i, R, Rbra, tau, niter, hermitian=True):
     matvec, order_in, shape, x0 = two_site_heff(L, Lbra, H, ket, i, R, Rbra)
-    evolved = _lanczos_expm_multiply(matvec, x0, -1j * tau, niter=niter)
+    evolved = _krylov_expm(hermitian)(matvec, x0, -1j * tau, niter=niter)
     return ITensor(tuple(order_in), evolved.reshape(shape))
 
 
-def _evolve_one_site(L, Lbra, H, ket, i, R, Rbra, tau, niter):
+def _evolve_one_site(L, Lbra, H, ket, i, R, Rbra, tau, niter, hermitian=True):
     matvec, order_in, shape, x0 = one_site_heff(L, Lbra, H, ket, i, R, Rbra)
-    evolved = _lanczos_expm_multiply(matvec, x0, 1j * tau, niter=niter)
+    evolved = _krylov_expm(hermitian)(matvec, x0, 1j * tau, niter=niter)
     return ITensor(tuple(order_in), evolved.reshape(shape))
 
 
-def _evolve_one_site_forward(L, Lbra, H, ket, i, R, Rbra, tau, niter):
+def _evolve_one_site_forward(L, Lbra, H, ket, i, R, Rbra, tau, niter,
+                             hermitian=True):
     """Forward (-i*tau) one-site evolution -- one-site TDVP's own local
     update, using the same one_site_heff() as _evolve_one_site() above
     (there used only for two-site TDVP's *backward* correction, +i*tau)."""
     matvec, order_in, shape, x0 = one_site_heff(L, Lbra, H, ket, i, R, Rbra)
-    evolved = _lanczos_expm_multiply(matvec, x0, -1j * tau, niter=niter)
+    evolved = _krylov_expm(hermitian)(matvec, x0, -1j * tau, niter=niter)
     return ITensor(tuple(order_in), evolved.reshape(shape))
 
 
-def _evolve_zero_site(L, Lbra, R, Rbra, C, left_link, right_link, tau, niter):
+def _evolve_zero_site(L, Lbra, R, Rbra, C, left_link, right_link, tau, niter,
+                      hermitian=True):
     """Backward (+i*tau) evolution of a bond tensor -- one-site TDVP's
     counterpart to _evolve_one_site() above, one rank lower (see
     dmrg.py's zero_site_heff())."""
     matvec, order_in, shape, x0 = zero_site_heff(L, Lbra, R, Rbra, C, left_link, right_link)
-    evolved = _lanczos_expm_multiply(matvec, x0, 1j * tau, niter=niter)
+    evolved = _krylov_expm(hermitian)(matvec, x0, 1j * tau, niter=niter)
     return ITensor(tuple(order_in), evolved.reshape(shape))
 
 
@@ -648,14 +780,14 @@ def _gauge_center(psi, target):
     return psi
 
 
-def _half_sweep_lr(psi, H, tau, cutoff, maxdim, niter):
+def _half_sweep_lr(psi, H, tau, cutoff, maxdim, niter, hermitian=True):
     n = psi.length()
     right_env = _all_right_environments(H, psi)  # sites i+1..N, ket = psi BEFORE this half-sweep
     left_env = {0: (None, None)}
     for i in range(1, n):
         L, Lbra = left_env[i - 1]
         R2, R2bra = right_env[i + 2]
-        theta = _evolve_two_site(L, Lbra, H, psi, i, R2, R2bra, tau, niter)
+        theta = _evolve_two_site(L, Lbra, H, psi, i, R2, R2bra, tau, niter, hermitian)
 
         left_link = _link_at(psi, i, i - 1)
         s_i = next(ind for ind in psi.A(i).inds if ind.hastags("Site"))
@@ -672,19 +804,19 @@ def _half_sweep_lr(psi, H, tau, cutoff, maxdim, niter):
         if i < n - 1:
             Lnew, Lnewbra = left_env[i]
             R2next, R2nextbra = right_env[i + 2]  # sites i+2..N, ORIGINAL/untouched
-            C_evolved = _evolve_one_site(Lnew, Lnewbra, H, psi, i + 1, R2next, R2nextbra, tau, niter)
+            C_evolved = _evolve_one_site(Lnew, Lnewbra, H, psi, i + 1, R2next, R2nextbra, tau, niter, hermitian)
             psi.set_A(i + 1, C_evolved)
     psi.center = n
 
 
-def _half_sweep_rl(psi, H, tau, cutoff, maxdim, niter):
+def _half_sweep_rl(psi, H, tau, cutoff, maxdim, niter, hermitian=True):
     n = psi.length()
     left_env = _all_left_environments(H, psi)  # sites 1..i-1, ket = psi BEFORE this half-sweep
     right_env = {n + 1: (None, None)}
     for i in range(n - 1, 0, -1):
         L2, L2bra = left_env[i - 1]
         R, Rbra = right_env[i + 2]
-        theta = _evolve_two_site(L2, L2bra, H, psi, i, R, Rbra, tau, niter)
+        theta = _evolve_two_site(L2, L2bra, H, psi, i, R, Rbra, tau, niter, hermitian)
 
         right_link = _link_at(psi, i + 1, i + 2)
         s_j = next(ind for ind in psi.A(i + 1).inds if ind.hastags("Site"))
@@ -699,12 +831,12 @@ def _half_sweep_rl(psi, H, tau, cutoff, maxdim, niter):
         if i > 1:
             L2prev, L2prevbra = left_env[i - 1]  # sites 1..i-1, ORIGINAL/untouched
             Rnew, Rnewbra = right_env[i + 1]
-            C_evolved = _evolve_one_site(L2prev, L2prevbra, H, psi, i, Rnew, Rnewbra, tau, niter)
+            C_evolved = _evolve_one_site(L2prev, L2prevbra, H, psi, i, Rnew, Rnewbra, tau, niter, hermitian)
             psi.set_A(i, C_evolved)
     psi.center = 1
 
 
-def _half_sweep_lr_onesite(psi, H, tau, niter):
+def _half_sweep_lr_onesite(psi, H, tau, niter, hermitian=True):
     """One-site analogue of _half_sweep_lr() above: at each site i,
     forward-evolve psi.A(i) alone (one_site_heff, not two_site_heff -- no
     truncation, since one-site TDVP must conserve bond dimension exactly),
@@ -723,7 +855,7 @@ def _half_sweep_lr_onesite(psi, H, tau, niter):
         Rn, Rnbra = right_env[i + 1]
         left_link = _link_at(psi, i, i - 1)
         right_link = _link_at(psi, i, i + 1)
-        A_new = _evolve_one_site_forward(L, Lbra, H, psi, i, Rn, Rnbra, tau, niter)
+        A_new = _evolve_one_site_forward(L, Lbra, H, psi, i, Rn, Rnbra, tau, niter, hermitian)
         if i == n:
             psi.set_A(i, A_new)
             continue
@@ -743,12 +875,12 @@ def _half_sweep_lr_onesite(psi, H, tau, niter):
         psi.set_A(i + 1, C * orig_next)
         left_env[i] = _extend_left(L, Lbra, H, psi, i)
         Lnew, Lnewbra = left_env[i]
-        C_evolved = _evolve_zero_site(Lnew, Lnewbra, Rn, Rnbra, C, new_link, right_link, tau, niter)
+        C_evolved = _evolve_zero_site(Lnew, Lnewbra, Rn, Rnbra, C, new_link, right_link, tau, niter, hermitian)
         psi.set_A(i + 1, C_evolved * orig_next)
     psi.center = n
 
 
-def _half_sweep_rl_onesite(psi, H, tau, niter):
+def _half_sweep_rl_onesite(psi, H, tau, niter, hermitian=True):
     """Mirror of _half_sweep_lr_onesite() above, sweeping right to left."""
     n = psi.length()
     left_env = _all_left_environments(H, psi)  # sites 1..i-1, BEFORE this half-sweep
@@ -758,7 +890,7 @@ def _half_sweep_rl_onesite(psi, H, tau, niter):
         R, Rbra = right_env[i + 1]
         left_link = _link_at(psi, i, i - 1)
         right_link = _link_at(psi, i, i + 1)
-        A_new = _evolve_one_site_forward(L2, L2bra, H, psi, i, R, Rbra, tau, niter)
+        A_new = _evolve_one_site_forward(L2, L2bra, H, psi, i, R, Rbra, tau, niter, hermitian)
         if i == 1:
             psi.set_A(i, A_new)
             continue
@@ -773,12 +905,13 @@ def _half_sweep_rl_onesite(psi, H, tau, niter):
         psi.set_A(i - 1, orig_prev * C)
         right_env[i] = _extend_right(R, Rbra, H, psi, i)
         Rnew, Rnewbra = right_env[i]
-        C_evolved = _evolve_zero_site(L2, L2bra, Rnew, Rnewbra, C, left_link, new_link, tau, niter)
+        C_evolved = _evolve_zero_site(L2, L2bra, Rnew, Rnewbra, C, left_link, new_link, tau, niter, hermitian)
         psi.set_A(i - 1, orig_prev * C_evolved)
     psi.center = 1
 
 
-def tdvp_step(psi, H, dt, cutoff, maxdim, niter=50, num_center=2):
+def tdvp_step(psi, H, dt, cutoff, maxdim, niter=50, num_center=2,
+              hermitian=None):
     """One real-time step exp(-i*dt*H) via TDVP: a left-to-right half-sweep
     evolving by dt/2, then a right-to-left half-sweep evolving by another
     dt/2 -- mirrors mpscpp3/chain_session.h's tdvp_step(). num_center=2
@@ -788,7 +921,17 @@ def tdvp_step(psi, H, dt, cutoff, maxdim, niter=50, num_center=2):
     dimension exactly (cutoff/maxdim unused -- pair with
     gse.global_subspace_expand() to grow it beforehand, the Yang-White
     scheme this module's own one-site path is meant to be paired with).
-    Mutates psi in place."""
+    Mutates psi in place.
+
+    `hermitian` picks the local exponentiator: True is the Lanczos one,
+    False the Arnoldi one (_arnoldi_expm_multiply's docstring says why a
+    non-Hermitian H needs it), and None, the default, decides from H
+    itself through mpsalgebra.mpo_is_hermitian, once per call. It is a
+    property of the operator and never of dt: an imaginary or complex dt
+    with a Hermitian H (METTS, TDZ) stays on Lanczos. A caller looping
+    over many steps with one H can decide once and pass the answer."""
+    if hermitian is None:
+        hermitian = mpo_is_hermitian(H)
     tau = dt / 2.0
     # The left-to-right half-sweep below needs psi right-canonical; see
     # _gauge_center(). A no-op (both while loops skip) on a state that
@@ -798,9 +941,9 @@ def tdvp_step(psi, H, dt, cutoff, maxdim, niter=50, num_center=2):
     # psi.position(1)` guard.
     _gauge_center(psi, 1)
     if num_center == 1:
-        _half_sweep_lr_onesite(psi, H, tau, niter)
-        _half_sweep_rl_onesite(psi, H, tau, niter)
+        _half_sweep_lr_onesite(psi, H, tau, niter, hermitian)
+        _half_sweep_rl_onesite(psi, H, tau, niter, hermitian)
     else:
-        _half_sweep_lr(psi, H, tau, cutoff, maxdim, niter)
-        _half_sweep_rl(psi, H, tau, cutoff, maxdim, niter)
+        _half_sweep_lr(psi, H, tau, cutoff, maxdim, niter, hermitian)
+        _half_sweep_rl(psi, H, tau, cutoff, maxdim, niter, hermitian)
     return psi

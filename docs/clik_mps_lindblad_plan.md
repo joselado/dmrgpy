@@ -6,10 +6,13 @@ States", arXiv:2509.07709 (CLIK-MPS). The plan was written from the main text
 and Appendices B, F, G and H. The last part of the paper and parts of
 Appendices C to E were not read.
 
-**Status: Phase 0 in progress (checkpoint 2026-10-29).** The cause of the
-"python" error is confirmed and the design of the fix is fixed; no library
-code is changed yet. See "Checkpoint" at the end of Phase 0. Phase 0 is a
-bug fix that stands on its own. The other phases build on it, in order.
+**Status: Phase 0 fixed on "python" (2026-10-29).** `tdvp_step` takes an
+Arnoldi exponentiator for a non-Hermitian MPO, and "python" now matches v3
+(9.0e-7 from the exact curve on both). This is pinned by
+`tests/test_nh_time_evolution.py`, recorded in `docs/numerical_changes.md`,
+and checked under the JAX backend (1e-13 from NumPy). Three things are open
+in Phase 0: the ED-against-DMRG norm convention (decision 1 in section 8),
+the `julia_live` check, and an audit record. Phase 1 can start.
 
 ## 1. The idea
 
@@ -140,7 +143,11 @@ The fix, as agreed, in this order:
 1. Read `applyExp` in `mpscpp3/ITensor/itensor/iterativesolvers.h` and use it
    as the template, since v3 is the backend that is right. Check whether it
    builds a full Hessenberg, which error estimate it uses, and whether it
-   sub-steps.
+   sub-steps. (Done. It is a three-term Lanczos with a real alpha and no
+   reorthogonalization. That keeps $A V = V T + f e_k^T$ exact with an
+   oblique basis, and this is why it is right. pyitensor's full
+   reorthogonalization removes components that $T$ never records, so the
+   fix is Arnoldi, as below.)
 2. Write `_arnoldi_expm_multiply` as a separate function in
    `pyitensor/tdvp.py`. Leave `_lanczos_expm_multiply`, its host and device
    paths and `_krylov_verdict` untouched (the locked rule that the two paths
