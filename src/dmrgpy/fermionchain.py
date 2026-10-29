@@ -7,6 +7,7 @@ from .fermionchaintk import staticcorrelator
 from . import funtk
 from . import gap
 from .kondospectrumtk.kondomethod import KondoSpectrumMixin
+from .kondoscreening import KondoScreeningMixin
 
 class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
@@ -155,7 +156,8 @@ class Majorana_Chain(Fermionic_Chain):
 
 
 
-class Spinful_Fermionic_Chain(KondoSpectrumMixin,Fermionic_Chain):
+class Spinful_Fermionic_Chain(KondoSpectrumMixin,KondoScreeningMixin,
+        Fermionic_Chain):
     """
     Class to deal with fermionic Hamiltonians with
     spin degree of freedom
@@ -231,7 +233,8 @@ class Spinful_Fermionic_Chain(KondoSpectrumMixin,Fermionic_Chain):
 
 
 
-class Spinful_Fermionic_Chain_Native(KondoSpectrumMixin,Many_Body_Chain):
+class Spinful_Fermionic_Chain_Native(KondoSpectrumMixin,KondoScreeningMixin,
+        Many_Body_Chain):
     """
     Spinful fermionic (Hubbard-like) chain built directly on native
     spinful sites: each orbital is a *single* tensor-network site with a

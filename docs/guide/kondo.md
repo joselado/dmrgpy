@@ -234,3 +234,85 @@ different weights and different peak positions. Both functions use ED.
 The low multiplet of an atom is often nearly degenerate, so the remarks
 of [Degenerate ground states](correlator-methods.md#degenerate-ground-states) on `dex` and `T` apply here. See
 `examples/kondo/atom_iets_orbital_resolved`.
+
+## Kondo screening on a Wilson chain
+
+We now ask a different question: is the spin of an impurity screened by
+the conduction electrons, and by which electrons? We follow the NRG-MPS
+method of Stocker and Zilberberg, arXiv:2501.10746. The Anderson impurity
+
+$$
+H = \epsilon_d \sum_\sigma n_\sigma + U n_\uparrow n_\downarrow
+  + t_D \sum_\sigma \left(d^\dagger_\sigma f_{0\sigma} + \text{h.c.}\right)
+  + \sum_{n\sigma} t_n \left(f^\dagger_{n\sigma} f_{n+1\sigma} + \text{h.c.}\right)
+$$
+
+is coupled to a Wilson chain: the band on $[-D,D]$ is cut at the energies
+$\pm D\Lambda^{-m}$, and the Lanczos tridiagonalization of the levels gives
+the hoppings $t_n \sim \Lambda^{-n/2}$. Site $n$ resolves the energy
+$D\Lambda^{-n/2}$, so the chain must be long enough to reach below the
+Kondo temperature $T_K$. DMRG gives the ground state, and from it we
+compute
+
+$$
+M_{\text{imp}} = 4\langle S^z_{\text{imp}} S^z_{\text{imp}}\rangle, \qquad
+M_n = 4\langle S^z_{\text{imp}} S^z_n\rangle, \qquad
+M_{\text{env}} = \sum_n M_n .
+$$
+
+$M_{\text{imp}}$ is the probability that the impurity is singly occupied,
+and $M_n$ says where the screening cloud sits along the chain. A screened
+moment has $M_{\text{imp}}$ close to 1 and $M_{\text{env}} = -M_{\text{imp}}$.
+We also project the ground state on a singly occupied impurity and take its
+Schmidt coefficients between impurity and bath: two equal values
+$1/\sqrt2$ for the Kondo singlet, one value 1 for a free, polarized moment.
+
+```python
+from dmrgpy import wilsonchain
+fc = wilsonchain.anderson_chain(13, ed=-0.5, U=1.0, tD=0.3, Lambda=3.0, B=0.0)
+fc.maxm = 100
+fc.nsweeps = 12
+r = fc.get_kondo_screening()
+print(r["M_imp"], r["M_env"], r["M_n"], r["schmidt"])
+```
+
+The bandwidth is $D=U$ and the density of states is flat and normalized,
+so $\Gamma = \pi t_D^2/(2D)$, and here $T_K \approx 0.017\,U$. The result
+is $M_{\text{imp}} = 0.83$, $M_{\text{env}} = -0.83$ and Schmidt
+coefficients $(0.707, 0.707)$: a Kondo singlet. In zero field
+$M_{\text{env}} = -M_{\text{imp}}$ holds exactly for any singlet, so the
+information is in $M_{\text{imp}}$, in the profile $M_n$, and in the
+response to a field. With `B` the larger Schmidt coefficient goes from
+$1/\sqrt2$ to 1 when $B$ passes $T_K$. The field also polarizes the bath,
+and $M_n$ is not a connected correlator, so in a strong field
+$M_{\text{env}}$ turns positive.
+
+With two levels, `ed` and `tD` are lists of two. Each level couples to its
+own Wilson chain, and $U$ acts between all four spin-orbitals, so at
+$\epsilon_d=-U/2$ the impurity holds one electron. Then `M_imp` and
+`M_n` are given per level, `M_env[l][k]` is the screening of level `l` by
+chain `k`, and there are four Schmidt coefficients. Equal couplings give
+an SU(4) Kondo singlet, with four values $1/2$. Unequal couplings split
+them in two pairs, and the splitting grows with the chain length, toward
+the SU(2) singlet of the level with the larger coupling.
+
+- `n`: the number of Wilson chain sites per level. It sets the lowest
+  energy, $D\Lambda^{-n/2}$, which must be below $T_K$. Take $n$ odd: with
+  $n$ even the ground state has an odd number of electrons, so it is
+  degenerate and not a singlet, and one member of it looks unscreened.
+- `Lambda`: the discretization. A larger value reaches low energies with
+  fewer sites, at the price of a coarser band.
+- `B`: a field $B S^z$ on the impurity, and a rigid shift $\pm B$ of the
+  bath bands.
+- `dos`: a function giving the shape of the density of states, flat if
+  not given.
+- `maxm`: the Wilson chain ground state needs a bond dimension of 100 or
+  more. Too small a `maxm` gives a state that breaks spin symmetry, which
+  looks like an unscreened moment: $M_{\text{env}} \neq -M_{\text{imp}}$
+  and unequal Schmidt coefficients in zero field. Check against a larger
+  `maxm`.
+
+The diagnostics are expectation values, so `mode="ED"` gives the exact
+values on a short chain, and `get_kondo_screening(imp=..., bath=...)`
+works on any spinful chain. See `examples/kondo/kondo_screening_field` and
+`examples/kondo/kondo_screening_su4`.

@@ -5737,6 +5737,45 @@ and it checks the sum rule `sum_k int S_kk = S(S+1)` on `Spin_Chain`
 sites, where `S(S+1) = (d^2-1)/4`, warning when more than 1e-2 of the
 weight is missing (finding 14).
 
+### 4.8d Kondo screening on a Wilson chain (`wilsonchain.py`, `kondoscreening.py`)
+
+This is the NRG-MPS method of Stocker and Zilberberg, arXiv:2501.10746,
+and it needs no new backend code. `wilsonchain.py` maps a band to a Wilson
+chain, logarithmic discretization and then a Lanczos tridiagonalization in
+double precision with full reorthogonalization, and `anderson_chain()`
+builds a one- or two-level Anderson impurity on a
+`Spinful_Fermionic_Chain`, storing its layout as `fc.impurity` and
+`fc.channels`. The tridiagonalization reproduces Wilson's closed form for
+the flat band to 1e-15 relative down to t_n ~ 1e-12, so the precision of
+the coefficients is not what limits the chain length. `kondoscreening.py`
+holds the diagnostics, through `KondoScreeningMixin` on both spinful
+chains. Every quantity of the paper reduces to an expectation value: with
+P^s = n_s(1-n_-s), P^up - P^dn = 2 Sz_imp gives M_imp = 4<Sz_imp^2> and
+M_n = 4<Sz_imp Sz_n>, and the projected Schmidt coefficients are the
+eigenvalues of the single-occupancy block of the impurity density matrix,
+rho_ab = <c^dag_b c_a prod_{c != a,b}(1-n_c)>. So the diagnostics run on
+every backend and on `mode="ED"`.
+
+What limits the method is the bond dimension. The exact free-fermion
+ground state of a resonant level (U=0, 22 orbitals, Lambda=2, interleaved
+up/down sites) needs a bond dimension of 150 to 300 for a discarded weight
+of 1e-10, since every energy shell adds its own entanglement. At U=1,
+tD=0.2, Lambda=2 and 23 bath sites on v3, maxm=40 gave a spin-symmetry
+broken state (Schmidt coefficients 0.97 and 0.25, M_env != -M_imp, the
+signature of an unscreened moment), maxm=80 gave M_imp to 2e-5 and the
+Schmidt coefficients to 3e-3, maxm=120 the Schmidt coefficients to 4e-5.
+The paper's own N=90 at D=100 is out of reach in this sense, but its
+correlators converge once the chain reaches below T_K. Two identities are
+worth knowing when reading results: M_env = -M_imp holds exactly in any
+state with total Sz=0, and in a field M_n is not connected, so the bath's
+own Zeeman polarization makes M_env positive. The field is a rigid shift
+of the bath bands, eps_n -> eps_n +- B with the zero-field t_n, not a new
+discretization of the shifted band. The chain length n per level must be
+odd: with n even the ground state has an odd number of electrons (n+1 for
+one level, 2n+1 for two, measured in ED), so it is degenerate and one
+member of it looks unscreened, and `anderson_chain` warns. Tests are in
+`tests/test_kondo_screening.py`.
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,
@@ -6467,6 +6506,7 @@ design history is in `docs/pyitensor_gpu_port_plan.md`.
 | `src/dmrgpy/kpmdmrg.py` | Kernel Polynomial Method dynamical correlators |
 | `src/dmrgpy/nonhermitian/kpm.py` | non-Hermitian KPM dynamical correlator (NHKPM.jl port, ED + itensor_version=3) |
 | `src/dmrgpy/tdz.py` | complex-time-evolution dynamical correlator ("TDZ", arXiv:2311.10909) |
+| `src/dmrgpy/wilsonchain.py`, `kondoscreening.py` | Wilson chain of a band, Anderson impurity on it, and the NRG-MPS screening diagnostics (arXiv:2501.10746) |
 | `examples/` | 100+ self-contained example scripts (also the regression suite) |
 | `examples/backend_comparison/`, `v2_VS_v3_*` examples within each theme folder | backend-vs-backend correctness comparisons |
 | `examples/groundstate/backend_timing_gs_energy/` | backend-vs-backend timing comparison |

@@ -2,6 +2,9 @@
 paths:
   - "src/dmrgpy/kondospectrumtk/**"
   - "tests/test_kondo_spectrum*.py"
+  - "tests/test_kondo_screening.py"
+  - "src/dmrgpy/wilsonchain.py"
+  - "src/dmrgpy/kondoscreening.py"
   - "tests/test_atom_iets.py"
   - "examples/kondo/**"
 ---
@@ -111,3 +114,14 @@ occupied weight), not S(S+1). On a chain too short for the session the
 correlator route's Kondo term is the exact ED one, and `order=3` with a
 correlator submode raises on v2 and `julia_live`, which have no TDVP for
 the two-time term (2026-10 audit, findings 2 and 4).
+
+**Kondo screening on a Wilson chain (2026-10-30)** is a different method
+that shares only the folder of its examples (`examples/kondo/kondo_screening_*`):
+`wilsonchain.py` (Wilson chain of a band, `anderson_chain()` for one or two
+levels) and `kondoscreening.py` (the NRG-MPS diagnostics of
+arXiv:2501.10746, `get_kondo_screening` on both spinful chains through
+`KondoScreeningMixin`). Nothing in `kondospectrumtk/` is involved. Every
+diagnostic is a vev (M_imp = 4<Sz_imp^2>, M_n = 4<Sz_imp Sz_n>, Schmidt
+coefficients from the single-occupancy block of the impurity density
+matrix), so ED cross-checks it; what limits it is `maxm`, see
+`docs/development.md` 4.8d. `tests/test_kondo_screening.py`.
