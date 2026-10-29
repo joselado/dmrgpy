@@ -36,11 +36,28 @@ one MPS: overlaps and expectation values are read off matrix elements.
 X amplifies the error of every G_ij by 1/S, so gram_tol also sets how
 accurate the eigenvalues can be.
 
+The matrix elements are grown one snapshot at a time (Section II.5 of the
+paper): a new snapshot costs one overlap and two elements of G with each
+stored state, linear work per step, and nothing is recomputed when the
+second branch is added.
+
+Convergence is judged as in the paper, by tracking the spectrum. The
+eigenvalues are solved a second time on the space without the last
+snapshot of each branch, which only restricts the matrices already
+computed (Appendix G), and the change of each eigenvalue is its
+convergence estimate. A converged mode does not move; an unconverged one
+does. It orders the modes by convergence correctly but is not an error
+bar: on 6-site chains against ED it was 3 to 40 times smaller than the
+true error of the eigenvalue.
+
 The residual of an eigenpair, ||G r - lambda r|| with ||r|| = 1, is
-c^dag (W - lambda G^dag - conj(lambda) G + |lambda|^2 M) c with W_ij =
-<rho_i|G^dag G|rho_j>. This is a difference of numbers of order ||G||^2,
-so it resolves the residual only down to about 1e-8 of the operator scale:
-it says whether a mode has converged, it cannot certify one below that.
+available on request (exact_residuals=True). It is c^dag (W - lambda G^dag
+- conj(lambda) G + |lambda|^2 M) c with W_ij = <rho_i|G^dag G|rho_j> over
+every pair, through the MPO of G^dag G, whose bond dimension is the square
+of G's; that makes it the costliest part of a run, which is why the paper
+uses <<rho|L^dag L|rho>> only for the steady-state error bound. It is also
+a difference of numbers of order ||G||^2, so it resolves the residual only
+down to about 1e-8 of the operator scale.
 
 Device: the overlaps go through mpsalgebra.inner, on the active array
 backend; the 2nk x 2nk algebra is host work, as in task.py.
@@ -140,6 +157,32 @@ def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
     return np.pi / 2
 
 
+class KrylovMatrices:
+    """The stored states with M_ij = <rho_i|rho_j> and G_ij =
+    <rho_i|G|rho_j>, grown one state at a time."""
+
+    def __init__(self, G):
+        self.G = G
+        self.states = []
+        self.M = np.zeros((0, 0), dtype=complex)
+        self.Gm = np.zeros((0, 0), dtype=complex)
+
+    def add(self, psi):
+        n = len(self.states)
+        self.states.append(psi)
+        M = np.zeros((n + 1, n + 1), dtype=complex)
+        Gm = np.zeros((n + 1, n + 1), dtype=complex)
+        M[:n, :n] = self.M
+        Gm[:n, :n] = self.Gm
+        for i, rho in enumerate(self.states):
+            M[i, n] = _scalar(inner(rho, psi))
+            M[n, i] = np.conj(M[i, n])
+            Gm[i, n] = _scalar(inner(rho, self.G, psi))
+            if i < n:
+                Gm[n, i] = _scalar(inner(psi, self.G, rho))
+        self.M, self.Gm = M, Gm
+
+
 def matrix_elements(states, A=None):
     """<rho_i|A|rho_j> over the stored states (A=None: the overlaps)."""
     n = len(states)
@@ -170,6 +213,14 @@ def project(M, Gm, gram_tol):
     return lam[order], X @ R[:, order], int(keep.sum())
 
 
+def eigenvalue_changes(lam, M, Gm, keep, gram_tol):
+    """For each eigenvalue, the distance to the nearest eigenvalue of the
+    space restricted to the states `keep`: the paper's tracking of the
+    spectrum, with no new matrix element."""
+    sub = project(M[np.ix_(keep, keep)], Gm[np.ix_(keep, keep)], gram_tol)[0]
+    return np.array([np.min(np.abs(sub - l)) for l in lam])
+
+
 def residuals(lam, C, M, Gm, W):
     """||G r - lambda r|| for each normalized eigenvector r = sum c_i rho_i;
     see the module docstring for its floor."""
@@ -187,10 +238,11 @@ class KrylovSpectrum:
     the stored states with the matrix elements, so that an expectation value
     in each eigenvector costs one more matrix of overlaps."""
 
-    def __init__(self, lam, C, res, states, M, ndim, alpha):
+    def __init__(self, lam, C, res, states, M, ndim, alpha, changes=None):
         self.eigenvalues = lam
         self.coefficients = C
-        self.residuals = res
+        self.residuals = res      # None unless exact_residuals=True
+        self.changes = changes    # the tracking estimate, always there
         self.states = states
         self.M = M
         self.ndim = ndim    # Krylov dimension kept after deflation
@@ -205,7 +257,7 @@ class KrylovSpectrum:
 
 def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
                     cutoff=1e-10, gram_tol=1e-12, seed=0, start_maxdim=10,
-                    niter=50, starts=None):
+                    niter=50, starts=None, exact_residuals=False):
     """The slowest eigenvalues of the MPO G (largest real part first) from
     the two-branch Krylov space described in the module docstring.
 
@@ -216,6 +268,8 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     threshold of the Gram matrix, seed for the two random starts. `starts`,
     a pair of MPS, replaces the two random starts (real branch first): the
     way to keep the space inside one sector of a conserved quantity of G.
+    exact_residuals=True adds ||G r - lambda r|| for every eigenvector (see
+    the module docstring for its cost).
 
     The defaults are measured, on 6-site chains against ED with the
     hopping as the unit. A small dt makes consecutive imaginary-time
@@ -238,18 +292,23 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
         psi_u = randomMPS(sites, m0, rng=rng)
     else:
         psi_p, psi_u = starts
-    states = evolve_branch(G, psi_p, dt, nk, cutoff, maxdim, niter, herm)
-    Gm = matrix_elements(states, G)
-    M = matrix_elements(states)
+    km = KrylovMatrices(G)
+    for psi in evolve_branch(G, psi_p, dt, nk, cutoff, maxdim, niter, herm):
+        km.add(psi)
     if alpha is None:
-        lam0 = project(M, Gm, gram_tol)[0][0]
+        lam0 = project(km.M, km.Gm, gram_tol)[0][0]
         alpha = 0.25 * probe_alpha_max(G, psi_u, lam0, dt, cutoff, maxdim,
                                        niter=niter, hermitian=herm)
-    states = states + evolve_branch(G, psi_u, dt * np.exp(-1j * alpha),
-                                    nk, cutoff, maxdim, niter, herm)
-    Gm = matrix_elements(states, G)
-    M = matrix_elements(states)
-    W = matrix_elements(states, mpo_product(mpo_dagger(G), G))
-    lam, C, ndim = project(M, Gm, gram_tol)
-    res = residuals(lam, C, M, Gm, W)
-    return KrylovSpectrum(lam, C, res, states, M, ndim, float(alpha))
+    for psi in evolve_branch(G, psi_u, dt * np.exp(-1j * alpha), nk,
+                             cutoff, maxdim, niter, herm):
+        km.add(psi)
+    lam, C, ndim = project(km.M, km.Gm, gram_tol)
+    keep = [i for i in range(2 * nk) if i not in (nk - 1, 2 * nk - 1)]
+    changes = (eigenvalue_changes(lam, km.M, km.Gm, keep, gram_tol)
+               if keep else np.full(len(lam), np.inf))
+    res = None
+    if exact_residuals:
+        W = matrix_elements(km.states, mpo_product(mpo_dagger(G), G))
+        res = residuals(lam, C, km.M, km.Gm, W)
+    return KrylovSpectrum(lam, C, res, km.states, km.M, ndim, float(alpha),
+                          changes)

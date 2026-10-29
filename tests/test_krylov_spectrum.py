@@ -38,7 +38,7 @@ def test_hermitian_ritz_energies_interlace_and_converge():
     assert np.all(E - Ee[:len(E)] >= -1e-9)
     assert abs(E[0] - Ee[0]) < 1e-9         # measured 1e-11
     assert abs(E[1] - Ee[1]) < 1e-7         # measured 1e-8
-    assert res[0] < 2e-5                    # measured 5.5e-6
+    assert res[0] < 1e-8      # tracking estimate; measured 8.5e-12
     assert np.max(res_ed[:3]) < 1e-12
     O = sc.Sz[0] * sc.Sz[1]
     assert abs(obs(O, 0) - obs_ed(O, 0)) < 1e-5   # measured 2.5e-7
@@ -79,7 +79,7 @@ def test_coefficient_residual_is_the_true_residual():
     sc, h = nh_asymmetric_hopping_chain(6, "python")
     S = sc._session
     G = S._mpo((-1 * h).to_terms())
-    ks = clik.krylov_spectrum(G, S.sites)
+    ks = clik.krylov_spectrum(G, S.sites, exact_residuals=True)
     for k in range(4):
         true = _true_residual(ks, G, k)
         assert abs(ks.residuals[k] - true) < 1e-3 * true + 1e-8

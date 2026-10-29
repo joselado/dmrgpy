@@ -3758,10 +3758,15 @@ exponentiator once, as in the chain loops. Two things are easy to get
 wrong. First, `nmultMPO(X, prime(Y))` followed by `mapPrime(2, 1)` is the
 product `Y X`, so `clik.mpo_product(A, B)` swaps its arguments to return
 `A B`; this is pinned in `tests/test_krylov_spectrum.py`. Second, the
-residual is a quadratic form in the snapshot coefficients, a difference of
-numbers of order `||G||^2`, so it cannot certify residuals below about 1e-8
-of the operator scale. Above that floor it agrees with the residual of the
-reconstructed MPS to three digits. Random starts come from
+matrix elements grow one snapshot at a time (`clik.KrylovMatrices`, linear
+work per step, as in the paper), and convergence is the paper's tracking of
+the spectrum: the change of each eigenvalue when the last snapshot of each
+branch is dropped, read off restricted matrices. The exact residual is
+opt-in (`exact_residuals=True`), since it needs `<rho_i|G^dag G|rho_j>` for
+every pair through an MPO of squared bond dimension. It is a
+quadratic form, a difference of numbers of order `||G||^2`, so it cannot
+certify residuals below about 1e-8 of the operator scale. Above that floor
+it agrees with the residual of the reconstructed MPS to three digits. Random starts come from
 `randomMPS(..., rng=)`, never from the global stream (2026-10-23 finding
 11).
 

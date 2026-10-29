@@ -149,10 +149,12 @@ class Lindblad_Chain():
         self._spectrum = None
 
     def get_spectrum(self, nk=20, dt=2.0, alpha=None, gram_tol=1e-12,
-                     seed=0, start=None, mode="DMRG"):
+                     seed=0, start=None, exact_residuals=False,
+                     mode="DMRG"):
         """(lam, res, obs): eigenvalues of L, largest real part first (the
-        steady state, lambda ~ 0, comes first), the residual of each
-        normalized eigenvector, and obs(O, k) = Tr(O r_k)/Tr(r_k) for an
+        steady state, lambda ~ 0, comes first), the convergence estimate
+        of each (res as in get_krylov_spectrum, exact_residuals included),
+        and obs(O, k) = Tr(O r_k)/Tr(r_k) for an
         operator O of the physical chain. Only the steady state has a
         nonzero trace, so for k > 0 obs gives Tr(O r_k) with ||r_k|| = 1.
         DMRG is get_krylov_spectrum on the doubled chain
@@ -174,7 +176,8 @@ class Lindblad_Chain():
         if mode == "ED":
             out = self._spectrum_ed()
         elif mode == "DMRG":
-            out = self._spectrum_dmrg(nk, dt, alpha, gram_tol, seed, start)
+            out = self._spectrum_dmrg(nk, dt, alpha, gram_tol, seed, start,
+                                      exact_residuals)
         else:
             raise ValueError("Lindblad_Chain: unrecognized mode " + repr(mode))
         self._spectrum = out
@@ -188,14 +191,16 @@ class Lindblad_Chain():
             self.get_spectrum(**kwargs)
         return self._spectrum[2](O, 0)
 
-    def _spectrum_dmrg(self, nk, dt, alpha, gram_tol, seed, start=None):
-        from .krylovspectrum import krylov_spectrum_dmrg
+    def _spectrum_dmrg(self, nk, dt, alpha, gram_tol, seed, start=None,
+                       exact_residuals=False):
+        from .krylovspectrum import _res, krylov_spectrum_dmrg
         from .pyitensor.mpsalgebra import inner
         from .pyitensor.vectorize import identity_mps
         dc = self.doubled
         starts = None if start is None else self._seeds(*start)
         ks = krylov_spectrum_dmrg(dc, self.L, nk=nk, dt=dt, alpha=alpha,
-                                  gram_tol=gram_tol, seed=seed, starts=starts)
+                                  gram_tol=gram_tol, seed=seed, starts=starts,
+                                  exact_residuals=exact_residuals)
         one = identity_mps(dc._session.sites)
         traces = np.array([inner(one, rho) for rho in ks.states])
 
@@ -208,7 +213,7 @@ class Lindblad_Chain():
             if k == 0:
                 return value / tr
             return value / np.sqrt(abs(np.vdot(c, ks.M @ c)))
-        return ks.eigenvalues, ks.residuals, obs
+        return ks.eigenvalues, _res(ks), obs
 
     def _seeds(self, psi, phi):
         """Local vectors of |psi>|psi> and |psi>|phi> on the doubled chain."""

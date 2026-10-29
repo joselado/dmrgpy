@@ -960,7 +960,8 @@ class Chain:
         return traceC(A)
 
     def krylov_spectrum(self, terms_g, nk=20, dt=0.5, alpha=None,
-                        gram_tol=1e-12, seed=0, starts=None):
+                        gram_tol=1e-12, seed=0, starts=None,
+                        exact_residuals=False):
         """clik.krylov_spectrum on the MPO of terms_g, evolved at this
         chain's maxm and cutoff; returns the clik.KrylovSpectrum. `starts`
         is a pair of local-vector lists, one vector per site, for the two
@@ -971,7 +972,7 @@ class Chain:
             starts = tuple(product_state(self.sites, v) for v in starts)
         return _clik_krylov_spectrum(G, self.sites, nk=nk, dt=dt, alpha=alpha,
                 maxdim=self.maxm, cutoff=self.cutoff, gram_tol=gram_tol,
-                seed=seed, starts=starts)
+                seed=seed, starts=starts, exact_residuals=exact_residuals)
 
     def hermitian_operator(self, A):
         return mpo_dagger(A)

@@ -10,15 +10,21 @@ import numpy as np
 
 
 def get_krylov_spectrum(self, G=None, nk=20, dt=0.5, alpha=None,
-                        gram_tol=1e-12, seed=0, mode="DMRG"):
+                        gram_tol=1e-12, seed=0, exact_residuals=False,
+                        mode="DMRG"):
     """Return (ev, res, obs) for the generator G (default -H).
 
     - ev: eigenvalues of G on the Krylov space, largest real part first
       (for the default G=-H, the energies are -ev)
-    - res: ||G r - lambda r|| for each normalized eigenvector r; an
-      eigenvalue is converged only when its residual is small, and the
-      DMRG residual cannot resolve values below about 1e-8 of the
-      operator scale
+    - res: how far each eigenvalue moves when the last snapshot of each
+      branch is dropped, the paper's tracking of the spectrum, at no extra
+      cost; a converged eigenvalue does not move. It ranks the modes by
+      convergence but underestimates the error, by a factor 3 to 40 on
+      small chains against ED. With
+      exact_residuals=True it is ||G r - lambda r|| for each normalized
+      eigenvector r instead, which costs a matrix element of G^dag G for
+      every pair of snapshots and cannot resolve values below about 1e-8
+      of the operator scale. mode="ED" always gives the exact residual.
     - obs(O, k): <r_k|O|r_k>/<r_k|r_k> for a MultiOperator O
 
     nk snapshots per branch, imaginary-time step dt, contour angle alpha of
@@ -36,15 +42,21 @@ def get_krylov_spectrum(self, G=None, nk=20, dt=0.5, alpha=None,
     if mode != "DMRG":
         raise ValueError("get_krylov_spectrum: unrecognized mode " + repr(mode))
     ks = krylov_spectrum_dmrg(self, G, nk=nk, dt=dt, alpha=alpha,
-                              gram_tol=gram_tol, seed=seed)
+                              gram_tol=gram_tol, seed=seed,
+                              exact_residuals=exact_residuals)
 
     def obs(O, k):
         return ks.expectation(self._session._mpo(O.to_terms()), k)
-    return ks.eigenvalues, ks.residuals, obs
+    return ks.eigenvalues, _res(ks), obs
+
+
+def _res(ks):
+    """The exact residuals when they were computed, else the tracking."""
+    return ks.residuals if ks.residuals is not None else ks.changes
 
 
 def krylov_spectrum_dmrg(self, G, nk=20, dt=0.5, alpha=None, gram_tol=1e-12,
-                         seed=0, starts=None):
+                         seed=0, starts=None, exact_residuals=False):
     """The pyitensor clik.KrylovSpectrum of the MultiOperator G on this
     chain, with its stored states, for a caller that needs more than
     <r|O|r> (Lindblad_Chain reads traces off it). `starts`: see
@@ -63,7 +75,8 @@ def krylov_spectrum_dmrg(self, G, nk=20, dt=0.5, alpha=None, gram_tol=1e-12,
     self._session.set_mpomaxm(max(self.maxm, self.mpomaxm))
     return self._session.krylov_spectrum(G.to_terms(), nk=nk, dt=dt,
                                          alpha=alpha, gram_tol=gram_tol,
-                                         seed=seed, starts=starts)
+                                         seed=seed, starts=starts,
+                                         exact_residuals=exact_residuals)
 
 
 def _krylov_spectrum_ed(self, G):

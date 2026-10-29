@@ -43,9 +43,9 @@ gap = -lam[1].real                          # dissipative gap
 mz = [lc.steady_state_vev(sc.Sz[i]) for i in range(n)]
 ```
 
-`lam` is sorted by real part, the steady state first. `res[k]` is the
-residual of each eigenvector; only the eigenvalues with a small residual
-are converged. `mz` is the magnetization profile of the steady state, a
+`lam` is sorted by real part, the steady state first. `res[k]` is how
+much $\lambda_k$ moves when the last snapshot is left out; only the
+eigenvalues that do not move are converged. `mz` is the magnetization profile of the steady state, a
 linear ramp from $+0.18$ to $-0.18$ that carries a spin current through
 the chain. Here the gap is $0.0924$ against $0.0926$ from ED, and the
 profile agrees with ED to $3\times10^{-4}$. The keywords are those of

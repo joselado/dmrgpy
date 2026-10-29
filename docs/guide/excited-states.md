@@ -215,11 +215,11 @@ es = -ev                                 # energies, lowest first
 zz = obs(sc.Sz[0]*sc.Sz[1], 0)           # <Sz0 Sz1> in the lowest state
 ```
 
-`res[k]` is the residual $\lVert G|r_k\rangle-\lambda_k|r_k\rangle\rVert$
-of the normalized eigenvector. Only the eigenvalues with a small residual
-are converged; the others are rough estimates. On the 20-site chain the
-lowest energy agrees with `gs_energy()` to $10^{-5}$, with a residual of
-about $5\times10^{-3}$. For a Hermitian $H$ each energy is an upper bound
+`res[k]` says how much $\lambda_k$ moves when the last snapshot of each
+state is left out. A converged eigenvalue does not move, so a small
+`res[k]` marks the converged part of the list. It is not an error bar: on
+small chains the true error was 3 to 40 times larger. On the 20-site
+chain the lowest energy agrees with `gs_energy()` to $10^{-5}$. For a Hermitian $H$ each energy is an upper bound
 on the exact one at the same position. Two random starts give at most two
 copies of a degenerate level, so a triplet appears twice. The keywords are:
 
@@ -230,6 +230,10 @@ copies of a degenerate level, so a triplet appears twice. The keywords are:
 - `alpha`: the contour angle (default: estimated from a short run).
 - `gram_tol`: relative threshold below which directions of the snapshot
   space are dropped (default `1e-12`).
+- `exact_residuals=True`: `res[k]` becomes the residual
+  $\lVert G|r_k\rangle-\lambda_k|r_k\rangle\rVert$ of the normalized
+  eigenvector. It is a real error measure, but it costs much more on a
+  large chain.
 - `mode="ED"`: every eigenvalue of the dense $G$, in the same order, as a
   reference.
 
