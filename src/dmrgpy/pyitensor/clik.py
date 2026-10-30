@@ -450,6 +450,8 @@ class KrylovSpectrum:
         self.M = M
         self.ndim = ndim    # Krylov dimension kept after deflation
         self.alpha = alpha  # contour angle used
+        self.substeps = 1   # TDVP steps per snapshot, set by krylov_spectrum
+        self.sector_deflation = False   # set by Chain.krylov_spectrum
 
     def expectation(self, A, k):
         """<r_k|A|r_k>/<r_k|r_k> for an MPO A."""
