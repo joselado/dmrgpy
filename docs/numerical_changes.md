@@ -1258,5 +1258,7 @@ conserve the trace. On chains where neither triggers, as on the driven
 4-site XXZ chain, every number above is unchanged. On the seeded 3-site
 Bose-Hubbard chain the occupations go from 4.8e-8 to 1.6e-8 off ED, and on
 the 4-site one each of the slowest eight eigenvalues comes closer to ED,
-by factors 1.1 to 10. The 5-site check, which before gave no steady state
-at all, is recorded in `docs/clik_mps_lindblad_plan.md`.
+by factors 1.1 to 10. The 5-site check gave no steady state at all before (top
+eigenvalue +0.485). It now gives $\lambda_1$ 7e-4 off ED and the
+occupations 1e-3 off, with spurious modes still in the list; see
+`docs/clik_mps_lindblad_plan.md`.

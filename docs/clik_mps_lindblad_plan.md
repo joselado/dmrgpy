@@ -579,6 +579,20 @@ leak of the snapshots (about 1e-6): modes of other sectors that decay
 slowly enter the Krylov space. The same diagnostic is running on 5
 sites; see the end of this section.
 
+**The 5-site check with the committed default.** Run with
+`substeps=1`, so that the gate has to find the count (code at
+`47fb3e2`), nk=20, dt=0.5, alpha=0.2, χ=64: the gate settled on 2
+sub-steps in both branches, and the run took 2249 s, against 3955 s
+with five forced sub-steps. This reproduces the paper's check:
+$\lambda_1=-0.8415+0.8139i$ against $-0.8409+0.8135i$ from ED, 7e-4 off
+with a residual of 2.6e-4, and its partner 8e-3 off. The occupations are
+0.7116, 0.8489, 0.8784, 0.8484, 0.7114, 1e-3 off ED. The same pollution
+as above is there: the steady state at $-0.0057$, and $-0.094-2.32i$,
+$-0.178$, $-0.243-3.78i$ and $-0.50+2.23i$ above $\lambda_1$. Their
+imaginary parts, of the order of U times a change of particle number,
+point to coherences between particle sectors, which is what the
+diagnostic below checks.
+
 **A looser Krylov error goal is not a lever.** Earlier tonight
 `errgoal=1e-6` looked 2.3 times faster on 5 sites; that was the broken
 stopping test, and its result was garbage. With the test relative to the
