@@ -168,3 +168,29 @@ def test_seeded_sector_bose_hubbard_against_ed(version):
     target = lam_ed[1] if lam_ed[1].imag > 0 else lam_ed[2]
     k = int(np.argmin(np.abs(lam - target)))
     assert abs(lam[k] - target) < 1e-4
+
+
+@pytest.mark.parametrize("version", [3, "python"])
+def test_hermiticity_probe_puts_the_sweep_parameters_back(version):
+    """The witness of is_hermitian() runs at a bond dimension of at most 8
+    and used to leave the session there; get_krylov_spectrum on v3 then
+    evolved at 8. Measured through the session's own truncation on v3,
+    and through the attribute on "python"."""
+    sc = spinchain.Spin_Chain([2] * 10, itensor_version=version)
+    sc.maxm = 40
+    h = sum(sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
+            + sc.Sz[i] * sc.Sz[i + 1] for i in range(9))
+    sc.set_hamiltonian(h)
+    wf = sc.get_gs()
+    sc._session.set_sweep_params(sc.maxm, sc.nsweeps, sc.cutoff, sc.noise)
+    assert not sc.is_hermitian(h + 0.3j * sc.Sz[0])
+    if version == "python":
+        assert sc._session.maxm == 40
+        return
+    # H^2|gs> needs more than 8 states per bond: truncated at 8,
+    # <gs|H^2|gs> is 5e-6 off, at 40 it holds to the cutoff
+    s = sc._session
+    Hm = sc.toMPO(h * h).cpp_handle
+    out = s.apply_pure_operator(Hm, wf.cpp_handle)
+    exact = sc.vev(h * h)
+    assert abs(s.overlap(wf.cpp_handle, out) - exact) < 1e-8 * abs(exact)

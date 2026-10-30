@@ -3792,7 +3792,11 @@ Arnoldi port of `tdvp._arnoldi_expm_multiply` (`mpscpp3/cbe.h`). This
 split is needed: ITensor's Lanczos `applyExp` does not converge on a
 Lindbladian (on the seeded 3-site Bose-Hubbard one at dt=0.5 it stops at
 its iteration cap and the next SVD meets a NaN). On a Hermitian H the
-Arnoldi sweep agrees with the vendored TDVP to 5e-15 in the overlap. The
+Arnoldi sweep agrees with the vendored TDVP to 5e-15 in the overlap. On a
+3-site Lindbladian (XXZ, decay, pumping, dephasing), five steps of z=0.3
+follow exp(zL) to 2e-9 in every `<Sz>`, against 2e-10 for `"python"`'s
+Arnoldi step and 1.3e-10 for the vendored Lanczos one, which converges on
+that mild case; the factor of 10 to `"python"` has not been chased. The
 starts are Gaussian MPS from a `std::mt19937_64` seeded with `seed`
 (`clik_random_starts`), not ITensor's `randomMPS`, whose `randomOrthog`
 draws from `std::random_device` and so cannot be seeded (and `seedRNG(0)`
@@ -3806,9 +3810,11 @@ at a bond dimension of 8: in the other order the whole v3 evolution ran
 at 8 and the levels were 1e-3 off.
 
 Measured on one P-core, BLAS at one thread, nk=20, wall time of the whole
-call (v3 / `"python"`): Heisenberg spin 1/2, maxm=32, dt=0.5, n=12 5.3 s /
-7.2 s and n=24 20.3 s / 32.1 s, the two lowest levels equal to 1e-8 and
-5e-6; driven XXZ (the test model), maxm=64, dt=2, n=4 5.0 s / 3.0 s and n=6
+call (v3 / `"python"`): Heisenberg spin 1/2, maxm=32, dt=0.5, n=12 5.5 s /
+7.2 s, the two lowest levels equal to 3e-9, and n=24 23.0 s / 32.1 s,
+where nk=20 does not converge the ground state on either backend (5e-6 to
+1e-4 above the DMRG energy over seeds 0 to 4 on v3 and 0 to 3 on
+`"python"`, the same spread); driven XXZ (the test model), maxm=64, dt=2, n=4 5.0 s / 3.0 s and n=6
 43.8 s / 26.5 s, steady states agreeing to 1e-4 in `<Sz_0>`; seeded
 Bose-Hubbard, two bosons, dt=0.5, L=3 7.0 s / 3.7 s and L=4 23.4 s /
 11.0 s, the same `<N_0>` to 2e-7. So v3 wins where the step is the
@@ -3923,7 +3929,7 @@ OpenBLAS, numpy here uses MKL), 10 sweeps from a random start, cutoff
 | Heisenberg S=1 L=40 | 50 | 0.230 | 0.225 | 0.839 | 0.867 |
 | Heisenberg S=1 L=40 | 100 | 2.45 | 2.39 | 4.18 | 4.56 |
 | Hubbard U=4 L=20 (d=2 sites) | 100 | 1.57 | 2.08 | 2.84 | 18.8 |
-| Hubbard U=4 L=40 (d=2 sites) | 100 | 3.61 | 4.80 | 5.52 | not run |
+| Hubbard U=4 L=40 (d=2 sites) | 100 | 3.61 | 4.80 | 5.52 | killed after 5 min |
 | Hubbard U=4 L=16 (`_Native`, d=4) | 50 | 0.241 | 0.144 | 0.523 | 0.345 |
 | Hubbard U=4 L=16 (`_Native`, d=4) | 100 | 2.15 | 1.58 | 4.79 | 1.92 |
 | Hubbard U=4 L=32 (`_Native`, d=4) | 100 | 4.13 | 2.11 | 8.13 | 4.77 |

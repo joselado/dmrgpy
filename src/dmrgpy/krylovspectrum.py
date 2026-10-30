@@ -89,6 +89,7 @@ def krylov_spectrum_dmrg(self, G, nk=20, dt=0.5, alpha=None, gram_tol=1e-12,
                                    self.noise)
     self._session.set_mpomaxm(max(self.maxm, self.mpomaxm))
     if self.itensor_version == 3:
+        self._session.set_verbose(self.verbose)   # GSE prints unless quiet
         if not hasattr(self._session, "clik_random_starts"):
             raise NotImplementedError(
                 "get_krylov_spectrum: the compiled v3 extension predates "

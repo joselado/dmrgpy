@@ -399,6 +399,12 @@ def is_hermitian(self,op):
         norm = (wf.dot(wf)).real
     finally:
         self.maxm = old_maxm
+        # the witness went through applyoperator_dmrg, which sent the
+        # probe's maxm to the session; a caller that had already sent its
+        # own sweep parameters would otherwise run at 8 (v3 CLIK did)
+        session = getattr(self,"_session",None)
+        if session is not None and hasattr(session,"set_sweep_params"):
+            session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     return not norm>tol
 
 

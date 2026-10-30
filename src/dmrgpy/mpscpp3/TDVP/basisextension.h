@@ -227,8 +227,11 @@ void addBasis(MPS& phi,
 	addBasisWorker(psis,phi,Fromright,args0);
 
 	auto sm = expand_time.sincemark();
-	printfln("\nmaxLinkDim after global subspace expansion = %d",maxLinkDim(phi));
-	printfln("Global subspace expansion: cputime = %s, walltime = %s",showtime(sm.time),showtime(sm.wall));
+	if(!quiet)
+		{
+		printfln("\nmaxLinkDim after global subspace expansion = %d",maxLinkDim(phi));
+		printfln("Global subspace expansion: cputime = %s, walltime = %s",showtime(sm.time),showtime(sm.wall));
+		}
 	}
 
 void addBasis(MPS& phi,
@@ -236,6 +239,7 @@ void addBasis(MPS& phi,
               std::vector<int> const& maxdimK,
               const Args& args0 = Args::global())
 	{
+        auto quiet = args0.getBool("Quiet",false);
         auto dk = args0.getInt("KrylovOrd",2);
         auto method = args0.getString("Method","DensityMatrix");
         auto nsw = args0.getInt("Nsweep",2);
@@ -262,8 +266,11 @@ void addBasis(MPS& phi,
 		if(donormalize)
 			psis.at(i).normalize();
 
-                printfln("norm(psi%d)=%.20f",i+1,norm(psis.at(i)));
-                printfln("maxLinkDim(psi%d) = %d",i+1,maxLinkDim(psis.at(i)));
+                if(!quiet)
+                        {
+                        printfln("norm(psi%d)=%.20f",i+1,norm(psis.at(i)));
+                        printfln("maxLinkDim(psi%d) = %d",i+1,maxLinkDim(psis.at(i)));
+                        }
 		}
 
 	int N = length(phi);
@@ -276,8 +283,11 @@ void addBasis(MPS& phi,
 	addBasisWorker(psis,phi,Fromright,args0);
         
         auto sm = expand_time.sincemark();
-        printfln("\nmaxLinkDim after global subspace expansion = %d",maxLinkDim(phi));
-        printfln("Global subspace expansion: cputime = %s, walltime = %s",showtime(sm.time),showtime(sm.wall));
+        if(!quiet)
+                {
+                printfln("\nmaxLinkDim after global subspace expansion = %d",maxLinkDim(phi));
+                printfln("Global subspace expansion: cputime = %s, walltime = %s",showtime(sm.time),showtime(sm.wall));
+                }
 	}
 
 }// namespace itensor
