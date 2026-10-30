@@ -638,7 +638,7 @@ a strict xfail that now passes.
    Lindbladian at a long dt could then be doubled up to 64 sub-steps and
    end in "reduce dt" for nothing. No case tonight hit it.
 4. The contour angle: on 3 and 4 sites a fixed 0.2 gave the slowest pair
-   2.9e-6 and 9.5e-6 off ED, against 2.6e-4 and 4.5e-4 at the probed 0.39.
+   2.9e-6 and 9.5e-6 off ED, against 2.6e-4 and 3.5e-4 at the probed 0.39.
    Two data points, not acted on.
 5. The five test failures of the Davidson commit `b131b53`, listed above.
 6. The two examples of section 7, which do not exist yet.
