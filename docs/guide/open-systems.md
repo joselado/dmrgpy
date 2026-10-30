@@ -68,7 +68,8 @@ we start from product states of that sector:
   bosons). The evolution starts from $|\psi\rangle\langle\psi|$ and from
   the traceless $|\psi\rangle\langle\phi|$, and the sector of $\psi$ is
   kept, for example `start=([1,1,0],[0,1,1])` for two bosons on three
-  sites.
+  sites. Modes of other sectors, which enter through small numerical
+  errors, are left out of `lam`.
 
 !!! note "Backends"
     `Lindblad_Chain` works for spin and boson chains on

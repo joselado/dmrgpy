@@ -1262,3 +1262,10 @@ by factors 1.1 to 10. The 5-site check gave no steady state at all before (top
 eigenvalue +0.485). It now gives $\lambda_1$ 7e-4 off ED and the
 occupations 1e-3 off, with spurious modes still in the list; see
 `docs/clik_mps_lindblad_plan.md`.
+
+A seeded `Lindblad_Chain.get_spectrum` whose sector identity checks out
+now leaves out every Ritz mode whose charge variance
+$\langle(Q_\mathrm{ket}-q)^2+(Q_\mathrm{bra}-q)^2\rangle$ exceeds 0.5. So
+`lam`, `res` and the index `k` of `obs` can shift where such modes were
+present. On the 5-site Bose-Hubbard check four of the five slowest values
+were dropped, all with variance 2.4 to 8.8; on 3 and 4 sites nothing is.
