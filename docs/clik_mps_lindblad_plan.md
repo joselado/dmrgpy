@@ -475,9 +475,9 @@ slower, 14.3 s against 13.3 s.
 ## Night of 2026-10-30
 
 The task was to debug and optimize the Lindblad route, with questions put
-to a second model rather than to the author. The repro scripts are in the
-session scratchpad, not in the repository; the numbers below are what
-they printed.
+to a second model rather than to the author. The repro scripts are in
+`docs/clik_mps_repro/night_2026_10_30/`, with a README saying what each
+one measured; the numbers below are what they printed.
 
 **Where the time goes depends on the size.** On the 4-site XXZ chain the
 matrix elements were 65% of the run: 2729 `inner` calls, each a few small
@@ -623,3 +623,27 @@ One data point, recorded and not acted on.
 `test_audit_2026_09_24c_session.py::test_sector_makes_no_solve_on_the_callers_chain[python]`
 and `test_audit_2026_09_25_scale.py::test_small_units_ground_state_still_open[python-1e-10]`,
 a strict xfail that now passes.
+
+**Open, in order, after the night of 2026-10-30.**
+
+1. A forward-only integrator, the basis-update and Galerkin (BUG) scheme,
+   as the principled cure for the stiffness; sub-stepping only works
+   around it. The augmented basis must be split with an SVD, not a QR, or
+   it leaks out of the sector as one-site TDVP did.
+2. The steady-state eigenvalue of the 5-site check is 5.7e-3 from zero at
+   χ=64. The next check is χ=96 or 128, as a Triton job, not a local run.
+3. The growth gate may reject a legitimate step. `_GROWTH_TOL` is 1 while
+   the norm of a normalized density matrix can grow by up to
+   $\tfrac12\ln D$ as it purifies (2.1 at D=70). A fast-purifying
+   Lindbladian at a long dt could then be doubled up to 64 sub-steps and
+   end in "reduce dt" for nothing. No case tonight hit it.
+4. The contour angle: on 3 and 4 sites a fixed 0.2 gave the slowest pair
+   2.9e-6 and 9.5e-6 off ED, against 2.6e-4 and 4.5e-4 at the probed 0.39.
+   Two data points, not acted on.
+5. The five test failures of the Davidson commit `b131b53`, listed above.
+6. The two examples of section 7, which do not exist yet.
+7. The Phase 0 leftovers: the ED-against-DMRG norm convention, the
+   `julia_live` check and the audit record. Left eigenvectors (Phase 1b)
+   and the Hermiticity projection of the steady state.
+
+One-site TDVP is settled: it is dropped.
