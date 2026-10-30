@@ -18,7 +18,7 @@ from .edtk import timedependent as tded
 _TEBD_NN_ERROR_MARKER = "nearest-neighbor"
 
 
-TEVOL_METHODS = ("TDVP","TDVP_GSE","TEBD","AUTO","MPO")
+TEVOL_METHODS = ("TDVP","TDVP_GSE","TDVP_CBE","TEBD","AUTO","MPO")
 
 
 def check_tevol_method(self):
@@ -45,6 +45,18 @@ def check_tevol_method(self):
             +", ".join(repr(m) for m in TEVOL_METHODS)
             +". (An unrecognized method used to run the legacy MPO-Taylor "
             "integrator silently.)")
+    # "TDVP_CBE" exists on itensor_version="python" only. Every dispatch
+    # below ends in the MPO-Taylor else-branch, which v2 and v3 would reach
+    # with this name, and julia_live has no such integrator either, so the
+    # request is refused here, ahead of every branch, rather than answered
+    # by a different integrator.
+    if self.tevol_method=="TDVP_CBE" and self.itensor_version!="python":
+        raise NotImplementedError(
+            "tevol_method='TDVP_CBE' (one-site TDVP with controlled bond "
+            "expansion) is implemented on itensor_version=\"python\" only, "
+            "and this chain uses itensor_version=%r. Switch the chain with "
+            "setup_python(), or use tevol_method=\"TDVP\" or \"TDVP_GSE\"."
+            %(self.itensor_version,))
 
 
 def _is_tebd_nn_error(exc):
@@ -127,6 +139,12 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     minutes at n=12, versus under a second for the same computation on
     v3/"python") that couldn't be root-caused in the time available.
 
+    self.tevol_method="TDVP_CBE" runs one-site TDVP with controlled bond
+    expansion before every local step (pyitensor/cbe.py, Li, Gleis, von
+    Delft, arXiv:2208.10972), so the bond keeps growing up to maxm at every
+    step; itensor_version="python" only, every other backend raises
+    (check_tevol_method).
+
     self.tevol_method="TEBD" instead runs 2nd-order-Trotter TEBD (gates
     built once from the bare nearest-neighbor bond Hamiltonians, reused
     unchanged every step, no per-step Krylov/Lanczos at all) --
@@ -187,6 +205,10 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
                 lambda: self._session.quench_tdvp(
                     self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
                     int(nt),dt))
+    elif self.itensor_version=="python" and self.tevol_method=="TDVP_CBE":
+        correlator,_wf = self._session.quench_tdvp_cbe(
+                self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
+                int(nt),dt)
     elif self.itensor_version in (3,"python") and self.tevol_method=="TDVP_GSE":
         correlator,_wf = self._session.quench_tdvp_gse(
                 self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
@@ -301,6 +323,10 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
                 lambda: self._session.evolve_and_measure_tdvp(
                     h.to_terms(),operator.to_terms(),wf.cpp_handle,
                     int(nt),dt))
+    elif self.itensor_version=="python" and self.tevol_method=="TDVP_CBE":
+        correlator,_wf = self._session.evolve_and_measure_tdvp_cbe(
+                h.to_terms(),operator.to_terms(),wf.cpp_handle,
+                int(nt),dt)
     elif self.itensor_version in (3,"python") and self.tevol_method=="TDVP_GSE":
         correlator,_wf = self._session.evolve_and_measure_tdvp_gse(
                 h.to_terms(),operator.to_terms(),wf.cpp_handle,

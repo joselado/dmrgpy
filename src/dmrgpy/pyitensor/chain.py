@@ -35,6 +35,7 @@ from .tdvp import tdvp_step as _tdvp_step_fn
 from .clik import krylov_spectrum as _clik_krylov_spectrum
 from .tebd import TEBDEvolver as _TEBDEvolver
 from .gse import global_subspace_expand as _global_subspace_expand_fn
+from .cbe import dmrg_cbe as _dmrg_cbe, tdvp_cbe_step as _tdvp_cbe_step_fn
 from .kpm_energy_truncation import energy_truncate as _kpm_energy_truncate
 from .tensor import ITensor, commonIndex, contract_many, dag, delta, noPrime, prime, swapPrime
 from . import backend as _bk
@@ -277,6 +278,13 @@ class Chain:
         self.mpomaxm = 5000
         self.verbose = False
 
+        # Ground-state solver, see set_dmrg_method(): "TWO_SITE" is dmrg.py's
+        # two-site DMRG, "CBE" one-site DMRG with controlled bond expansion
+        # (cbe.py). cbe_delta is the expansion fraction of the CBE paper,
+        # used by "CBE" and by the CBE-TDVP methods below.
+        self.dmrg_method = "TWO_SITE"
+        self.cbe_delta = 0.1
+
         # Ground-state bond-dimension ramp, see set_bond_ramp()/
         # _make_sweeps_ramped(). Defaults mirror both the C++ backends'
         # and Many_Body_Chain's own (manybodychain.py), which is what
@@ -312,6 +320,22 @@ class Chain:
 
     def set_mpomaxm(self, mpomaxm):
         self.mpomaxm = mpomaxm
+
+    def set_dmrg_method(self, method, cbe_delta=0.1):
+        """The ground-state solver of gs_energy(): "TWO_SITE" (dmrg.py,
+        the default) or "CBE" (cbe.py's dmrg_cbe, one-site DMRG with
+        controlled bond expansion). cbe_delta, the expansion fraction, is
+        also what the CBE-TDVP methods read. Only gs_energy() reads the
+        method; the excited-state, generalized and band-edge solves stay
+        two-site (the Python layer refuses the first two under "CBE")."""
+        if method not in ("TWO_SITE", "CBE"):
+            raise ValueError("set_dmrg_method: unknown method %r, expected "
+                             "'TWO_SITE' or 'CBE'" % (method,))
+        if not cbe_delta >= 0:
+            raise ValueError("set_dmrg_method: cbe_delta must be >= 0, got %r"
+                             % (cbe_delta,))
+        self.dmrg_method = method
+        self.cbe_delta = float(cbe_delta)
 
     def set_bond_ramp(self, enabled, start, fraction, noise_decay):
         """Ground-state bond-dimension ramp -- the counterpart of
@@ -639,8 +663,18 @@ class Chain:
         self._check_wf_sites(self.wf0, "gs_energy")
         # noise only on a fresh start: a warm start is a state the caller
         # chose, and noise would move it inside a degenerate level
-        energy = dmrg(self.wf0, self._solve_H(), sweeps, quiet=not self.verbose,
-                      noisy_start=fresh)
+        if self.dmrg_method == "CBE":
+            # one-site route: no padded bonds, which a QR would complete
+            # into live directions and which leave no room to expand
+            # (see _strip_bond_padding)
+            self.wf0 = _strip_bond_padding(self.wf0)
+            with _bk.pad_bonds_suspended():
+                energy = _dmrg_cbe(self.wf0, self._solve_H(), sweeps,
+                                   delta=self.cbe_delta,
+                                   quiet=not self.verbose, noisy_start=fresh)
+        else:
+            energy = dmrg(self.wf0, self._solve_H(), sweeps,
+                          quiet=not self.verbose, noisy_start=fresh)
         if self.sector:
             # The solve minimized H + the charge penalty; report <H>, which
             # is the sector's own energy (the penalty is identically zero
@@ -1178,6 +1212,68 @@ class Chain:
             # One-site TDVP does not truncate, so this is a roundoff-level
             # correction here; kept for the symmetry with
             # evolve_and_measure_tdvp() and with v3's copy of this loop.
+            psi = _renormalized(psi, norm0)
+        return correlator, psi
+
+    def _cbe_step(self, psi, H, dt, hermitian=None):
+        """One CBE-TDVP step (cbe.py), mutating psi, with padding
+        suspended as for the whole one-site route."""
+        with _bk.pad_bonds_suspended():
+            return _tdvp_cbe_step_fn(psi, H, dt, cutoff=self.cutoff,
+                    maxdim=self.maxm, delta=self.cbe_delta, niter=50,
+                    hermitian=hermitian)
+
+    def tdvp_cbe_step(self, H, wf, dt):
+        """One CBE-TDVP step of size dt (any complex number) on a copy of
+        wf, for a caller that drives the evolution itself (tdz.py). Same
+        argument order as tdvp_step() above. Padding is not stripped here,
+        for the reason given there; the expansion itself is
+        rank-revealing, and the SVD that trims each bond drops zero
+        singular values."""
+        return self._cbe_step(wf.copy(), H, dt)
+
+    def quench_tdvp_cbe(self, terms_h, terms_i, terms_j, nt, dt):
+        """CBE counterpart of quench_tdvp(): the same setup and measurement,
+        with each step one-site TDVP with controlled bond expansion
+        (cbe.tdvp_cbe_step). The bond grows at every step, up to maxm,
+        unlike TDVP_GSE, which expands only during its first
+        tdvp_gse_sweeps steps."""
+        if self.wf0 is None:
+            self.gs_energy()
+        ampo_h = self._ampo(terms_h)
+        H = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        EGS = inner(self.wf0, H, self.wf0).real / inner(self.wf0, self.wf0).real
+        ampo_h.add(-EGS, "Id", 1)
+        Hshift = to_mpo(ampo_h, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
+        A1 = self._mpo(terms_i)
+        A2 = self._mpo(terms_j)
+        psi1 = self._apply_mpo(A1, self.wf0)
+        psi2 = self._apply_mpo(A2, self.wf0)
+        psi1 = _strip_bond_padding(psi1)
+        norm0 = np.sqrt(inner(psi1, psi1))
+        herm = mpo_is_hermitian(Hshift)  # once, not per step; see tdvp_step
+        correlator = []
+        for _ in range(nt):
+            # measure before evolving, see quench_tdvp()
+            correlator.append(inner(psi2, psi1))
+            psi1 = self._cbe_step(psi1, Hshift, dt, hermitian=herm)
+            psi1.normalize()
+            psi1 = psi1 * norm0
+        return correlator, psi1
+
+    def evolve_and_measure_tdvp_cbe(self, terms_h, terms_op, wf, nt, dt):
+        """CBE counterpart of evolve_and_measure_tdvp(): `wf` is copied
+        (the step mutates its input) and the norm is put back after every
+        step, since the SVD that trims each bond discards weight."""
+        H = self._mpo(terms_h)
+        A = self._mpo(terms_op)
+        psi = _strip_bond_padding(wf.copy())
+        norm0 = np.sqrt(abs(inner(psi, psi)))
+        herm = mpo_is_hermitian(H)  # once, not per step; see tdvp_step
+        correlator = []
+        for _ in range(nt):
+            correlator.append(inner(psi, A, psi))
+            psi = self._cbe_step(psi, H, dt, hermitian=herm)
             psi = _renormalized(psi, norm0)
         return correlator, psi
 

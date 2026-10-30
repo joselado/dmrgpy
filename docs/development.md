@@ -3194,6 +3194,16 @@ Notable, deliberate implementation details (not bugs to "fix"):
   under a second for the same computation on `itensor_version=3`) that
   couldn't be root-caused in the time available — see git history around
   `mpscpp2/TDVP/` if picking this up again.
+- `tevol_method="TDVP_CBE"` (`itensor_version="python"` only) runs
+  one-site TDVP with controlled bond expansion before every local forward
+  step (`pyitensor/cbe.py`, see "Controlled bond expansion" in section
+  4.5). Every other backend raises `NotImplementedError` naming
+  `"python"`, from `timedependent.check_tevol_method()`, which all three
+  dispatch sites (`evolution_dmrg_DC`, `evolve_and_measure_dmrg`,
+  `tdz._advance_complex_time_step`) call before any branch: each chain ends
+  in the MPO-Taylor `else`, which v2 and v3 would otherwise reach with this
+  name. The session methods are `quench_tdvp_cbe`,
+  `evolve_and_measure_tdvp_cbe` and the one-step `tdvp_cbe_step` (TDZ).
 - `tevol_method="TEBD"` (`itensor_version="python"` via
   `pyitensor/tebd.py`'s `TEBDEvolver`, `itensor_version=3` via
   `mpscpp3/tebd.h` -- a from-scratch C++ port, not a shared code path --
@@ -3788,6 +3798,63 @@ dimension d inside each pair and 1 between pairs, so
 independent route; `tests/test_lindblad.py` matches its `Tr(L^k)` against
 the doubled-chain operator. Strong symmetries are not projected out, so
 every conserved sector gives its own `lambda = 0`.
+
+**Controlled bond expansion (`cbe.py`).** `dmrg_method="CBE"` and
+`tevol_method="TDVP_CBE"` are one-site DMRG and one-site TDVP with
+controlled bond expansion (Gleis, Li, von Delft, PRL 130 246402,
+arXiv:2207.14712; the projector formalism of arXiv:2207.13161; TDVP in
+Li, Gleis, von Delft, arXiv:2208.10972). Before each one-site update the
+bond is expanded from D to D+D~, `A_ex=[A|A~]` and `C_ex=[C;0]`, so the
+state does not change; after the update a truncating SVD cuts it back to
+`maxdim` and `cutoff`. `A~` spans the part of `H|psi>` in the discarded
+space `(1-AA^dag) x (1-B^dag B)`, chosen by the shrewd selection of the
+paper's Table I (four small SVDs, never the full two-site object);
+`selection="naive"` does the full two-site projected SVD and is the
+reference the kernel is tested against. The structure mirrors FiniteMPS.jl
+(MIT, `src/Algorithm/CBE/`), with the paper's sizes: `D_ex =
+ceil((1+cbe_delta) maxdim)`, `D~ = D_ex - D`, preselection to
+`ceil(D_ex/w)` for an MPO bond w; in TDVP the thresholds 1e-4 and 1e-6
+are relative to the norm of the unprojected object. TDVP is the
+repository's symmetric second-order step, the QR of one-site TDVP
+replaced by the truncating SVD. Every SVD in `cbe.py` is a full SVD
+(`cbe.svd`), not `svd.py`'s Gram-matrix route: the Gram route returns U
+columns orthonormal only to about `eps (s_max/s)^2`, so `1-AA^dag` was not
+a projector, local energies dropped below the ground state and the energy
+rose from sweep to sweep (L=40, maxm=50: -17.54 to -15.16).
+`tests/test_cbe.py::test_cbe_split_is_an_exact_isometry_where_the_gram_route_is_not`
+pins it. `_noisy_start`
+is reused unchanged: noise on the first sweep of a fresh start only.
+
+Dispatch: `groundstate.check_dmrg_method` runs in `gs_energy`/`get_gs`
+before `get_mode`, so the ED fallback of a missing extension cannot answer
+a CBE request; it raises `ValueError` for an unknown name or a bad
+`cbe_delta` and `NotImplementedError` naming `"python"` on v2, v3 and
+`julia_live`. The excited-state search and both non-Hermitian routes call
+`require_two_site` and raise too. `method_key` is part of `solver_key`
+and `_send_key`, so switching `dmrg_method` re-solves. `"TWO_SITE"` and
+`"CBE"` are uppercase like `tevol_method`, and `"TDVP_CBE"` follows
+`"TDVP_GSE"`; a separate setting, rather than a new `tevol_method`-like
+name for DMRG, keeps the default byte-identical.
+
+Measured on one core, threads pinned, cutoff 1e-12. In pure Python, CBE
+is not faster for spin 1/2, since numpy's SVD dominates its cost (3.7 of
+8.9 s at L=40, maxm=100). It wins for d=4, as the paper predicts. The
+Heisenberg runs are 6 sweeps, the Hubbard runs 3, all from a random start:
+
+| model | maxm | two-site s/sweep | CBE s/sweep | E, last sweep (two-site / CBE) |
+|---|---|---|---|---|
+| Heisenberg L=40 | 50 | 0.77 | 1.35 to 1.82 | -17.541473283931 / -17.541473284022 |
+| Heisenberg L=40 | 100 | 2.0 | 3.9 to 5.4 | -17.541473299793 / -17.541473299785 |
+| Heisenberg L=40 | 200 | 2.2 | 6 to 7 | equal |
+| Hubbard U=4 L=16 (`_Native`) | 50 | 1.40 | 0.96 | -24.818716941774 / -24.818714752791 |
+| Hubbard U=4 L=16 (`_Native`) | 100 | 6.9 | 4.8 | -24.818767009610 / -24.818764421427 |
+
+At maxm=200 the cutoff holds D at 95, but `D~ = D_ex - D` still adds
+about 125 states, which is most of the extra cost there; a smaller `D~`
+rule is left open. Neel quench of the Heisenberg chain, n=14, maxm=32,
+dt=0.1, 60 steps, `<Sz_7>` against ED: TDVP 0.200 s/step, max error
+1.8e-3; TDVP_GSE 0.078 s/step, 1.3e-2, bond stuck at 26; TDVP_CBE 0.116
+s/step, 2.0e-3, bond 32.
 
 ### 4.6 The Julia backend (`mpsjulialive/`)
 

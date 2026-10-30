@@ -32,6 +32,9 @@ bound on $E_0$ otherwise. The keywords that control accuracy are:
   Gapped chains need a small `maxm`; critical chains and wide ladders need
   a large one.
 - `sc.nsweeps`: the number of DMRG sweeps.
+- `sc.dmrg_method = "CBE"`: one-site updates with bond expansion, cheaper
+  for a large local dimension
+  ([One-site updates with bond expansion](solver.md#one-site-updates-with-bond-expansion)).
 - `gs_energy(maxde=1e-4)`: doubles `maxm` until the energy fluctuation per
   site ([Energy fluctuation](#energy-fluctuation)) is smaller than `maxde`.
 - `mode="ED"`: exact diagonalization, for small chains and for checking

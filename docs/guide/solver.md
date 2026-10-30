@@ -38,6 +38,41 @@ state: `gs_energy()` and `get_gs()` return it without a new solve as long
 as the Hamiltonian and the settings above do not change, and
 `sc.restart()` forgets it.
 
+## One-site updates with bond expansion
+
+The default sweep updates two sites at a time. This lets a bond grow, but
+the local problem has dimension $d^2D^2$, so it becomes expensive for a
+large local dimension $d$, for example $d=4$ in a Hubbard chain. A one-site
+update costs only $dD^2$, but alone it cannot grow a bond: from a product
+state it stays a product state. Controlled bond expansion (Gleis, Li and
+von Delft, [PRL 130, 246402 (2023)](https://arxiv.org/abs/2207.14712))
+solves this. Before each one-site update, the bond gets the few new states
+on which $H|\psi\rangle$ has weight outside the current two-site space,
+the part that a two-site update would add. After the update the bond is
+cut back to `sc.maxm`. So it converges like two-site DMRG with one-site
+local problems.
+
+```python
+sc.dmrg_method = "CBE"
+e0 = sc.gs_energy()
+```
+
+- `sc.dmrg_method` (default `"TWO_SITE"`): `"CBE"` for one-site updates
+  with controlled bond expansion. Use it for chains with a large local
+  dimension; for spin-1/2 chains the two-site update is usually faster.
+- `sc.cbe_delta` (default 0.1): each bond is expanded to $(1+\delta)$`maxm`
+  states before the update, as in the paper.
+
+It also works with a conserved sector
+([Fixed particle number or fixed magnetization](ground-state.md#fixed-particle-number-or-fixed-magnetization)).
+
+!!! note "Backends"
+    `"CBE"` exists only on `itensor_version="python"`. The other backends
+    raise an error, and so do the excited-state search and the
+    non-Hermitian ground state.
+
+See `examples/groundstate/cbe_ground_state`.
+
 ## Starting from a given state
 
 By default a solve starts from a state the backend chooses, a random one

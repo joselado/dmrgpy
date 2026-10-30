@@ -44,6 +44,55 @@ def ramp_key(self):
             self.bond_ramp_noise_decay)
 
 
+DMRG_METHODS = ("TWO_SITE","CBE")
+
+
+def check_dmrg_method(self):
+    """Validate self.dmrg_method and self.cbe_delta, and refuse "CBE" on a
+    backend that does not implement it.
+
+    "CBE" (one-site DMRG with controlled bond expansion, pyitensor/cbe.py)
+    exists on itensor_version="python" only. The compiled sessions and
+    julia_live have no such solver, and quietly running their two-site
+    DMRG, or the ED fallback of a missing extension, would answer a
+    different question than the one asked (docs/development.md 4.10), so
+    the request raises there. Called by Many_Body_Chain.gs_energy()/
+    get_gs() before the mode is resolved, and again by gs_energy() here."""
+    method = getattr(self,"dmrg_method","TWO_SITE")
+    if method not in DMRG_METHODS:
+        raise ValueError("Unrecognized dmrg_method "+repr(method)
+                +"; expected "+", ".join(repr(m) for m in DMRG_METHODS))
+    delta = getattr(self,"cbe_delta",0.1)
+    if not (isinstance(delta,(int,float)) and delta>=0):
+        raise ValueError("cbe_delta must be a number >= 0, got %r"%(delta,))
+    if method=="CBE" and self.itensor_version!="python":
+        raise NotImplementedError(
+            "dmrg_method='CBE' (one-site DMRG with controlled bond "
+            "expansion) is implemented on itensor_version=\"python\" only, "
+            "and this chain uses itensor_version=%r. Switch the chain with "
+            "setup_python(), or set dmrg_method=\"TWO_SITE\"."
+            %(self.itensor_version,))
+
+
+def require_two_site(self,where):
+    """Refuse dmrg_method="CBE" in a DMRG solve that has no CBE version
+    (excited states, the generalized and the non-Hermitian eigenproblem),
+    instead of running two-site DMRG under a setting that says CBE."""
+    if getattr(self,"dmrg_method","TWO_SITE")=="CBE":
+        raise NotImplementedError(
+            "%s has no controlled-bond-expansion version: it runs two-site "
+            "DMRG only, and this chain sets dmrg_method=\"CBE\". Set "
+            "dmrg_method=\"TWO_SITE\" for this calculation."%(where,))
+
+
+def method_key(self):
+    """The ground-state solver, as part of the send-cache key and of
+    solver_key(): a change of dmrg_method or cbe_delta between two bare
+    gs_energy() calls must give a fresh solve, as for ramp_key()."""
+    return (getattr(self,"dmrg_method","TWO_SITE"),
+            getattr(self,"cbe_delta",0.1))
+
+
 def sector_key(self):
     """The conserved sector, as part of gs_energy_single()'s send-cache key:
     the session caches its own energy across a skipped Hamiltonian re-send,
@@ -66,7 +115,8 @@ def solver_key(self):
     decide whether a cached self.e0/self.wf0 still answers the question
     being asked."""
     return (self.maxm,self.nsweeps,self.cutoff,self.noise,
-            max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self))
+            max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self),
+            method_key(self))
 
 
 def gs_is_current(self):
@@ -408,6 +458,13 @@ def _session_parameters(self):
         self._session.set_bond_ramp(self.bond_ramp,self.bond_ramp_start,
                                     self.bond_ramp_fraction,
                                     self.bond_ramp_noise_decay)
+    # The ground-state solver. Only the "python" session has more than one;
+    # check_dmrg_method() has already refused "CBE" everywhere else, so no
+    # hasattr() guard here: on a compiled session that guard would be the
+    # silent path.
+    check_dmrg_method(self)
+    if self.itensor_version=="python":
+        self._session.set_dmrg_method(self.dmrg_method,self.cbe_delta)
 
 
 def _on_session(self):
@@ -531,7 +588,8 @@ def _send_key(self):
     keyed on its handle instead)."""
     from .multioperatortk.staticoperator import StaticOperator
     base = (self.maxm,self.nsweeps,self.cutoff,self.noise,
-            max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self))
+            max(self.maxm,self.mpomaxm),ramp_key(self),sector_key(self),
+            method_key(self))
     if isinstance(self.hamiltonian,StaticOperator):
         return base+(id(self.hamiltonian.cpp_handle),),None
     terms = self.hamiltonian.to_terms()
@@ -758,6 +816,7 @@ def _gs_energy_julia(self,ishermitian=True,wf0=None,reconverge=None):
 
 
 def gs_energy(self,**kwargs):
+    check_dmrg_method(self) # "CBE" exists on "python" only
     # a chain with no Hamiltonian is refused, naming set_hamiltonian(),
     # inside is_hermitian() (require_hamiltonian())
     if self.is_hermitian(self.hamiltonian): # put a check for Hermitian
@@ -768,6 +827,7 @@ def gs_energy(self,**kwargs):
         else: raise NotImplementedError("gs_energy is not implemented for "
                 "itensor_version=%r" % (self.itensor_version,))
     else: # non-Hermitian excited states
+        require_two_site(self,"The non-Hermitian ground state (NH-DMRG)")
         # Julia version has its own function
         if self.itensor_version=="julia_live":
             return _gs_energy_julia(self,ishermitian=False,**kwargs)
@@ -856,6 +916,7 @@ def gs_energy_generalized(self,A,lam0=None):
     every chain, 2026-09-25 fixes). For the plain ground state instead,
     restart() and then gs_energy() before using any other method that
     reads self.wf0."""
+    require_two_site(self,"gs_energy_generalized()")
     if self.mode=="ED":
         raise NotImplementedError(
             "gs_energy_generalized has no ED implementation -- unset "

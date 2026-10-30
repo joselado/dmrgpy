@@ -61,6 +61,7 @@ SETTINGS = frozenset((
     "cvm_nsweeps","cvm_maxm",
     "tevol_method","tevol_custom_exp","tdvp_gse_sweeps",
     "tdvp_gse_krylov_order","tdvp_gse_cutoff",
+    "dmrg_method","cbe_delta",
     "excited_gram_schmidt",
 ))
 
