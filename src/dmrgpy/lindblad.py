@@ -150,7 +150,7 @@ class Lindblad_Chain():
 
     def get_spectrum(self, nk=20, dt=2.0, alpha=None, gram_tol=1e-12,
                      seed=0, start=None, exact_residuals=False,
-                     mode="DMRG"):
+                     mode="DMRG", substeps=1):
         """(lam, res, obs): eigenvalues of L, largest real part first (the
         steady state, lambda ~ 0, comes first), the convergence estimate
         of each (res as in get_krylov_spectrum, exact_residuals included),
@@ -175,12 +175,18 @@ class Lindblad_Chain():
         appear. With a seed, the second branch is kept traceless against
         the identity of the seed's sector, the charge of a local basis
         state being its index, whenever L conserves that charge; otherwise
-        against the full identity."""
+        against the full identity.
+
+        substeps is the number of TDVP steps per snapshot it starts from.
+        Each step is checked against trace conservation and the count is
+        doubled while a step fails, since a strongly dissipative L makes
+        long TDVP steps unstable (the seeded 5-site Bose-Hubbard check at
+        dt=0.5 needs more than one)."""
         if mode == "ED":
             out = self._spectrum_ed()
         elif mode == "DMRG":
             out = self._spectrum_dmrg(nk, dt, alpha, gram_tol, seed, start,
-                                      exact_residuals)
+                                      exact_residuals, substeps)
         else:
             raise ValueError("Lindblad_Chain: unrecognized mode " + repr(mode))
         self._spectrum = out
@@ -195,7 +201,7 @@ class Lindblad_Chain():
         return self._spectrum[2](O, 0)
 
     def _spectrum_dmrg(self, nk, dt, alpha, gram_tol, seed, start=None,
-                       exact_residuals=False):
+                       exact_residuals=False, substeps=1):
         from .krylovspectrum import _res, krylov_spectrum_dmrg
         from .pyitensor.mpsalgebra import inner
         from .pyitensor.vectorize import identity_mps
@@ -206,7 +212,8 @@ class Lindblad_Chain():
                                   exact_residuals=exact_residuals,
                                   traceless=True,
                                   sector_charge=(None if start is None
-                                                 else sum(start[0])))
+                                                 else sum(start[0])),
+                                  substeps=substeps)
         one = identity_mps(dc._session.sites)
         traces = np.array([inner(one, rho) for rho in ks.states])
 

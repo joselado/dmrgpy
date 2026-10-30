@@ -174,3 +174,51 @@ def test_seeded_sector_bose_hubbard_against_ed():
     k = int(np.argmin(np.abs(lam - target)))
     assert abs(lam[k] - target) < 1e-4
     assert res[k] < 1e-4
+
+
+def _bose_hubbard(L, N, kappa=1.0):
+    bc = bosonchain.Bosonic_Chain(L, maxnb=[N + 1] * L,
+                                  itensor_version="python")
+    h = sum(-(bc.Adag[j + 1] * bc.A[j] + bc.Adag[j] * bc.A[j + 1])
+            for j in range(L - 1))
+    bc.set_hamiltonian(h + 0.5 * sum(bc.N[j] * (bc.N[j] - 1)
+                                     for j in range(L)))
+    bc.maxm = 64
+    jumps = [np.sqrt(kappa) * (bc.Adag[j + 1] + bc.Adag[j])
+             * (bc.A[j + 1] - bc.A[j]) for j in range(L - 1)]
+    return bc, Lindblad_Chain(bc, jumps)
+
+
+def test_sector_identity_is_the_left_steady_state_of_its_sector():
+    """|1_q>> counts the configurations of charge q, and <<1_q|L = 0 when
+    the jumps conserve the boson number; a decay breaks it."""
+    from dmrgpy.pyitensor.chain import _is_left_zero_mode
+    from dmrgpy.pyitensor.vectorize import sector_identity_mps
+    bc, lc = _bose_hubbard(3, 2)
+    S = lc.doubled._session
+    one = sector_identity_mps(S.sites, 2)
+    assert abs(inner(one, one) - 6) < 1e-12     # 6 ways to put 2 on 3
+    assert abs(inner(one, identity_mps(S.sites)) - 6) < 1e-12
+    assert _is_left_zero_mode(S._mpo(lc.L.to_terms()), one)
+    lc2 = Lindblad_Chain(bc, [0.3 * bc.A[0]])
+    assert not _is_left_zero_mode(S._mpo(lc2.L.to_terms()), one)
+
+
+def test_stiff_lindbladian_takes_tdvp_substeps():
+    """Ten times the dissipation of the seeded Bose-Hubbard test at
+    dt=0.5. One TDVP step per snapshot is unstable there (backward bond
+    evolution amplifies errors by exp(tau R)): measured 0.86 off ED in
+    the occupations, the slowest pair 2 off. The trace-metered real
+    branch doubles the sub-steps to 8: occupations 3e-4, the slowest pair
+    1.2e-3 and 6.9e-3."""
+    bc, lc = _bose_hubbard(3, 2, kappa=10.0)
+    lam, res, obs = lc.get_spectrum(nk=20, dt=0.5, alpha=0.2,
+                                    start=([1, 1, 0], [0, 1, 1]))
+    n_dmrg = [obs(bc.N[j], 0).real for j in range(3)]
+    bc.set_conserved_sector(Nb=2)
+    lam_ed, _, obs_ed = lc.get_spectrum(mode="ED")
+    assert abs(lam[0]) < 1e-6
+    for j in range(3):
+        assert abs(n_dmrg[j] - obs_ed(bc.N[j], 0).real) < 1e-3
+    assert min(abs(lam - lam_ed[1])) < 2e-2
+    assert min(abs(lam - lam_ed[2])) < 2e-2

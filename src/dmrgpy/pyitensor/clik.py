@@ -86,8 +86,11 @@ def mpo_product(A, B):
     return out
 
 
-def _step(psi, G, z, cutoff, maxdim, niter, hermitian, one_site=False):
-    """exp(G z)|psi>, normalized, and the log of the norm it had.
+def _step(psi, G, z, cutoff, maxdim, niter, hermitian, one_site=False,
+          substeps=1):
+    """exp(G z)|psi>, normalized, and the log of the norm it had, as
+    `substeps` TDVP steps of z/substeps (see krylov_spectrum for why a
+    strongly dissipative G needs more than one).
     one_site=True is one-site TDVP after a global subspace expansion of
     every step, the pairing of the paper; otherwise two-site TDVP.
 
@@ -108,6 +111,13 @@ def _step(psi, G, z, cutoff, maxdim, niter, hermitian, one_site=False):
     the expansion itself is costly. The paper avoids the leak with
     block-sparse U(1) symmetries; see docs/clik_mps_lindblad_plan.md,
     "Status 2026-10-30" and "Night of 2026-10-30"."""
+    if substeps > 1:
+        lognorm = 0.0
+        for _ in range(substeps):
+            psi, part = _step(psi, G, z / substeps, cutoff, maxdim, niter,
+                              hermitian, one_site)
+            lognorm += part
+        return psi, lognorm
     if one_site:
         with bk.pad_bonds_suspended():
             psi = global_subspace_expand(G, psi, _GSE_ORDER, cutoff,
@@ -136,12 +146,21 @@ _GSE_ORDER = 3
 
 
 def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
-                  one_site=False, deflate=None):
-    """nk normalized snapshots exp(G z m)|psi0>, m = 0..nk-1, with a
-    global subspace expansion before each of the first _GSE_STEPS steps
-    (before every step for one_site=True). `deflate`, an MPS d with
-    <d|G = 0, is projected out after every step: the exact evolution keeps
-    <d|psi> where it started, and TDVP does not (see krylov_spectrum)."""
+                  one_site=False, deflate=None, substeps=1, meter=None):
+    """(states, substeps): nk normalized snapshots exp(G z m)|psi0>,
+    m = 0..nk-1, with a global subspace expansion before each of the first
+    _GSE_STEPS steps (before every step for one_site=True), and the number
+    of TDVP steps per snapshot it ended with.
+
+    `deflate`, an MPS d with <d|G = 0, is projected out after every step:
+    the exact evolution keeps <d|psi> where it started, and TDVP does not
+    (see krylov_spectrum). `meter`, another such left zero mode with
+    <meter|psi0> != 0, makes the step adaptive: the exact flow conserves
+    <meter|psi>, so a step that changes it by more than _METER_TOL, or
+    grows the norm by more than e^_GROWTH_TOL, is rejected and redone
+    with twice the sub-steps, and the sub-steps carry over to the next
+    snapshot. A step that overflows inside the sweep (a LinAlgError or a
+    floating-point overflow) counts as rejected."""
     if hermitian is None:
         hermitian = mpo_is_hermitian(G)
     psi = psi0.copy()
@@ -152,16 +171,58 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
             with bk.pad_bonds_suspended():
                 psi = global_subspace_expand(G, psi, _GSE_ORDER, cutoff,
                                              maxdim=maxdim, bond_maxdim=maxdim)
-        psi, _ = _step(psi, G, z, cutoff, maxdim, niter, hermitian, one_site)
+        while True:
+            if meter is None:
+                new, lognorm = _step(psi, G, z, cutoff, maxdim, niter,
+                                     hermitian, one_site, substeps)
+                break
+            try:
+                with np.errstate(over="raise", invalid="raise"):
+                    new, lognorm = _step(psi, G, z, cutoff, maxdim, niter,
+                                         hermitian, one_site, substeps)
+                if _step_accepted(meter, psi, new, lognorm):
+                    break
+            except (np.linalg.LinAlgError, FloatingPointError):
+                pass   # overflowed inside the sweep: rejected as well
+            if substeps >= _MAX_SUBSTEPS:
+                raise RuntimeError(
+                    "krylov_spectrum: a step of |z|=%.3g is still unstable "
+                    "with %d TDVP sub-steps; reduce dt" % (abs(z), substeps))
+            substeps *= 2
+        psi = new
         if deflate is not None:
             psi = _deflated(psi, deflate, cutoff, maxdim)
             psi.normalize()
         states.append(psi)
-    return states
+    return states, substeps
+
+
+# The adaptive step of evolve_branch. The thresholds sit between what was
+# measured on the seeded 5-site Bose-Hubbard Lindbladian at dt=0.5: with
+# five TDVP steps of 0.1 per snapshot the trace moved by 1.1%, 0.5% and
+# 0.3% over the first three snapshots, from the projection error of the
+# small early bonds, and the log-norm stayed below 0.2; with one step of
+# 0.5 the trace moved by 4.2% at the first snapshot and the log-norm was
+# 16.8 at the second. The norm of a normalized density matrix can grow
+# legitimately as the state purifies, by at most (1/2) ln D in all.
+_METER_TOL = 0.03
+_GROWTH_TOL = 1.0
+_MAX_SUBSTEPS = 64
+
+
+def _step_accepted(meter, old, new, lognorm):
+    """Whether a step from `old` to `new` (both normalized, the norm of
+    the unnormalized result being e^lognorm) kept <meter|psi>."""
+    if not np.isfinite(lognorm) or lognorm > _GROWTH_TOL:
+        return False
+    before = _scalar(inner(meter, old))
+    after = _scalar(inner(meter, new)) * np.exp(lognorm)
+    return abs(after - before) <= _METER_TOL * abs(before)
 
 
 def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
-                    angles=None, niter=50, hermitian=None, one_site=False):
+                    angles=None, niter=50, hermitian=None, one_site=False,
+                    substeps=1):
     """The first angle of the increasing grid `angles` at which the
     complex contour stops being stable, or pi/2 if none does (the paper's
     Algorithm 3), found by bisection.
@@ -191,7 +252,7 @@ def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
         increments = []
         for _ in range(nsteps):
             psi, lognorm = _step(psi, G, z, cutoff, maxdim, niter, hermitian,
-                                 one_site)
+                                 one_site, substeps)
             increments.append(lognorm - (lam0 * z).real)
         return np.mean(increments[nsteps // 2:]) > 0.0
 
@@ -371,7 +432,7 @@ class KrylovSpectrum:
 def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
                     cutoff=1e-10, gram_tol=1e-12, seed=0, start_maxdim=10,
                     niter=50, starts=None, exact_residuals=False,
-                    one_site=False, deflate=None):
+                    one_site=False, deflate=None, substeps=1):
     """The slowest eigenvalues of the MPO G (largest real part first) from
     the two-branch Krylov space described in the module docstring.
 
@@ -400,6 +461,20 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     eigenvalues came closer to ED, by factors 1.1 to 10 (1.3e-4 to 2.2e-5
     for one member of the slowest pair).
 
+    `substeps` TDVP steps make each snapshot step. The snapshot spacing dt
+    sets how well the Krylov space is conditioned, and nothing more; the
+    integrator needs its own step once G is strongly dissipative. Two-site
+    TDVP evolves each bond backward, by exp(-tau G_eff), and on fast-decaying
+    directions that amplifies every truncation and Krylov error by up to
+    exp(tau R), R the largest local decay rate. On the seeded 5-site
+    Bose-Hubbard Lindbladian (4 bosons, rates near 100) one step of 0.5
+    grew the norm by e^16.8 at the second snapshot and left the particle
+    sector entirely, while five steps of 0.1 stayed bounded. With
+    `deflate`, the real branch is metered (evolve_branch's `meter`) and
+    doubles `substeps` until its steps keep the trace; the complex branch
+    and the angle probe then use the same count, returned as
+    KrylovSpectrum.substeps.
+
     The defaults are measured, on 6-site chains against ED with the
     hopping as the unit. A small dt makes consecutive imaginary-time
     snapshots nearly parallel, and deflation then removes most of them:
@@ -424,8 +499,15 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     if deflate is not None:
         psi_u = _deflated(psi_u, deflate)
     km = KrylovMatrices(G, herm)
-    for psi in evolve_branch(G, psi_p, dt, nk, cutoff, maxdim, niter, herm,
-                             one_site):
+    meter = None
+    if deflate is not None and abs(_scalar(inner(deflate, psi_p))) > 1e-8 * (
+            np.sqrt(abs(_scalar(inner(deflate, deflate))
+                        * _scalar(inner(psi_p, psi_p))))):
+        meter = deflate
+    states, substeps = evolve_branch(G, psi_p, dt, nk, cutoff, maxdim, niter,
+                                     herm, one_site, substeps=substeps,
+                                     meter=meter)
+    for psi in states:
         km.add(psi)
     if alpha is None and herm:
         # Every Im(lambda) of a Hermitian G vanishes, so alpha_max is pi/2
@@ -436,9 +518,11 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
         lam0 = project(km.M, km.Gm, gram_tol)[0][0]
         alpha = 0.25 * probe_alpha_max(G, psi_u, lam0, dt, cutoff, maxdim,
                                        niter=niter, hermitian=herm,
-                                       one_site=one_site)
-    for psi in evolve_branch(G, psi_u, dt * np.exp(-1j * alpha), nk,
-                             cutoff, maxdim, niter, herm, one_site, deflate):
+                                       one_site=one_site, substeps=substeps)
+    states, _ = evolve_branch(G, psi_u, dt * np.exp(-1j * alpha), nk, cutoff,
+                              maxdim, niter, herm, one_site, deflate,
+                              substeps=substeps)
+    for psi in states:
         km.add(psi)
     lam, C, ndim = project(km.M, km.Gm, gram_tol)
     keep = [i for i in range(2 * nk) if i not in (nk - 1, 2 * nk - 1)]
@@ -448,5 +532,7 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     if exact_residuals:
         W = matrix_elements(km.states, mpo_product(mpo_dagger(G), G))
         res = residuals(lam, C, km.M, km.Gm, W)
-    return KrylovSpectrum(lam, C, res, km.states, km.M, ndim, float(alpha),
-                          changes)
+    out = KrylovSpectrum(lam, C, res, km.states, km.M, ndim, float(alpha),
+                         changes)
+    out.substeps = substeps
+    return out
