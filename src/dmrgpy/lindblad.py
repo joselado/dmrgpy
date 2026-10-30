@@ -175,7 +175,14 @@ class Lindblad_Chain():
         appear. With a seed, the second branch is kept traceless against
         the identity of the seed's sector, the charge of a local basis
         state being its index, whenever L conserves that charge; otherwise
-        against the full identity.
+        against the full identity. In the first case the modes of other
+        sectors are dropped from what is returned: the snapshots leak out
+        of the sector at the level of 1e-6, and slowly decaying coherences
+        between sectors then enter the Krylov space. On the seeded 5-site
+        Bose-Hubbard check four of the five slowest Ritz values were such
+        modes, with a charge variance of 2.4 to 8.8, against 2e-5 to 2e-3
+        for every mode that matches ED. A mode is kept when its variance
+        <(Q_ket - q)^2 + (Q_bra - q)^2> is at most 0.5.
 
         substeps is the number of TDVP steps per snapshot it starts from.
         Each step is checked against trace conservation and the count is
@@ -214,19 +221,50 @@ class Lindblad_Chain():
                                   sector_charge=(None if start is None
                                                  else sum(start[0])),
                                   substeps=substeps)
+        lam, res, C = ks.eigenvalues, _res(ks), ks.coefficients
+        if start is not None and ks.sector_deflation:
+            keep = self._in_sector(ks, sum(start[0])) <= 0.5
+            lam, res, C = lam[keep], res[keep], C[:, keep]
         one = identity_mps(dc._session.sites)
         traces = np.array([inner(one, rho) for rho in ks.states])
 
         def obs(O, k):
             Om = dc._session._mpo(on_sublattice(O, 0).to_terms())
             t = np.array([inner(one, Om, rho) for rho in ks.states])
-            c = ks.coefficients[:, k]
+            c = C[:, k]
             value = c @ t
             tr = c @ traces
             if k == 0:
                 return value / tr
             return value / np.sqrt(abs(np.vdot(c, ks.M @ c)))
-        return ks.eigenvalues, _res(ks), obs
+        return lam, res, obs
+
+    def _charge(self, j):
+        """The charge of site j of the doubled chain, the index of its
+        local basis state: the occupation for bosons, S - Sz for spins."""
+        dc = self.doubled
+        if hasattr(dc, "maxnb"):
+            return dc.N[j]
+        S = (dc.sites[j] - 1) / 2.0
+        return S * dc.Id - dc.Sz[j]
+
+    def _in_sector(self, ks, q):
+        """<(Q_ket - q)^2 + (Q_bra - q)^2> in every Ritz vector of ks, from
+        matrix elements between the stored snapshots. A mode of another
+        sector has at least 1, since the charges are integers; a mode of
+        the seed's sector only the leak of the snapshots."""
+        from .pyitensor.mpsalgebra import BatchedBras, mpo_arrays_device
+        n = len(self.chain.sites)
+        qk = sum(self._charge(2 * i) for i in range(n)) - q
+        qb = sum(self._charge(2 * i + 1) for i in range(n)) - q
+        W = mpo_arrays_device(self.doubled._session._mpo((qk * qk + qb * qb)
+                                                         .to_terms()))
+        bb = BatchedBras(ks.states)
+        Qm = np.array([bb.sandwiches(W, rho) for rho in ks.states]).T
+        C = ks.coefficients
+        num = np.einsum("ik,ij,jk->k", C.conj(), Qm, C)
+        den = np.einsum("ik,ij,jk->k", C.conj(), ks.M, C)
+        return (num / den).real
 
     def _seeds(self, psi, phi):
         """Local vectors of |psi>|psi> and |psi>|phi> on the doubled chain."""

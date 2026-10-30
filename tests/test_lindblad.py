@@ -222,3 +222,26 @@ def test_stiff_lindbladian_takes_tdvp_substeps():
         assert abs(n_dmrg[j] - obs_ed(bc.N[j], 0).real) < 1e-3
     assert min(abs(lam - lam_ed[1])) < 2e-2
     assert min(abs(lam - lam_ed[2])) < 2e-2
+
+
+def test_charge_variance_of_ritz_vectors():
+    """_in_sector reads <(Q_ket-q)^2 + (Q_bra-q)^2> off the stored states:
+    0 for |110><110| in the sector of two bosons, 1 for |111><110|."""
+    from types import SimpleNamespace
+    from dmrgpy.pyitensor.metts import product_state
+    bc, lc = _bose_hubbard(3, 2)
+    sites = lc.doubled._session.sites
+
+    def state(ket, bra):
+        vecs = []
+        for i in range(3):
+            for k, occ in ((2 * i + 1, ket[i]), (2 * i + 2, bra[i])):
+                v = np.zeros(sites.dim(k), dtype=complex)
+                v[occ] = 1.0
+                vecs.append(v)
+        return product_state(sites, vecs)
+    ks = SimpleNamespace(states=[state([1, 1, 0], [1, 1, 0]),
+                                 state([1, 1, 1], [1, 1, 0])],
+                         coefficients=np.eye(2, dtype=complex),
+                         M=np.eye(2, dtype=complex))
+    assert np.allclose(lc._in_sector(ks, 2), [0.0, 1.0], atol=1e-12)

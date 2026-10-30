@@ -593,6 +593,19 @@ imaginary parts, of the order of U times a change of particle number,
 point to coherences between particle sectors, which is what the
 diagnostic below checks.
 
+**The spurious 5-site modes are other sectors, and are now dropped.**
+The charge variance $\langle(Q_\mathrm{ket}-q)^2+(Q_\mathrm{bra}-q)^2\rangle$
+of each Ritz vector, read off the stored snapshots, is 2.4 to 8.8 for
+every spurious mode listed above and 2e-5 to 2e-3 for every mode that
+matches ED ($\lambda_1$: 2.1e-4). A mode of another sector has at least
+1, since the charges are integers. A seeded run whose sector identity
+checks out now drops the modes above 0.5. On the 5-site run the list
+that remains is the steady state ($-0.0057$), $\lambda_1$ (7e-4 off),
+its partner (8e-3), $-1.328$ (2e-2 off $-1.348$), $-1.453+1.450i$
+(4e-3) and $-1.492-1.477i$ (5e-2): the ED spectrum in order. The steady
+state eigenvalue, 5.7e-3 from zero, is the largest remaining error; the
+occupations are 1e-3 off.
+
 **A looser Krylov error goal is not a lever.** Earlier tonight
 `errgoal=1e-6` looked 2.3 times faster on 5 sites; that was the broken
 stopping test, and its result was garbage. With the test relative to the

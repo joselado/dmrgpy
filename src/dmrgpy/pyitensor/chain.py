@@ -973,6 +973,7 @@ class Chain:
         steady state of G, else against the full identity |1>>."""
         G = self._mpo(terms_g)
         deflate = None
+        sector = False
         if traceless:
             from .vectorize import identity_mps
             deflate = identity_mps(self.sites)
@@ -981,13 +982,16 @@ class Chain:
                 d = sector_identity_mps(self.sites, sector_charge)
                 if _is_left_zero_mode(G, d):
                     deflate = d
+                    sector = True
         if starts is not None:
             from .metts import product_state
             starts = tuple(product_state(self.sites, v) for v in starts)
-        return _clik_krylov_spectrum(G, self.sites, nk=nk, dt=dt, alpha=alpha,
+        ks = _clik_krylov_spectrum(G, self.sites, nk=nk, dt=dt, alpha=alpha,
                 maxdim=self.maxm, cutoff=self.cutoff, gram_tol=gram_tol,
                 seed=seed, starts=starts, exact_residuals=exact_residuals,
                 deflate=deflate, substeps=substeps)
+        ks.sector_deflation = sector   # deflated against 1_q, verified
+        return ks
 
     def hermitian_operator(self, A):
         return mpo_dagger(A)
