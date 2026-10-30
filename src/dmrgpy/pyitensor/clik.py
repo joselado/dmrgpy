@@ -146,7 +146,8 @@ _GSE_ORDER = 3
 
 
 def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
-                  one_site=False, deflate=None, substeps=1, meter=None):
+                  one_site=False, deflate=None, substeps=1, meter=None,
+                  bounded=False):
     """(states, substeps): nk normalized snapshots exp(G z m)|psi0>,
     m = 0..nk-1, with a global subspace expansion before each of the first
     _GSE_STEPS steps (before every step for one_site=True), and the number
@@ -159,7 +160,10 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
     <meter|psi>, so a step that changes it grossly, or grows the norm by
     more than e^_GROWTH_TOL, is rejected and redone with twice the
     sub-steps, and the sub-steps carry over to the next snapshot (see
-    _step_accepted). A step that overflows inside the sweep (a LinAlgError or a
+    _step_accepted). bounded=True, for a G whose spectrum has Re <= 0
+    (a Lindbladian, where a left steady state exists), applies the norm
+    growth and overflow tests without a meter, as on the traceless
+    branch. A step that overflows inside the sweep (a LinAlgError or a
     floating-point overflow) counts as rejected."""
     if hermitian is None:
         hermitian = mpo_is_hermitian(G)
@@ -172,7 +176,7 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
                 psi = global_subspace_expand(G, psi, _GSE_ORDER, cutoff,
                                              maxdim=maxdim, bond_maxdim=maxdim)
         while True:
-            if meter is None:
+            if meter is None and not bounded:
                 new, lognorm = _step(psi, G, z, cutoff, maxdim, niter,
                                      hermitian, one_site, substeps)
                 break
@@ -216,9 +220,12 @@ _MAX_SUBSTEPS = 64
 
 def _step_accepted(meter, old, new, lognorm):
     """Whether a step from `old` to `new` (both normalized, the norm of
-    the unnormalized result being e^lognorm) kept <meter|psi>."""
+    the unnormalized result being e^lognorm) stayed bounded and, with a
+    meter, kept <meter|psi>."""
     if not np.isfinite(lognorm) or lognorm > _GROWTH_TOL:
         return False
+    if meter is None:
+        return True
     before = _scalar(inner(meter, old))
     after = _scalar(inner(meter, new)) * np.exp(lognorm)
     scale = np.sqrt(abs(_scalar(inner(meter, meter))))
@@ -511,7 +518,7 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
         meter = deflate
     states, substeps = evolve_branch(G, psi_p, dt, nk, cutoff, maxdim, niter,
                                      herm, one_site, substeps=substeps,
-                                     meter=meter)
+                                     meter=meter, bounded=deflate is not None)
     for psi in states:
         km.add(psi)
     if alpha is None and herm:
@@ -526,7 +533,8 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
                                        one_site=one_site, substeps=substeps)
     states, _ = evolve_branch(G, psi_u, dt * np.exp(-1j * alpha), nk, cutoff,
                               maxdim, niter, herm, one_site, deflate,
-                              substeps=substeps)
+                              substeps=substeps,
+                              bounded=deflate is not None)
     for psi in states:
         km.add(psi)
     lam, C, ndim = project(km.M, km.Gm, gram_tol)
