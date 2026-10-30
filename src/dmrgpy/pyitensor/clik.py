@@ -254,11 +254,19 @@ class KrylovMatrices:
         self.states.append(psi)
         col_M, col_G, row_G = [], [], []
         for chunk in self._chunks(psi):
+            k = len(chunk)
+            if bk.is_device():
+                # A device backend compiles every array operation once per
+                # shape, and a batch that grows by one bra per snapshot
+                # never repeats one: 2518 compiles, 87 s of a 6-site JAX
+                # run. Padding the batch to a power of two with copies of
+                # its first bra (their numbers are dropped) repeats them.
+                chunk = chunk + [chunk[0]] * ((1 << (k - 1).bit_length()) - k)
             bb = BatchedBras(chunk)
-            col_M.append(bb.overlaps(psi))
-            col_G.append(bb.sandwiches(self._Wa, psi))
+            col_M.append(bb.overlaps(psi)[:k])
+            col_G.append(bb.sandwiches(self._Wa, psi)[:k])
             if not self.hermitian:
-                row_G.append(np.conj(bb.sandwiches(self._Wd, psi)))
+                row_G.append(np.conj(bb.sandwiches(self._Wd, psi))[:k])
         col_M = np.concatenate(col_M)
         col_G = np.concatenate(col_G)
         row_G = np.conj(col_G) if self.hermitian else np.concatenate(row_G)
