@@ -47,12 +47,16 @@ mz = [lc.steady_state_vev(sc.Sz[i]) for i in range(n)]
 much $\lambda_k$ moves when the last snapshot is left out; only the
 eigenvalues that do not move are converged. `mz` is the magnetization profile of the steady state, a
 linear ramp from $+0.18$ to $-0.18$ that carries a spin current through
-the chain. Here the gap is $0.0924$ against $0.0926$ from ED, and the
+the chain. Here the gap is $0.0927$ against $0.0926$ from ED, and the
 profile agrees with ED to $3\times10^{-4}$. The keywords are those of
 `get_krylov_spectrum`, with one difference:
 
 - `dt`: the time step (default 2.0). The evolution must run for several
   times $1/\Delta$, so `nk*dt` has to be large when the gap is small.
+- `substeps`: the number of time steps per snapshot to start from
+  (default 1). A strongly dissipative $\mathcal L$ makes long steps
+  unstable, so a step that does not conserve the trace is redone with
+  twice as many. Only the cost changes, not `dt`.
 - `mode="ED"`: the dense $\mathcal L$, as a reference on a small chain.
 
 When $\mathcal L$ conserves a quantity, for example the particle number

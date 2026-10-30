@@ -156,10 +156,10 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
     the exact evolution keeps <d|psi> where it started, and TDVP does not
     (see krylov_spectrum). `meter`, another such left zero mode with
     <meter|psi0> != 0, makes the step adaptive: the exact flow conserves
-    <meter|psi>, so a step that changes it by more than _METER_TOL, or
-    grows the norm by more than e^_GROWTH_TOL, is rejected and redone
-    with twice the sub-steps, and the sub-steps carry over to the next
-    snapshot. A step that overflows inside the sweep (a LinAlgError or a
+    <meter|psi>, so a step that changes it grossly, or grows the norm by
+    more than e^_GROWTH_TOL, is rejected and redone with twice the
+    sub-steps, and the sub-steps carry over to the next snapshot (see
+    _step_accepted). A step that overflows inside the sweep (a LinAlgError or a
     floating-point overflow) counts as rejected."""
     if hermitian is None:
         hermitian = mpo_is_hermitian(G)
@@ -197,15 +197,19 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
     return states, substeps
 
 
-# The adaptive step of evolve_branch. The thresholds sit between what was
-# measured on the seeded 5-site Bose-Hubbard Lindbladian at dt=0.5: with
-# five TDVP steps of 0.1 per snapshot the trace moved by 1.1%, 0.5% and
-# 0.3% over the first three snapshots, from the projection error of the
-# small early bonds, and the log-norm stayed below 0.2; with one step of
-# 0.5 the trace moved by 4.2% at the first snapshot and the log-norm was
-# 16.8 at the second. The norm of a normalized density matrix can grow
-# legitimately as the state purifies, by at most (1/2) ln D in all.
-_METER_TOL = 0.03
+# The adaptive step of evolve_branch. A step is rejected when it grows
+# the norm by more than e^_GROWTH_TOL, overflows, or moves <meter|psi> by
+# more than _METER_TOL times ||meter||, the component of the normalized
+# state along the unit vector of the meter. Measured on the seeded 5-site
+# Bose-Hubbard Lindbladian at dt=0.5: one step of 0.5 grew the log-norm by
+# 16.8 at the second snapshot, while five steps of 0.1 kept it below 0.2
+# and moved the trace by at most 1.3e-3 of ||1_q||. The norm of a
+# normalized density matrix can grow legitimately as the state purifies,
+# by at most (1/2) ln D in all. The trace test is a gross-error test, in
+# units of the state norm, because truncation also moves the trace and no
+# sub-step removes that: measured against the trace itself, a random start
+# on a truncated 6-site XXZ chain was rejected at every count up to 64.
+_METER_TOL = 1e-2
 _GROWTH_TOL = 1.0
 _MAX_SUBSTEPS = 64
 
@@ -217,7 +221,8 @@ def _step_accepted(meter, old, new, lognorm):
         return False
     before = _scalar(inner(meter, old))
     after = _scalar(inner(meter, new)) * np.exp(lognorm)
-    return abs(after - before) <= _METER_TOL * abs(before)
+    scale = np.sqrt(abs(_scalar(inner(meter, meter))))
+    return abs(after - before) <= _METER_TOL * scale
 
 
 def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
