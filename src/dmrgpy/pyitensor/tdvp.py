@@ -670,7 +670,7 @@ def _arnoldi_run(matvec, basis, coeff, m, n, tol, errgoal):
         c = _hessenberg_exp_first_column(Hk, coeff)
         if hnext <= tol * scale or k >= n:
             return Qk, Hk, hnext, k, True, c
-        if abs(coeff) * hnext * abs(c[-1]) < errgoal:
+        if _arnoldi_estimate_ok(coeff, hnext, c, errgoal):
             return Qk, Hk, hnext, k, True, c
         if k == m:
             return Qk, Hk, hnext, k, False, c
@@ -682,6 +682,23 @@ def _arnoldi_run(matvec, basis, coeff, m, n, tol, errgoal):
     raise AssertionError("unreachable: the k == m verdict always returns")
 
 
+def _arnoldi_estimate_ok(coeff, hnext, c, errgoal):
+    """Saad's estimate |coeff| h_{k+1,k} |e_k^T exp(coeff H_k) e_1| against
+    errgoal times ||exp(coeff H_k) e_1||: relative to the result, not to
+    the input vector as the Lanczos route measures it. For a unitary step
+    the two are the same number. For a dissipative one they are not: the
+    result can be many orders of magnitude smaller than the input, and an
+    error small against the input is then larger than the result itself.
+    On the 5-site Bose-Hubbard Lindbladian at dt=0.5 (local rates near
+    100, so a TDVP half step damps by about e^-22), steps stopped after
+    one iteration with a result 5e-19 of the input; TDVP's backward
+    half-steps, which undo the damping, then amplified that error, and one
+    step grew the norm by e^6 and left the particle-number sector entirely
+    (<(N-q)^2> = 100). At the default goal the same step was already 3e-4
+    out of the sector."""
+    return abs(coeff) * hnext * abs(c[-1]) < errgoal * np.linalg.norm(c)
+
+
 def _arnoldi_converged_substep(Hk, hnext, coeff, frac, errgoal):
     """_largest_converged_substep for the Hessenberg matrix of
     _arnoldi_run: the largest frac/2^j (j >= 1) whose error estimate
@@ -690,7 +707,7 @@ def _arnoldi_converged_substep(Hk, hnext, coeff, frac, errgoal):
     for _ in range(60):
         s = s / 2.0
         c = _hessenberg_exp_first_column(Hk, coeff * s)
-        if abs(coeff * s) * hnext * abs(c[-1]) < errgoal:
+        if _arnoldi_estimate_ok(coeff * s, hnext, c, errgoal):
             return s, c
     raise RuntimeError("Krylov exponentiator: no sub-step of the "
                        "unconverged Krylov space meets the error goal")
