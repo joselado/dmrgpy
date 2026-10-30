@@ -108,12 +108,13 @@ def test_expansion_keeps_the_state_and_adds_orthogonal_directions(selection, sid
 
 # ---------------------------------------------------------------- CBE-DMRG
 
-def test_cbe_split_is_an_exact_isometry_where_the_gram_route_is_not():
+def test_both_svd_routes_give_exact_isometries():
     """The expansion projects on 1 - A A^dag, a projector only for an exact
-    isometry A. svd.svd's Gram route returns columns of small singular
-    values that are orthonormal only to eps*(s_max/s)^2; cbe.svd always
-    takes the full SVD. Before, a 40-site Heisenberg sweep at maxm=50 went
-    from -17.5413 up to -15.16."""
+    isometry A. svd.svd's Gram route used to recover one factor as
+    W^dag M / s, orthonormal only to eps*(s_max/s)^2 (5e-4 here); a 40-site
+    Heisenberg sweep at maxm=50 then went from -17.5413 up to -15.16. It
+    now refactorizes the kept block, so both factors of both routes are
+    isometries to roundoff."""
     from dmrgpy.pyitensor.index import Index
     from dmrgpy.pyitensor.svd import svd as gram_svd
     from dmrgpy.pyitensor.tensor import ITensor
@@ -129,7 +130,10 @@ def test_cbe_split_is_an_exact_isometry_where_the_gram_route_is_not():
         return np.max(np.abs(m.conj().T @ m - np.eye(m.shape[1])))
 
     assert iso_error(cbe.svd(T, [a], cutoff=0.0)[0]) < 1e-13
-    assert iso_error(gram_svd(T, [a], cutoff=0.0)[0]) > 1e-6
+    assert iso_error(gram_svd(T, [a], cutoff=0.0)[0]) < 1e-13
+    V = gram_svd(T, [a], cutoff=0.0)[2]
+    v = np.asarray(V.transpose_to([ix for ix in V.inds if ix != b] + [b]))
+    assert np.max(np.abs(v @ v.conj().T - np.eye(v.shape[0]))) < 1e-13
 
 
 

@@ -170,13 +170,29 @@ def _svd_truncated(mat, cutoff, maxdim, mindim):
         keep, discarded = _truncate(S_host, cutoff, maxdim if maxdim else None,
                                     max(1, mindim))
         if S_host[0] > 0.0 and S_host[keep - 1] >= _GRAM_MIN_RELATIVE_SV * S_host[0]:
+            # The eigenvectors W are orthonormal to eps, but the factor on
+            # the other side, recovered as W^dag M / s, is orthonormal only
+            # to ~eps*(s_max/s)**2: at s/s_max = 1e-6 its columns overlap by
+            # ~1e-4, 1 - A A^dag is then no projector, and a sweep built on
+            # it (CBE's projected two-site space) raised the energy from
+            # sweep to sweep. So the kept block W^dag M (keep x n, or M W)
+            # is factorized once more by a thin SVD, which leaves both sides
+            # orthonormal to eps and the product equal to the projection of
+            # M on span(W). Cost O(keep^2 max(m,n)), below the full SVD
+            # whenever keep < min(m,n).
+            _xp = bk.xp()
             W = evecs[:, :keep]
             if left:
-                U = W
-                Vh = (W.conj().T @ mat) / S[:keep, None]
+                U2, S2, Vh = _xp.linalg.svd(W.conj().T @ mat,
+                                            full_matrices=False)
+                U = W @ U2
             else:
-                Vh = W.conj().T
-                U = (mat @ W) / S[None, :keep]
+                U, S2, Vh2 = _xp.linalg.svd(mat @ W, full_matrices=False)
+                Vh = Vh2 @ W.conj().T
+            # S_host keeps the Gram values: they enter only weights s**2,
+            # where their error is ~eps*s_max**2 absolute, and refetching
+            # S2 would cost a device synchronization.
+            S = _xp.concatenate([S2.astype(S.dtype), S[keep:]])
             return U, S, S_host, Vh, keep, discarded
 
     U, S, Vh = bk.xp().linalg.svd(mat, full_matrices=False)

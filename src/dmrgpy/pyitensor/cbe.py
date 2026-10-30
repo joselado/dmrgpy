@@ -104,7 +104,7 @@ from .dmrg import (_all_right_environments, _davidson_ground_state,
                    zero_site_heff)
 from .index import Index
 from .mpsalgebra import _link_at, mpo_is_hermitian
-from .svd import _truncate
+from .svd import _svd_truncated, _truncate
 from .tensor import ITensor, commonIndex
 
 # Singular values below this fraction of the scale of the object they come
@@ -268,27 +268,24 @@ def expand_right_isometry(L, Wl, Wr, R, C, B, dtilde, dpre,
 # ---------------------------------------------------------------------------
 
 def svd(T, left_inds, cutoff=0.0, maxdim=None):
-    """svd.svd's split and truncation rule (U, S, V), but always through
-    the full SVD, never through svd.py's Gram-matrix route.
+    """svd.svd's split and truncation rule (U, S, V), without its bond
+    padding, through svd.py's _svd_truncated.
 
-    The Gram route gets the singular vectors of a small singular value s
-    from an eigenvector of M M^dag at s^2, whose accuracy is eps*s_max^2,
-    so it accepts columns of U that are orthonormal only to about
-    eps*(s_max/s)^2 (s down to 1e-7*s_max). Two-site DMRG lives with that.
-    CBE does not: the expansion projects on the complement of U's columns,
-    1 - U U^dag, which is a projector only when U is an isometry. Measured
-    on a 40-site Heisenberg chain at maxm=50, isometry errors of 1e-9 to
-    0.7 after the Gram split gave local eigenvalues of -30 against a
-    ground-state energy of -17.54, and the sweep energy went up to -15.2.
-    With the full SVD the isometries are exact to roundoff."""
+    The expansion projects on the complement of U's columns, 1 - U U^dag,
+    which is a projector only when U is an isometry to roundoff. The Gram
+    route of _svd_truncated once recovered one factor as W^dag M / s,
+    orthonormal only to eps*(s_max/s)^2; on a 40-site Heisenberg chain at
+    maxm=50 that gave local eigenvalues of -30 against a ground-state
+    energy of -17.54, and the sweep energy went up to -15.2. It now
+    refactorizes the kept block, and both factors are isometries to
+    roughly 1e-14 (tests/test_cbe.py)."""
     xp = bk.xp()
     left_inds = list(left_inds)
     right_inds = [ix for ix in T.inds if ix not in left_inds]
     ldim = int(np.prod([ix.dim for ix in left_inds])) if left_inds else 1
     rdim = int(np.prod([ix.dim for ix in right_inds])) if right_inds else 1
     mat = T.transpose_to(left_inds + right_inds).reshape(ldim, rdim)
-    U, S, Vh, s_host = _svd(mat)
-    keep, _ = _truncate(s_host, cutoff, maxdim if maxdim else None, 1)
+    U, S, _, Vh, keep, _ = _svd_truncated(mat, cutoff, maxdim, 1)
     bu, bv = Index(keep, tags="Link"), Index(keep, tags="Link")
     Ut = ITensor(left_inds + [bu], U[:, :keep].reshape(
         tuple(ix.dim for ix in left_inds) + (keep,)))
