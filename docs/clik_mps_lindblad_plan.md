@@ -471,3 +471,63 @@ slower, 14.3 s against 13.3 s.
 4. Left eigenvectors (Phase 1b), the Hermiticity projection of the steady
    state, and the Phase 0 leftovers: the ED-against-DMRG norm convention,
    the `julia_live` check and the audit record.
+
+## Night of 2026-10-30
+
+The task was to debug and optimize the Lindblad route, with questions put
+to a second model rather than to the author. The repro scripts are in the
+session scratchpad, not in the repository; the numbers below are what
+they printed.
+
+**Where the time goes depends on the size.** On the 4-site XXZ chain the
+matrix elements were 65% of the run: 2729 `inner` calls, each a few small
+contractions dominated by Python overhead. On the 5-site Bose-Hubbard case
+the two-site matvec dominates. Its four contractions cost about the same,
+roughly 150M multiply-adds each at χ=64, and the MPO is dense in its
+virtual blocks (75% of the blocks are nonzero), so there is no exact
+sparsity to use.
+
+**Committed.**
+
+- Batched matrix elements (`BatchedBras.sandwiches`): the 3-site
+  Bose-Hubbard spectrum goes from 10.9 s to 2.8 s with the same
+  eigenvalues. On a device the batch is padded to a power of two, since
+  JAX compiles each new shape (the JAX test went 80 s, then 125 s, then
+  71 s).
+- A traceless second start for random starts (`deflate=`): the XXZ gap
+  mode goes from 2.2e-4 to 8.9e-5.
+- No probe for a Hermitian generator, and a bisected probe otherwise: the
+  3-site Bose-Hubbard probe goes from 56 evolution steps to 24.
+- A row-major Arnoldi basis on the host: 10.8 s to 4.4 s of bookkeeping
+  per 5-site step, about 7% of it.
+
+**The second branch does not stay traceless.** The exact evolution
+conserves the trace, but two-site TDVP at dt=0.5 does not. On the seeded
+3-site Bose-Hubbard case the in-sector trace of the normalized snapshots
+grows to 1.6e-3 after one step and 5.9e-2 after five, against 1e-8 to
+1e-6 for a 20 times finer reference, and the last snapshots of that branch
+are about 80% steady state. Projecting the sector identity $1_N$ out after
+every step keeps the trace at 1e-15. At 3 sites it moves the eigenvalues
+little (one mode from 1.1e-6 to 4.4e-7, another from 5.3e-4 to 9.5e-4),
+so it is not committed. Projecting the full identity instead is wrong for
+a seeded run: $|1\rangle\rangle$ is not in the sector, and the occupations
+went from 5e-8 to 4e-6 off ED. A general version needs the sector identity
+as an MPS, a charge-counting MPS of bond dimension N+1, built from the
+seed's charge.
+
+**One-site TDVP is settled: drop it.** The leak is the QR of the one-site
+sweep, which completes a rank-deficient bond basis with arbitrary vectors
+that mix charges; a rank-revealing split keeps the charge variance at
+1e-15. Even then the one-site branch is 0.70 off the fine reference after
+five steps, against 1.6e-3 for two-site, and it is not faster on 5 sites.
+A hybrid, two-site until the bonds stop growing and then one-site without
+expansion, is identical on XXZ (bonds at the Hilbert-space limit) and ten
+times worse on Bose-Hubbard (bonds at the in-sector rank, where one-site
+keeps a projection error). Neither is committed.
+
+**The Davidson commit broke five tests**, all outside the Lindblad code.
+`b131b53` (2026-10-25) fails them and its parent passes them:
+`test_audit_2026_09_24b_groundstate.py` (three Kondo crossing tests),
+`test_audit_2026_09_24c_session.py::test_sector_makes_no_solve_on_the_callers_chain[python]`
+and `test_audit_2026_09_25_scale.py::test_small_units_ground_state_still_open[python-1e-10]`,
+a strict xfail that now passes.

@@ -1218,3 +1218,31 @@ The remaining 9e-7 is the time-step error that the two backends share.
 non-Hermitian $H$, while both DMRG backends normalize the state after each
 step. So ED and DMRG still answer different quantities there; this is not
 changed yet.
+
+## The 2026-10-30 Lindbladian spectrum on `"python"`
+
+`Lindblad_Chain.get_spectrum` with random starts now begins its second
+branch from a traceless state, as in arXiv:2509.07709. The exact evolution
+conserves the trace, so this branch no longer contains the steady state and
+resolves the slowest decaying modes instead. A seeded start
+(`start=(psi, phi)`) is already traceless, so its numbers do not change.
+Measured on the driven, dephased 4-site XXZ chain at the defaults, as the
+distance of each ED eigenvalue to the nearest Krylov one:
+
+| eigenvalue | before | now |
+|---|---|---|
+| steady state | 1.0e-6 | 1.3e-6 |
+| gap mode, $-0.1439$ | 2.2e-4 | 8.9e-5 |
+| $-0.2281 - 1.6373i$ | 1.9e-4 | 6.2e-5 |
+| $-0.2281 + 1.6373i$ | 2.3e-4 | 3.0e-4 |
+
+The magnetization profile of the steady state is unchanged, 2.9e-6 off ED.
+
+`get_krylov_spectrum` on a Hermitian generator no longer runs the contour
+probe and takes the angle $\pi/8$ directly. The probe could only return
+$\pi/2$ there, so the angle, and every number, is the same unless the
+probe misfired on an unconverged slowest eigenvalue. On a non-Hermitian
+generator the probe now bisects its angle grid instead of scanning it. The
+two give the same angle, since instability grows monotonically with the
+angle; they could differ only where the heuristic test itself is not
+monotonic.

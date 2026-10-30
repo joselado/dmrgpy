@@ -91,14 +91,23 @@ def _step(psi, G, z, cutoff, maxdim, niter, hermitian, one_site=False):
     one_site=True is one-site TDVP after a global subspace expansion of
     every step, the pairing of the paper; otherwise two-site TDVP.
 
-    one_site=True is experimental and off everywhere: on a generator with a
-    conserved charge it leaks out of the sector. On the seeded 3-site
-    Bose-Hubbard Lindbladian the middle bond grows past the in-sector rank
-    of 14 to 27, and the traceless branch is 0.62 off the two-site one after
-    five steps, for every expansion cutoff from 1e-10 to 1e-4. One-site TDVP
-    without the expansion does not leak (it agrees with two-site TDVP to
-    integrator error). The paper avoids this with block-sparse U(1)
-    symmetries; see docs/clik_mps_lindblad_plan.md, "Status 2026-10-30"."""
+    one_site=True is experimental and off everywhere, for two measured
+    reasons. First, on a generator with a conserved charge it leaks out of
+    the sector. The expansion makes bonds wider than the state's rank, and
+    the one-site sweep splits each evolved tensor with a QR, which is not
+    rank revealing: it completes the bond basis with arbitrary vectors that
+    mix charges, and the evolution then flows into them. On the seeded
+    3-site Bose-Hubbard Lindbladian the charge variance grows from 1.6e-5
+    after one step to 4.9e-4 after five, and stays at 1e-15 with a
+    rank-revealing split instead. Second, even without the leak it is far
+    less accurate there: against a 20 times finer two-site reference, the
+    traceless branch is 5e-3, 4e-2, 0.23, 0.50 and 0.70 off over five
+    steps of dt=0.5, against 6e-6 to 1.6e-3 for two-site TDVP, because its
+    trace error grows to 0.99. It is not faster either on the 5-site case
+    (90 to 137 s per step against 73 to 144 s, on a loaded machine), since
+    the expansion itself is costly. The paper avoids the leak with
+    block-sparse U(1) symmetries; see docs/clik_mps_lindblad_plan.md,
+    "Status 2026-10-30" and "Night of 2026-10-30"."""
     if one_site:
         with bk.pad_bonds_suspended():
             psi = global_subspace_expand(G, psi, _GSE_ORDER, cutoff,
