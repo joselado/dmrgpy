@@ -1246,3 +1246,17 @@ generator the probe now bisects its angle grid instead of scanning it. The
 two give the same angle, since instability grows monotonically with the
 angle; they could differ only where the heuristic test itself is not
 monotonic.
+
+The non-Hermitian Arnoldi exponentiator now stops on its error estimate
+relative to the result rather than to the input vector. A unitary step is
+unchanged. A dissipative step that shrinks the vector now takes more
+iterations. On the 5-site Bose-Hubbard Lindbladian at dt=0.5 the old test
+stopped some local steps after one iteration with a result 5e-19 of the
+input. `Lindblad_Chain.get_spectrum` also projects the trace out of its
+second branch after every step and sub-steps its TDVP when a step does not
+conserve the trace. On chains where neither triggers, as on the driven
+4-site XXZ chain, every number above is unchanged. On the seeded 3-site
+Bose-Hubbard chain the occupations go from 4.8e-8 to 1.6e-8 off ED, and on
+the 4-site one each of the slowest eight eigenvalues comes closer to ED,
+by factors 1.1 to 10. The 5-site check, which before gave no steady state
+at all, is recorded in `docs/clik_mps_lindblad_plan.md`.

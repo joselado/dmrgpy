@@ -525,6 +525,31 @@ expansion, is identical on XXZ (bonds at the Hilbert-space limit) and ten
 times worse on Bose-Hubbard (bonds at the in-sector rank, where one-site
 keeps a projection error). Neither is committed.
 
+**The paper's 5-site check failed at dt=0.5, and why.** Run to the end
+for the first time (4825 s at χ=64, one TDVP step per snapshot), it gave
+a top eigenvalue of +0.485, no steady state, and occupations that are not
+even mirror symmetric; ED gives $\lambda_1=-0.8409\pm0.8135i$, the
+paper's value. Two causes, both in the integrator and not in CLIK itself.
+First, the Arnoldi stopping test was relative to the input vector, and a
+dissipative local step can shrink it to 5e-19 of the input; it is now
+relative to the result. Second, and this one is structural, two-site
+TDVP evolves each bond backward by $e^{-\tau G_\mathrm{eff}}$, which on
+directions decaying at rate $R\approx100$ amplifies every truncation and
+Krylov error by up to $e^{\tau R}\approx e^{25}$. One step of 0.5 grew the
+norm by $e^{16.8}$ at the second snapshot and left the particle sector
+($\langle(N-q)^2\rangle=100$); five steps of 0.1 kept the log-norm below
+0.2 and the charge variance at $10^{-6}$. Three and four sites work at
+dt=0.5 because the rates grow with the number of bosons. A second model
+(Fable) agreed with this reading: the stopping test cannot cure it, and
+the principled fix is a forward-only integrator, the basis-update and
+Galerkin (BUG) scheme, built for exactly this failure of the backward
+step. That is a new integrator and is left for later. What is committed
+is sub-stepping: `substeps` TDVP steps per snapshot, doubled while a step
+of the real branch grows the norm by more than $e$, overflows, or moves
+the trace by more than $10^{-2}$ of $\lVert 1_q\rVert$. On 3 sites with
+ten times the dissipation it settles on 8 and takes the occupations from
+0.86 to 3e-4 off ED at the same cost.
+
 **The Davidson commit broke five tests**, all outside the Lindblad code.
 `b131b53` (2026-10-25) fails them and its parent passes them:
 `test_audit_2026_09_24b_groundstate.py` (three Kondo crossing tests),
