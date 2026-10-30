@@ -5,6 +5,8 @@ paths:
   - "tests/test_kondo_screening.py"
   - "src/dmrgpy/wilsonchain.py"
   - "src/dmrgpy/kondoscreening.py"
+  - "src/dmrgpy/kondocloud.py"
+  - "tests/test_kondo_cloud.py"
   - "tests/test_atom_iets.py"
   - "examples/kondo/**"
 ---
@@ -125,3 +127,12 @@ diagnostic is a vev (M_imp = 4<Sz_imp^2>, M_n = 4<Sz_imp Sz_n>, Schmidt
 coefficients from the single-occupancy block of the impurity density
 matrix), so ED cross-checks it; what limits it is `maxm`, see
 `docs/development.md` 4.8d. `tests/test_kondo_screening.py`.
+
+**The real-space Kondo cloud (2026-10-30)**, `kondocloud.py`, is Holzner
+et al., arXiv:0906.2933: `anderson_lead()` (dot at the end of a uniform
+lead, L sites in total, native class by default) and `get_kondo_cloud`
+on `KondoScreeningMixin` (Sigma(x), xi_a, T_K of eq. 4). Sigma(L-1) = 0
+is exact only for a singlet, so L even at N = L; `half_filling=True`
+(the Nf sector) is needed away from ed = -U/2 and did not converge on
+`"python"` at L = 40. `tests/test_kondo_cloud.py`, `docs/development.md`
+4.8d.
