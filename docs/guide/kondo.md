@@ -296,6 +296,94 @@ an SU(4) Kondo singlet, with four values $1/2$. Unequal couplings split
 them in two pairs, and the splitting grows with the chain length, toward
 the SU(2) singlet of the level with the larger coupling.
 
+### The Kondo cloud along a real-space lead
+
+How far from the impurity does the screening happen? A Wilson chain does
+not say it, since its sites are energy shells and not positions. We
+follow Holzner, McCulloch, Schollwöck, von Delft and Heidrich-Meisner,
+PRB 80, 205114 (2009), and put the dot at the end of a plain
+tight-binding lead of $L-1$ sites, $L$ sites in total:
+
+$$
+H = \epsilon_d \sum_\sigma n_{d\sigma} + B S^z_d + U n_{d\uparrow} n_{d\downarrow}
+  - t \sum_{i\sigma} \left(c^\dagger_{i\sigma} c_{i+1\sigma} + \text{h.c.}\right)
+  - \sqrt{2}\, t' \sum_\sigma \left(c^\dagger_{1\sigma} d_\sigma + \text{h.c.}\right),
+\qquad \Gamma = 2t'^2/t .
+$$
+
+The cloud is read from the integrated spin correlation
+
+$$
+\Sigma(x) = 1 + \sum_{i=1}^{x}
+  \frac{\langle \vec S_d \cdot \vec S_i\rangle}{\langle \vec S_d \cdot \vec S_d\rangle},
+$$
+
+meaning that $1-\Sigma(x)$ is the part of the impurity spin screened by
+the first $x$ lead sites. In a total-spin singlet $\langle \vec S_{\text{tot}}^2\rangle=0$
+gives $\sum_i \langle \vec S_d\cdot\vec S_i\rangle = -\langle \vec S_d^2\rangle$,
+so $\Sigma(L-1)=0$ exactly. This needs $L$ even at half filling; with $L$
+odd the ground state is a doublet. The screening length is the distance
+where a fraction $a$ of the spin is screened,
+$\xi_a(L) = \min\{x : \Sigma(x) \le 1-a\}$, with $a=0.9$ as the reference.
+It grows with $L$ and saturates once the lead is longer than the cloud.
+The scale to compare with is $\xi_K^0 = \hbar v_F/T_K$, with $v_F=2t$ and
+
+$$
+T_K = \sqrt{U\Gamma}\, \exp\left(-\frac{\pi |\epsilon_d| |\epsilon_d+U|}{2U\Gamma}\right).
+$$
+
+The paper finds $\xi_{0.9} \approx 6.7\,t/T_K$ for $U/\Gamma \gtrsim 2$.
+
+```python
+from dmrgpy import kondocloud
+fc = kondocloud.anderson_lead(40, ed=-0.5, U=1.0, Gamma=0.5)
+fc.maxm = 80
+fc.nsweeps = 12
+fc.cutoff = 1e-10
+r = fc.get_kondo_cloud(a=[0.75, 0.9])
+print(r["Sigma"], r["xi"], r["sum_rule"])
+print(6.7/kondocloud.kondo_temperature(1.0, 0.5))
+```
+
+Here $U/\Gamma=2$ and $T_K=0.32$. The result is $\xi_{0.75}=5$ and
+$\xi_{0.9}=15$, the same at $L=60$, and $\Sigma(L-1)=4\times10^{-6}$, the
+truncation error. $\Sigma(x)$ drops in steps of two sites: the odd sites
+screen and the even sites add almost nothing, the even-odd effect of a
+half-filled lead, so $\xi_a$ comes out odd. At $U/\Gamma=3$ we get
+$\xi_{0.75}=9$, again the same at $L=40$ and $60$, so $\xi_{0.75}T_K$ is
+1.61 and 1.60 for the two couplings, meaning that the cloud scales as
+$1/T_K$. The paper's own numbers give 1.8. For $\xi_{0.9}$ at
+$U/\Gamma=2$ we get $4.8/T_K$; $U/\Gamma=2$ is at the edge of the Kondo
+regime, where the paper also sees deviations from $6.7/T_K$. At
+$U/\Gamma=3$ and 4, $\xi_{0.9}$ still grows from $L=40$ to $L=60$: the
+cloud does not fit in the lead yet.
+
+- `L`: the total number of sites, dot included. Take it even.
+- `Gamma`, `U`, `ed`: the hybridization, the repulsion and the level, in
+  units of `t`. The cloud grows as $1/T_K$, so it fits only for small
+  $U/\Gamma$: on leads of 40 to 60 sites $\xi_{0.75}$ saturates up to
+  $U/\Gamma=3$.
+- `half_filling=True`: fixes $N=L$ electrons, as the paper does. It is
+  needed away from $\epsilon_d=-U/2$, where particle-hole symmetry no
+  longer fixes the filling. On `itensor_version="python"` this sector
+  converged here for leads up to 30 sites, not at 40.
+- `B` and `connected=True`: a field on the dot. Then $S^z_{\text{tot}}$
+  is the only conserved spin, and we use the connected form
+  $(\langle S^z_d S^z_i\rangle - \langle S^z_d\rangle\langle S^z_i\rangle)/
+  (\langle S^z_d S^z_d\rangle - \langle S^z_d\rangle^2)$, which has no sum
+  rule. `r["mu"]` is the moment $\langle (S^z_d)^2\rangle - \langle S^z_d\rangle^2$.
+- `maxm`: a metallic lead is entangled at every bond, so it needs a
+  large bond dimension. At $L=40$, `maxm=64` gave $\xi_{0.9}=14$ and
+  `maxm=80` and 100 gave 15. A too small bond dimension also breaks the
+  singlet, and then $\Sigma(L-1)$ is not 0; a warning says so above
+  `sum_rule_tol`.
+
+The scaling collapses of the paper, $\Sigma$ against $x/\xi_K$ and
+$\xi_a(L)/\xi_a$ against $L/\xi_a$, are fits on these numbers. See
+`examples/kondo/kondo_cloud_real_space`.
+
+### The Wilson chain keywords
+
 - `n`: the number of Wilson chain sites per level. It sets the lowest
   energy, $D\Lambda^{-n/2}$, which must be below $T_K$. Take $n$ odd: with
   $n$ even the ground state has an odd number of electrons, so it is

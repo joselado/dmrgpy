@@ -5843,6 +5843,41 @@ one level, 2n+1 for two, measured in ED), so it is degenerate and one
 member of it looks unscreened, and `anderson_chain` warns. Tests are in
 `tests/test_kondo_screening.py`.
 
+**The real-space Kondo cloud** (`kondocloud.py`) is the DMRG study of
+Holzner et al., PRB 80, 205114 (2009), arXiv:0906.2933, and also needs
+no backend code. `anderson_lead(L, ...)` puts the dot on site 0 of a
+uniform lead (the paper's eq. 2, coupling sqrt(Gamma t), L sites in
+total) on `Spinful_Fermionic_Chain_Native` by default, since at L=40 and
+equal maxm on `"python"` it gave a lower energy and a sum-rule error 16
+times smaller than the interleaved class, at about twice the time.
+`get_kondo_cloud` (on `KondoScreeningMixin`, so on both spinful chains)
+returns <S_d.S_i>, Sigma(x) (eq. 3), xi_a(L) (eq. 5), the moment and
+<n_d>; `kondo_temperature`/`kondo_length` are eq. 4. S_d.S_i is built as
+Sz Sz + (S+ S- + S- S+)/2, with real coefficients, so the MPO stays real.
+The paper writes the lead hopping up to site L but the total spin up to
+L-1; we take L sites in total, which is what makes Sigma(L-1) = 0, the
+singlet sum rule, exact (checked in ED to 1e-12, and warned about when it
+fails). The paper holds N = L for every ed; at ed = -U/2 the unconstrained
+ground state is already there, away from it `half_filling=True` sets the
+Nf sector. On `"python"` that sector agreed with the unconstrained solve
+to L = 30 here, and at L = 40 (native, maxm=64, 10 sweeps) it did not
+converge: once it returned E = +47 against -50.01, once it raised that
+the state left the sector. So a gate sweep on long leads waits for the v3
+port. In a
+field the paper's connected zz form is `connected=True`. What limits the
+method on `"python"` is again the bond dimension, since a metallic lead
+is entangled at every bond: at U=0 and L=8, maxm=100 left the far
+correlations 5e-6 off Wick (maxm=256, exact there, gives 1e-8), and at
+L=40, U/Gamma=2, xi_0.9 was 14 at maxm=64 and 15 at 80 and 100 (518 s
+for maxm=100 and 16 sweeps on a loaded host). The physics check that fits:
+xi_0.75 T_K = 1.61 and 1.60 at U/Gamma = 2 and 3, saturated at L = 40 and
+60 (maxm=80), against 1.8 from the paper's own xi_0.75 = 29 at
+U/Gamma = 5; xi_0.9 T_K = 4.8 at U/Gamma = 2 against the paper's 6.7, at
+the edge of its Kondo regime. The two scaling
+collapses of the paper are fits and are left to the user. Not
+implemented: the SU(2)-symmetric DMRG the paper relies on for L = 500 at
+m = 1500. Tests in `tests/test_kondo_cloud.py`.
+
 ### 4.8e Open and renormalized Wilson chains (`wilsonchain.py`)
 
 This is Bruognolo et al., PRB 95, 121115(R) (2017), arXiv:1611.05291. We

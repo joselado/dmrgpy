@@ -5,6 +5,8 @@ paths:
   - "tests/test_kondo_screening.py"
   - "src/dmrgpy/wilsonchain.py"
   - "src/dmrgpy/kondoscreening.py"
+  - "src/dmrgpy/kondocloud.py"
+  - "tests/test_kondo_cloud.py"
   - "tests/test_atom_iets.py"
   - "examples/kondo/**"
 ---
@@ -133,3 +135,12 @@ Re G_bath(0) of the continuum at every length for a spectrum that vanishes
 at omega=0, which `tests/test_open_wilson_chain.py` pins to 1e-10; for a
 finite density of states at the Fermi level the shifts are regularized
 principal values and C2 is only approximate. See `docs/development.md` 4.8e.
+
+**The real-space Kondo cloud (2026-10-30)**, `kondocloud.py`, is Holzner
+et al., arXiv:0906.2933: `anderson_lead()` (dot at the end of a uniform
+lead, L sites in total, native class by default) and `get_kondo_cloud`
+on `KondoScreeningMixin` (Sigma(x), xi_a, T_K of eq. 4). Sigma(L-1) = 0
+is exact only for a singlet, so L even at N = L; `half_filling=True`
+(the Nf sector) is needed away from ed = -U/2 and did not converge on
+`"python"` at L = 40. `tests/test_kondo_cloud.py`, `docs/development.md`
+4.8d.

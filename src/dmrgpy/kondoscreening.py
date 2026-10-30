@@ -116,3 +116,12 @@ class KondoScreeningMixin():
         state: M_imp, M_env, M_n, Schmidt coefficients. See
         kondoscreening.py"""
         return kondo_screening(self, imp=imp, bath=bath, mode=mode)
+    def get_kondo_cloud(self, imp=None, lead=None, a=0.9, connected=False,
+                        mode="DMRG", sum_rule_tol=1e-3):
+        """Integrated spin correlation Sigma(x) and screening length xi_a
+        of the impurity orbital imp along a real-space lead
+        (arXiv:0906.2933). See kondocloud.py"""
+        from .kondocloud import kondo_cloud
+        return kondo_cloud(self, imp=imp, lead=lead, a=a,
+                           connected=connected, mode=mode,
+                           sum_rule_tol=sum_rule_tol)
