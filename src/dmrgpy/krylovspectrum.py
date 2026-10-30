@@ -57,11 +57,11 @@ def _res(ks):
 
 def krylov_spectrum_dmrg(self, G, nk=20, dt=0.5, alpha=None, gram_tol=1e-12,
                          seed=0, starts=None, exact_residuals=False,
-                         traceless=False):
+                         traceless=False, sector_charge=None):
     """The pyitensor clik.KrylovSpectrum of the MultiOperator G on this
     chain, with its stored states, for a caller that needs more than
-    <r|O|r> (Lindblad_Chain reads traces off it). `starts` and
-    `traceless`: see pyitensor Chain.krylov_spectrum."""
+    <r|O|r> (Lindblad_Chain reads traces off it). `starts`, `traceless`
+    and `sector_charge`: see pyitensor Chain.krylov_spectrum."""
     if self.itensor_version != "python":
         raise NotImplementedError(
             "get_krylov_spectrum runs on itensor_version=\"python\" only (got "
@@ -78,7 +78,8 @@ def krylov_spectrum_dmrg(self, G, nk=20, dt=0.5, alpha=None, gram_tol=1e-12,
                                          alpha=alpha, gram_tol=gram_tol,
                                          seed=seed, starts=starts,
                                          exact_residuals=exact_residuals,
-                                         traceless=traceless)
+                                         traceless=traceless,
+                                         sector_charge=sector_charge)
 
 
 def _krylov_spectrum_ed(self, G):

@@ -41,3 +41,49 @@ def identity_mps(sites):
         tensors.append(ITensor(tuple(inds_b), arr_b))
         left = right
     return MPS(tensors)
+
+
+def sector_identity_mps(sites, q):
+    """|1_q>> = sum over the configurations a with sum_i a_i = q of
+    prod_i |a_i>_{2i-1}|a_i>_{2i}, the identity of the sector of total
+    charge q, with the charge of a local basis state taken as its index
+    (the occupation, for bosons). A charge counter rides on the bonds:
+    dimension q+1 between pairs and d(q+1) inside a pair. For a
+    Lindbladian that conserves this charge on both sides of rho (a strong
+    symmetry), <<1_q| is a left steady state, and it is the trace
+    functional of every state of the sector: <<1_q|rho>> = Tr(rho)."""
+    n = sites.length()
+    if n % 2:
+        raise ValueError("sector_identity_mps: a doubled chain has an even "
+                         "number of sites, got %d" % n)
+    if q < 0 or int(q) != q:
+        raise ValueError("sector_identity_mps: the charge must be a "
+                         "non-negative integer, got %r" % (q,))
+    q = int(q)
+    npair = n // 2
+    tensors = []
+    left = None
+    for p in range(npair):
+        a, b = 2 * p + 1, 2 * p + 2
+        d = sites.dim(a)
+        nin = 1 if p == 0 else q + 1
+        last = p == npair - 1
+        nout = 1 if last else q + 1
+        inner_link = Index(nin * d, tags="Link,l={}".format(a))
+        right = None if last else Index(nout, tags="Link,l={}".format(b))
+        A = np.zeros((nin, d, nin * d), dtype=complex)
+        B = np.zeros((nin * d, d, nout), dtype=complex)
+        for k in range(nin):
+            for s in range(d):
+                A[k, s, k * d + s] = 1.0
+                total = k + s
+                if last and total == q:
+                    B[k * d + s, s, 0] = 1.0
+                elif not last and total <= q:
+                    B[k * d + s, s, total] = 1.0
+        inds_a = ([left] if left else []) + [sites.si(a), inner_link]
+        inds_b = [inner_link, sites.si(b)] + ([right] if right else [])
+        tensors.append(ITensor(tuple(inds_a), A if left else A[0]))
+        tensors.append(ITensor(tuple(inds_b), B if right else B[:, :, 0]))
+        left = right
+    return MPS(tensors)

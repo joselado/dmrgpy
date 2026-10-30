@@ -172,7 +172,10 @@ class Lindblad_Chain():
         instead of random states, as in arXiv:2509.07709. Both lie in the
         sector of psi when phi has the same charge, and the evolution
         keeps them there, so only that sector's steady state and modes
-        appear."""
+        appear. With a seed, the second branch is kept traceless against
+        the identity of the seed's sector, the charge of a local basis
+        state being its index, whenever L conserves that charge; otherwise
+        against the full identity."""
         if mode == "ED":
             out = self._spectrum_ed()
         elif mode == "DMRG":
@@ -201,7 +204,9 @@ class Lindblad_Chain():
         ks = krylov_spectrum_dmrg(dc, self.L, nk=nk, dt=dt, alpha=alpha,
                                   gram_tol=gram_tol, seed=seed, starts=starts,
                                   exact_residuals=exact_residuals,
-                                  traceless=True)
+                                  traceless=True,
+                                  sector_charge=(None if start is None
+                                                 else sum(start[0])))
         one = identity_mps(dc._session.sites)
         traces = np.array([inner(one, rho) for rho in ks.states])
 

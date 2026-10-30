@@ -961,18 +961,26 @@ class Chain:
 
     def krylov_spectrum(self, terms_g, nk=20, dt=0.5, alpha=None,
                         gram_tol=1e-12, seed=0, starts=None,
-                        exact_residuals=False, traceless=False):
+                        exact_residuals=False, traceless=False,
+                        sector_charge=None):
         """clik.krylov_spectrum on the MPO of terms_g, evolved at this
         chain's maxm and cutoff; returns the clik.KrylovSpectrum. `starts`
         is a pair of local-vector lists, one vector per site, for the two
         product-state starts (None: random starts). traceless=True, for a
-        Lindbladian on a doubled chain, deflates the second start against
-        the vectorized identity (clik.krylov_spectrum's `deflate`)."""
+        Lindbladian on a doubled chain, keeps the second branch traceless
+        (clik.krylov_spectrum's `deflate`): against the identity of the
+        sector of charge `sector_charge` when that identity is a left
+        steady state of G, else against the full identity |1>>."""
         G = self._mpo(terms_g)
         deflate = None
         if traceless:
             from .vectorize import identity_mps
             deflate = identity_mps(self.sites)
+            if sector_charge is not None:
+                from .vectorize import sector_identity_mps
+                d = sector_identity_mps(self.sites, sector_charge)
+                if _is_left_zero_mode(G, d):
+                    deflate = d
         if starts is not None:
             from .metts import product_state
             starts = tuple(product_state(self.sites, v) for v in starts)
@@ -2231,3 +2239,18 @@ class Chain:
         if accelerate and self._same_mps(vi, vj, self.maxm, self.cutoff):
             return self._kpm_moments_accelerated(m, vi, n, kpmmaxm, kpmcutoff)
         return self._kpm_moments_full(m, vi, vj, n, kpmmaxm, kpmcutoff)
+
+
+def _is_left_zero_mode(G, d, rtol=1e-10):
+    """Whether <d|G = 0, read as ||G^dag d|| <= rtol ||G d||: the sector
+    identity is a left steady state exactly when the Lindbladian conserves
+    the charge on both sides of rho. Measured on the 3-site Bose-Hubbard
+    Lindbladian: 6.7e-14 of ||d|| with number-conserving jumps, 0.15 once a
+    decay of one site is added."""
+    x = applyMPO(mpo_dagger(G), d)
+    x.noPrime("Site")
+    y = applyMPO(G, d)
+    y.noPrime("Site")
+    nx = np.sqrt(abs(inner(x, x)))
+    ny = np.sqrt(abs(inner(y, y)))
+    return nx <= rtol * max(ny, np.sqrt(abs(inner(d, d))))

@@ -136,10 +136,12 @@ _GSE_ORDER = 3
 
 
 def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
-                  one_site=False):
+                  one_site=False, deflate=None):
     """nk normalized snapshots exp(G z m)|psi0>, m = 0..nk-1, with a
     global subspace expansion before each of the first _GSE_STEPS steps
-    (before every step for one_site=True)."""
+    (before every step for one_site=True). `deflate`, an MPS d with
+    <d|G = 0, is projected out after every step: the exact evolution keeps
+    <d|psi> where it started, and TDVP does not (see krylov_spectrum)."""
     if hermitian is None:
         hermitian = mpo_is_hermitian(G)
     psi = psi0.copy()
@@ -151,6 +153,9 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
                 psi = global_subspace_expand(G, psi, _GSE_ORDER, cutoff,
                                              maxdim=maxdim, bond_maxdim=maxdim)
         psi, _ = _step(psi, G, z, cutoff, maxdim, niter, hermitian, one_site)
+        if deflate is not None:
+            psi = _deflated(psi, deflate, cutoff, maxdim)
+            psi.normalize()
         states.append(psi)
     return states
 
@@ -211,14 +216,15 @@ def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
     return float(angles[lo]) if lo < len(angles) else np.pi / 2
 
 
-def _deflated(psi, d):
-    """psi - (<d|psi>/<d|d>) d, or psi itself when that component is
-    already below 1e-14 of it (a seeded traceless start)."""
+def _deflated(psi, d, cutoff=0.0, maxdim=None):
+    """psi - (<d|psi>/<d|d>) d, compressed to cutoff/maxdim, or psi
+    itself when that component is already below 1e-14 of it (a seeded
+    traceless start)."""
     c = _scalar(inner(d, psi)) / _scalar(inner(d, d))
     if abs(c) * np.sqrt(abs(_scalar(inner(d, d)))) <= (
             1e-14 * np.sqrt(abs(_scalar(inner(psi, psi))))):
         return psi
-    return mps_sum(psi, (-c) * d)
+    return mps_sum(psi, (-c) * d, cutoff=cutoff, maxdim=maxdim)
 
 
 class KrylovMatrices:
@@ -379,12 +385,20 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     exact_residuals=True adds ||G r - lambda r|| for every eigenvector (see
     the module docstring for its cost). `deflate`, an MPS d, takes the
     component along d out of the second start, psi_u - (<d|psi_u>/<d|d>) d,
-    at the cost of dim(d) more bond on that start. For a Lindbladian d is
-    the identity |1>>, the left steady state, so the second start is
-    traceless, as in the paper: exp(L z) conserves the trace, the branch
-    then never contains the steady state, and its snapshots go to the
-    slowest decaying modes instead. On a driven 4-site XXZ chain this took
-    the gap mode from 2.2e-4 to 8.9e-5 off ED at the Lindblad defaults.
+    at the cost of dim(d) more bond on that start, and again after every
+    step of that branch. For a Lindbladian d is a left steady state, the
+    identity |1>> or the identity of the start's sector, so the second
+    branch is traceless, as in the paper: exp(L z) conserves the trace,
+    the branch then never contains the steady state, and its snapshots go
+    to the slowest decaying modes instead. On a driven 4-site XXZ chain
+    the traceless start took the gap mode from 2.2e-4 to 8.9e-5 off ED at
+    the Lindblad defaults. The projection after every step is needed
+    because TDVP does not conserve the trace: on the seeded 4-site
+    Bose-Hubbard Lindbladian at dt=0.5 the in-sector trace of the
+    normalized snapshots grew to 1.1 without it, so the branch ended as
+    mostly steady state, and with it each of the slowest eight
+    eigenvalues came closer to ED, by factors 1.1 to 10 (1.3e-4 to 2.2e-5
+    for one member of the slowest pair).
 
     The defaults are measured, on 6-site chains against ED with the
     hopping as the unit. A small dt makes consecutive imaginary-time
@@ -424,7 +438,7 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
                                        niter=niter, hermitian=herm,
                                        one_site=one_site)
     for psi in evolve_branch(G, psi_u, dt * np.exp(-1j * alpha), nk,
-                             cutoff, maxdim, niter, herm, one_site):
+                             cutoff, maxdim, niter, herm, one_site, deflate):
         km.add(psi)
     lam, C, ndim = project(km.M, km.Gm, gram_tol)
     keep = [i for i in range(2 * nk) if i not in (nk - 1, 2 * nk - 1)]
