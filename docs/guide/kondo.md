@@ -376,7 +376,8 @@ The second part is the spin-boson model,
 $H = -\frac{\Delta}{2}\sigma_x + \frac12\sigma_z\left(\epsilon + t_{\text{imp}}(b+b^\dagger)\right) + H_{\text{bath}}$,
 with $\Gamma(\omega) = 2\alpha\,\omega_c^{1-s}\omega^s$, on a C2 chain of 6
 bosonic sites. The spin is site 0, a two-level site, and `bc.x_imp` is
-$\sigma_z$. Its response to the bias, $\chi = d\langle\sigma_z\rangle/d\epsilon$
+$\sigma_z$. Here $\langle\sigma_z\rangle = -0.90$ already at
+$\epsilon = 0.01$, a strong response of the spin to the bias. Its response to the bias, $\chi = d\langle\sigma_z\rangle/d\epsilon$
 on a chain of length $N$, is the susceptibility at $T \sim \Lambda^{-N}$,
 as in the paper. `oscillator_chain` builds the dissipative harmonic
 oscillator in the same way. That model is quadratic, so its
@@ -392,7 +393,9 @@ length, and DMRG on C2 agrees with it to 1e-5.
   bosonic bath has `band=(0, wc)`.
 - `kind`: `"C0"`, `"C1"` or `"C2"`. Use C2 to remove the mass flow.
   `anderson_chain(..., kind="C2")` and `boson_bath_chain` take it too,
-  and `"standard"` is the Wilson chain of the section above.
+  and `"standard"` is the Wilson chain of the section above. In
+  `anderson_chain` the factor per site is $\Lambda^{1/2}$, so `n` and
+  `Lambda` mean the same there for every kind.
 - `nsub`: levels per factor $\Lambda$ in the fine discretization of the
   bath. The chain coefficients converge as $1/\texttt{nsub}$, about 1% at
   the default 8. The static identities hold at any value.

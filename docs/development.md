@@ -5779,8 +5779,8 @@ member of it looks unscreened, and `anderson_chain` warns. Tests are in
 ### 4.8e Open and renormalized Wilson chains (`wilsonchain.py`)
 
 This is Bruognolo et al., PRB 95, 121115(R) (2017), arXiv:1611.05291. We
-found no open-source implementation to mirror (the authors used their own
-QSpace code), so it is written from the paper and its supplement.
+found no open-source implementation to mirror, so it is written from the
+paper and its supplement.
 `open_wilson_chain()` builds the continued fraction of the bath correlator
 with the paper's "version 2" windows, the slow window shrinking by Lambda
 per site, and returns an `OpenWilsonChain` with the chain (`eps`, `tS`),
