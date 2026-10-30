@@ -118,6 +118,11 @@ def test_screening_length_scales_as_one_over_TK():
     # xi_0.75 has saturated by L = 40 (the same at L = 60, maxm = 80), and
     # xi_0.75 T_K is the same for both, 1.61 and 1.60. The paper's own
     # numbers (xi_0.75 = 29 at U/Gamma = 5, L = 500) give p(0.75) = 1.8.
+    # Sigma drops in pairs of sites, so xi_a moves in steps of two, and one
+    # step at either coupling breaks the 5% assert. The margin: at
+    # U/Gamma = 2, L = 40, Sigma(5) = 0.232 at maxm = 64 and 0.238 at
+    # maxm = 100, against the threshold 0.25. The "python" DMRG start is
+    # reseeded per call, so the test is deterministic.
     p = []
     for ratio in [2.0, 3.0]:
         fc = _lead(L=40, Gamma=1.0/ratio)

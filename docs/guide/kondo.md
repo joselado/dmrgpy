@@ -365,7 +365,8 @@ cloud does not fit in the lead yet.
   $U/\Gamma=3$.
 - `half_filling=True`: fixes $N=L$ electrons, as the paper does. It is
   needed away from $\epsilon_d=-U/2$, where particle-hole symmetry no
-  longer fixes the filling.
+  longer fixes the filling. On `itensor_version="python"` this sector
+  converged here for leads up to 30 sites, not at 40.
 - `B` and `connected=True`: a field on the dot. Then $S^z_{\text{tot}}$
   is the only conserved spin, and we use the connected form
   $(\langle S^z_d S^z_i\rangle - \langle S^z_d\rangle\langle S^z_i\rangle)/
