@@ -158,15 +158,38 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
     (see krylov_spectrum). `meter`, another such left zero mode with
     <meter|psi0> != 0, makes the step adaptive: the exact flow conserves
     <meter|psi>, so a step that changes it grossly, or grows the norm by
-    more than e^_GROWTH_TOL, is rejected and redone with twice the
-    sub-steps, and the sub-steps carry over to the next snapshot (see
-    _step_accepted). bounded=True, for a G whose spectrum has Re <= 0
+    more than e^_GROWTH_TOL, is rejected, and the branch starts over with
+    twice the sub-steps (see _step_accepted and _branch_attempt). bounded=True, for a G whose spectrum has Re <= 0
     (a Lindbladian, where a left steady state exists), applies the norm
     growth and overflow tests without a meter, as on the traceless
     branch. A step that overflows inside the sweep (a LinAlgError or a
     floating-point overflow) counts as rejected."""
     if hermitian is None:
         hermitian = mpo_is_hermitian(G)
+    gated = meter is not None or bounded
+    while True:
+        states = _branch_attempt(G, psi0, z, nk, cutoff, maxdim, niter,
+                                 hermitian, one_site, deflate, substeps,
+                                 meter, gated)
+        if states is not None:
+            return states, substeps
+        if substeps >= _MAX_SUBSTEPS:
+            raise RuntimeError(
+                "krylov_spectrum: a step of |z|=%.3g is still unstable with "
+                "%d TDVP sub-steps; reduce dt" % (abs(z), substeps))
+        substeps *= 2
+
+
+def _branch_attempt(G, psi0, z, nk, cutoff, maxdim, niter, hermitian,
+                    one_site, deflate, substeps, meter, gated):
+    """One run of evolve_branch at a fixed sub-step count: the
+    snapshots, or None at the first rejected step. A rejection restarts
+    the whole branch, so that no snapshot taken at a count found unstable
+    stays in the Krylov space: on the seeded 5-site Bose-Hubbard
+    Lindbladian the first step at one sub-step passed the gate (trace off
+    by 6e-3 of ||1_q||, the state already 3e-4 out of the sector) and only
+    the second failed (log-norm 16.8). Instabilities show up within the
+    first snapshots, so the restarts are cheap."""
     psi = psi0.copy()
     psi.normalize()
     states = [psi]
@@ -175,30 +198,24 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
             with bk.pad_bonds_suspended():
                 psi = global_subspace_expand(G, psi, _GSE_ORDER, cutoff,
                                              maxdim=maxdim, bond_maxdim=maxdim)
-        while True:
-            if meter is None and not bounded:
-                new, lognorm = _step(psi, G, z, cutoff, maxdim, niter,
-                                     hermitian, one_site, substeps)
-                break
+        if not gated:
+            psi, _ = _step(psi, G, z, cutoff, maxdim, niter, hermitian,
+                           one_site, substeps)
+        else:
             try:
                 with np.errstate(over="raise", invalid="raise"):
                     new, lognorm = _step(psi, G, z, cutoff, maxdim, niter,
                                          hermitian, one_site, substeps)
-                if _step_accepted(meter, psi, new, lognorm):
-                    break
             except (np.linalg.LinAlgError, FloatingPointError):
-                pass   # overflowed inside the sweep: rejected as well
-            if substeps >= _MAX_SUBSTEPS:
-                raise RuntimeError(
-                    "krylov_spectrum: a step of |z|=%.3g is still unstable "
-                    "with %d TDVP sub-steps; reduce dt" % (abs(z), substeps))
-            substeps *= 2
-        psi = new
+                return None   # overflowed inside the sweep
+            if not _step_accepted(meter, psi, new, lognorm):
+                return None
+            psi = new
         if deflate is not None:
             psi = _deflated(psi, deflate, cutoff, maxdim)
             psi.normalize()
         states.append(psi)
-    return states, substeps
+    return states
 
 
 # The adaptive step of evolve_branch. A step is rejected when it grows
