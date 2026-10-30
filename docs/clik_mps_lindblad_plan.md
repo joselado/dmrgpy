@@ -559,6 +559,26 @@ moves the trace by up to 1.2e-3 of $\lVert 1\rVert$, and a stable
 sub-stepped 5-site step by 1.3e-3. Norm growth and overflow are checked
 on both branches whenever a left steady state is known.
 
+**The 5-site check with sub-steps.** Run with five forced TDVP steps
+of 0.1 per snapshot (code at `46fb3bd`: relative Arnoldi test and
+per-step projection of $1_q$, no gate yet), nk=20, dt=0.5, alpha=0.2,
+χ=64, 3955 s on a loaded machine. The steady state is right: the
+occupations are 0.7114, 0.8492, 0.8789, 0.8494, 0.7117 against 0.7123,
+0.8486, 0.8781, 0.8486, 0.7123 from ED, mirror symmetric to 3e-4 and
+about 1e-3 off. Every one of the slowest eight ED eigenvalues, the
+paper's $\lambda_1=-0.8409\pm0.8135i$ included, has a Krylov eigenvalue
+within 0.05 of it (the script printed the distance to one digit only).
+But the list is polluted. The steady state comes out at $-0.0102$, and
+above $\lambda_1$ sit modes that ED does not have, such as
+$-0.107+2.32i$ and $-0.239$, with residuals of 6e-3 to 0.4. On 4 sites
+nothing like this happens, and the charge variance of each Ritz vector,
+read off the stored snapshots, tracks its convergence: 5e-13 to 2e-7 on
+the modes that match ED to 1e-5 or better, 1e-3 to 1e-2 on the
+unconverged ones. The candidate explanation for 5 sites is the charge
+leak of the snapshots (about 1e-6): modes of other sectors that decay
+slowly enter the Krylov space. The same diagnostic is running on 5
+sites; see the end of this section.
+
 **A looser Krylov error goal is not a lever.** Earlier tonight
 `errgoal=1e-6` looked 2.3 times faster on 5 sites; that was the broken
 stopping test, and its result was garbage. With the test relative to the
