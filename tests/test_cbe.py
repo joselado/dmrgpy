@@ -14,7 +14,8 @@ arXiv:2208.10972). Both live in pyitensor/cbe.py. What is pinned here:
   state while CBE reaches the ground state;
 - CBE-TDVP follows ED after a quench from a product state, where TDVP_GSE
   stops growing its bonds after tdvp_gse_sweeps steps;
-- every other backend refuses both settings, naming "python".
+- v2 and julia_live refuse both settings, naming "python" (v3 has them
+  too, tests/test_cbe_v3.py).
 
 Every DMRG case pins its sweep schedule and its random seed.
 """
@@ -251,7 +252,7 @@ def test_dmrg_method_is_validated_and_refused_where_it_does_not_exist():
         sc.gs_energy()
     with pytest.raises(TypeError):
         spinchain.Spin_Chain([2] * 4, itensor_version="python", dmrg_methd="CBE")
-    for version in (2, 3):
+    for version in (2,):  # 3 has it too, tests/test_cbe_v3.py
         sc = spinchain.Spin_Chain([2] * 6, itensor_version=version)
         h = sum(sc.Sz[i] * sc.Sz[i + 1] for i in range(5))
         sc.set_hamiltonian(h)
@@ -332,7 +333,7 @@ def test_cbe_tdvp_complex_time_step_matches_exact():
 
 
 def test_tdvp_cbe_is_refused_on_other_backends():
-    for version in (2, 3):
+    for version in (2,):  # 3 has it too, tests/test_cbe_v3.py
         sc = spinchain.Spin_Chain([2] * 6, itensor_version=version)
         h = sum(sc.Sz[i] * sc.Sz[i + 1] for i in range(5))
         sc.set_hamiltonian(h)

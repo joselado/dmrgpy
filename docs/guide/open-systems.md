@@ -73,4 +73,4 @@ we start from product states of that sector:
 
 !!! note "Backends"
     `Lindblad_Chain` works for spin and boson chains on
-    `itensor_version="python"`. Fermions are not supported.
+    `itensor_version="python"` and `3`. Fermions are not supported.

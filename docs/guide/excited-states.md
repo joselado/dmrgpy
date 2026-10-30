@@ -238,8 +238,9 @@ copies of a degenerate level, so a triplet appears twice. The keywords are:
   reference.
 
 !!! note "Backends"
-    `get_krylov_spectrum` runs on `itensor_version="python"` only, and
-    not yet in a conserved sector.
+    `get_krylov_spectrum` runs on `itensor_version="python"` and `3`,
+    and not yet in a conserved sector. The random starts differ between
+    the two, so the unconverged levels differ too.
 
 ## Generalized eigenvalue problem
 

@@ -41,7 +41,7 @@ def _check_tevol_method(self,methods=("TDVP","TDVP_GSE")):
             "itensor_version='julia_live' implements tevol_method "
             +", ".join(repr(m) for m in methods)+" for this operation "
             "(got "+repr(self.tevol_method)+")"
-            +("; 'TDVP_CBE' exists on itensor_version=\"python\" only"
+            +("; 'TDVP_CBE' exists on itensor_version=\"python\" and 3 only"
               if self.tevol_method=="TDVP_CBE" else ""))
 
 

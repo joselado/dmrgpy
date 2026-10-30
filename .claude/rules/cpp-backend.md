@@ -15,7 +15,14 @@ extension"; it loads when a file under `mpscpp2/` or `mpscpp3/` is read or
 edited. The vendored ITensor copies under `mpscppN/ITensor/` are upstream
 code and are not read or modified here; the dmrgpy-owned C++ is
 `chain_session.h`, `bindings.cc`, `check_task.h`, `get_sites.h` and
-`mo_terms.h` in each `mpscppN/`, plus `mpscpp3/TDVP/`.
+`mo_terms.h` in each `mpscppN/`, plus `mpscpp3/TDVP/`, `mpscpp3/tebd.h`
+and `mpscpp3/cbe.h` (controlled bond expansion, a port of
+`pyitensor/cbe.py`: dense indices only, so `reject_sector`, and Lanczos
+`applyExp` local steps, so Hermitian H only, like v3's two-site TDVP;
+it also holds `arnoldi_exp` and `tdvp_arnoldi_step`, two-site TDVP with
+Arnoldi local steps, which `cliksession.py` uses for a non-Hermitian
+generator, since the Lanczos `applyExp` does not converge on a
+Lindbladian).
 
 `mpscpp2/bindings.cc` and `mpscpp3/bindings.cc` each compile a pybind11
 extension module (`mpscpp2/_dmrgcpp*.so` and `mpscpp3/_dmrgcpp*.so`, built

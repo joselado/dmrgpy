@@ -146,9 +146,10 @@ def _advance_complex_time_step(self, Hop, wf, dz, do_gse=False):
     as plain "TDVP" (3 or "python" only) -- see evolution_dmrg_DC's
     docstring for why a v2 port isn't available here.
 
-    self.tevol_method="TDVP_CBE" ("python" only, other backends raise in
-    check_tevol_method) runs one-site TDVP with controlled bond expansion
-    at every step (pyitensor/cbe.py), through Chain.tdvp_cbe_step.
+    self.tevol_method="TDVP_CBE" ("python" and 3 only, other backends raise
+    in check_tevol_method) runs one-site TDVP with controlled bond
+    expansion at every step (pyitensor/cbe.py, mpscpp3/cbe.h), through
+    Chain.tdvp_cbe_step.
 
     self.tevol_method="AUTO" behaves exactly like "TDVP" here: TEBD has no
     complex-time counterpart on any backend at all (there is no bond-gate
@@ -172,7 +173,7 @@ def _advance_complex_time_step(self, Hop, wf, dz, do_gse=False):
         return advance_complex_time_step(self,Hop,wf,dz,do_gse=do_gse)
     if self.itensor_version in (3, "python") and self.tevol_method in ("TDVP","AUTO"):
         handle = self._session.tdvp_step(Hop.cpp_handle, wf.cpp_handle, dz)
-    elif self.itensor_version == "python" and self.tevol_method == "TDVP_CBE":
+    elif self.itensor_version in (3, "python") and self.tevol_method == "TDVP_CBE":
         # one-site TDVP with controlled bond expansion at every step, the
         # expansion being local and cheap, so there is no do_gse gate
         handle = self._session.tdvp_cbe_step(Hop.cpp_handle, wf.cpp_handle, dz)

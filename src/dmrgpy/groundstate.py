@@ -45,18 +45,20 @@ def ramp_key(self):
 
 
 DMRG_METHODS = ("TWO_SITE","CBE")
+CBE_BACKENDS = ("python",3) # dmrg_method="CBE" and tevol_method="TDVP_CBE"
 
 
 def check_dmrg_method(self):
     """Validate self.dmrg_method and self.cbe_delta, and refuse "CBE" on a
     backend that does not implement it.
 
-    "CBE" (one-site DMRG with controlled bond expansion, pyitensor/cbe.py)
-    exists on itensor_version="python" only. The compiled sessions and
-    julia_live have no such solver, and quietly running their two-site
-    DMRG, or the ED fallback of a missing extension, would answer a
-    different question than the one asked (docs/development.md 4.10), so
-    the request raises there. Called by Many_Body_Chain.gs_energy()/
+    "CBE" (one-site DMRG with controlled bond expansion) exists on
+    itensor_version="python" (pyitensor/cbe.py) and 3 (mpscpp3/cbe.h,
+    dense indices only, so not in a conserved sector). v2 and julia_live
+    have no such solver, and quietly running their two-site DMRG, or the
+    ED fallback of a missing extension, would answer a different question
+    than the one asked (docs/development.md 4.10), so the request raises
+    there. Called by Many_Body_Chain.gs_energy()/
     get_gs() before the mode is resolved, and again by gs_energy() here."""
     method = getattr(self,"dmrg_method","TWO_SITE")
     if method not in DMRG_METHODS:
@@ -65,13 +67,34 @@ def check_dmrg_method(self):
     delta = getattr(self,"cbe_delta",0.1)
     if not (isinstance(delta,(int,float)) and delta>=0):
         raise ValueError("cbe_delta must be a number >= 0, got %r"%(delta,))
-    if method=="CBE" and self.itensor_version!="python":
+    if method=="CBE" and self.itensor_version not in CBE_BACKENDS:
         raise NotImplementedError(
             "dmrg_method='CBE' (one-site DMRG with controlled bond "
-            "expansion) is implemented on itensor_version=\"python\" only, "
-            "and this chain uses itensor_version=%r. Switch the chain with "
-            "setup_python(), or set dmrg_method=\"TWO_SITE\"."
+            "expansion) is implemented on itensor_version=\"python\" and 3 "
+            "only, and this chain uses itensor_version=%r. Switch the chain "
+            "with setup_python() or setup_cpp(version=3), or set "
+            "dmrg_method=\"TWO_SITE\"."
             %(self.itensor_version,))
+    if method=="CBE": require_cbe_session(self,"dmrg_method='CBE'")
+
+
+def require_cbe_session(self,what):
+    """Refuse CBE on itensor_version=3 when the compiled extension cannot
+    run it: missing (get_mode would fall back to ED, which answers a
+    different question), or built before mpscpp3/cbe.h existed."""
+    if self.itensor_version!=3: return
+    from . import cppext
+    if not cppext.available(3):
+        raise NotImplementedError(
+            "%s on itensor_version=3 needs the compiled v3 extension, which "
+            "is not available here; run install.py, or use "
+            "itensor_version=\"python\"."%(what,))
+    session = getattr(self,"_session",None)
+    if session is not None and not hasattr(session,"set_dmrg_method"):
+        raise NotImplementedError(
+            "%s: the compiled v3 extension predates controlled bond "
+            "expansion; rebuild it (make pybind in src/dmrgpy/mpscpp3)."
+            %(what,))
 
 
 def require_two_site(self,where):
@@ -458,12 +481,15 @@ def _session_parameters(self):
         self._session.set_bond_ramp(self.bond_ramp,self.bond_ramp_start,
                                     self.bond_ramp_fraction,
                                     self.bond_ramp_noise_decay)
-    # The ground-state solver. Only the "python" session has more than one;
-    # check_dmrg_method() has already refused "CBE" everywhere else, so no
-    # hasattr() guard here: on a compiled session that guard would be the
-    # silent path.
+    # The ground-state solver. Only the "python" and v3 sessions have more
+    # than one; check_dmrg_method() has already refused "CBE" everywhere
+    # else, so no hasattr() guard here: on a session that should have it
+    # that guard would be the silent path.
     check_dmrg_method(self)
-    if self.itensor_version=="python":
+    # hasattr-guarded like set_bond_ramp above, so that TWO_SITE keeps
+    # working on a v3 extension built before cbe.h; check_dmrg_method has
+    # refused "CBE" on such a build
+    if self.itensor_version in CBE_BACKENDS and hasattr(self._session,"set_dmrg_method"):
         self._session.set_dmrg_method(self.dmrg_method,self.cbe_delta)
 
 

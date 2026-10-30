@@ -63,13 +63,14 @@ e0 = sc.gs_energy()
 - `sc.cbe_delta` (default 0.1): each bond is expanded to $(1+\delta)$`maxm`
   states before the update, as in the paper.
 
-It also works with a conserved sector
+On `itensor_version="python"` it also works with a conserved sector
 ([Fixed particle number or fixed magnetization](ground-state.md#fixed-particle-number-or-fixed-magnetization)).
 
 !!! note "Backends"
-    `"CBE"` exists only on `itensor_version="python"`. The other backends
-    raise an error, and so do the excited-state search and the
-    non-Hermitian ground state.
+    `"CBE"` exists on `itensor_version="python"` and on
+    `itensor_version=3`, where it does not work in a conserved sector. The
+    other backends raise an error, and so do the excited-state search and
+    the non-Hermitian ground state.
 
 See `examples/groundstate/cbe_ground_state`.
 

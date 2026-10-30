@@ -131,3 +131,19 @@ def test_generalized_solver_still_works_at_two_sites():
                        + sc.Sz[0] * sc.Sz[1])
     assert sc.gs_energy_generalized(sc.Id) == pytest.approx(
         sc.gs_energy(mode="ED"), abs=1e-6)
+
+
+def test_cbe_on_v3_without_the_extension_raises_rather_than_running_ed(no_cpp_extension):
+    """itensor_version=3 has dmrg_method="CBE" (mpscpp3/cbe.h), but with
+    no extension the ED fallback would answer a request for a CBE solve,
+    so it raises instead, as every backend without CBE does."""
+    from dmrgpy import timedependent
+    sc = spinchain.Spin_Chain(["S=1/2"] * 6, itensor_version=3)
+    sc.set_hamiltonian(sum(sc.Sz[i] * sc.Sz[i + 1] for i in range(5)))
+    sc.dmrg_method = "CBE"
+    with pytest.raises(NotImplementedError, match="compiled v3 extension"):
+        sc.gs_energy()
+    sc.dmrg_method = "TWO_SITE"
+    sc.tevol_method = "TDVP_CBE"
+    with pytest.raises(NotImplementedError, match="compiled v3 extension"):
+        timedependent.check_tevol_method(sc)

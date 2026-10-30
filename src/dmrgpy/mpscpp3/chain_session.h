@@ -24,6 +24,7 @@
 // grow bond dimension instead -- see TDVP/README.md for the algorithm.
 #include "TDVP/tdvp.h"
 #include "TDVP/basisextension.h"
+#include "cbe.h" // controlled bond expansion, a port of pyitensor/cbe.py
 
 // Port of mpscpp2/chain_session.h to the ITensor v3 API. The Chain class's
 // public methods, semantics, and preserved-not-fixed quirks (see
@@ -345,6 +346,70 @@ class Chain
     MPS
     random_mps() const { return default_mps(); }
 
+    // -- CLIK-MPS helpers, for cliksession.py, the v3 driver of
+    // get_krylov_spectrum() and Lindblad_Chain (pyitensor/clik.py and
+    // pyitensor/vectorize.py are the reference). Dense indices only.
+
+    // The two random starts of the real and the complex branch, bond
+    // dimension m, Gaussian tensors from a std::mt19937_64 seeded with
+    // `seed`, so that a run is reproducible as clik.py's rng-seeded
+    // randomMPS is. Not ITensor's randomMPS(): its randomOrthog() draws
+    // from std::random_device, which no seed reaches, and seedRNG(0) is a
+    // no-op besides, so the starts changed from run to run.
+    std::vector<MPS>
+    clik_random_starts(int m, int seed) const
+        {
+        reject_sector("get_krylov_spectrum");
+        int mm = m<1 ? 1 : m;
+        std::mt19937_64 gen((unsigned long long)seed);
+        auto first = seeded_random_mps(mm,gen);
+        auto second = seeded_random_mps(mm,gen);
+        return {first,second};
+        }
+
+    // The product state with local vector vecs[j-1] on site j (bond
+    // dimension 1), pyitensor/metts.py's product_state().
+    MPS
+    product_mps(std::vector<std::vector<Cplx>> const& vecs) const
+        {
+        reject_sector("product_mps");
+        int n = sites_.length();
+        if ((int)vecs.size()!=n)
+            throw std::invalid_argument("Chain::product_mps: one local vector per site is needed");
+        std::vector<ITensor> site_vectors;
+        for (int j=1;j<=n;j++)
+            {
+            auto s = sites_.si(j);
+            if ((int)vecs[j-1].size()!=dim(s))
+                throw std::invalid_argument("Chain::product_mps: local vector of the wrong dimension");
+            auto T = ITensor(s);
+            for (auto k : range1(dim(s))) T.set(s=k,vecs[j-1][k-1]);
+            site_vectors.push_back(T);
+            }
+        return build_product_state(site_vectors);
+        }
+
+    // |1>> = prod_i sum_a |a>_{2i-1}|a>_{2i} on a doubled chain (ket and
+    // bra sites alternating), bond dimension d inside each pair and 1
+    // between pairs, not normalized (pyitensor/vectorize.py's
+    // identity_mps).
+    MPS
+    doubled_identity_mps() const
+        {
+        return pair_charge_identity(-1);
+        }
+
+    // |1_q>>, the identity of the sector of total charge q, the charge of
+    // a local basis state being its index (vectorize.py's
+    // sector_identity_mps): a charge counter of dimension q+1 rides on the
+    // bonds between pairs.
+    MPS
+    sector_identity_mps(int q) const
+        {
+        if (q<0) throw std::invalid_argument("Chain::sector_identity_mps: the charge must be >= 0");
+        return pair_charge_identity(q);
+        }
+
     void
     set_sweep_params(int maxm, int nsweeps, double cutoff, double noise)
         {
@@ -369,6 +434,23 @@ class Chain
         ramp_start_ = start;
         ramp_fraction_ = fraction;
         ramp_noise_decay_ = noise_decay;
+        }
+
+    // The ground-state solver of gs_energy(): "TWO_SITE" (ITensor's two-site
+    // dmrg(), the default) or "CBE" (cbe.h's dmrg_cbe, one-site DMRG with
+    // controlled bond expansion), the counterpart of pyitensor/chain.py's
+    // Chain.set_dmrg_method(). cbe_delta, the expansion fraction, is also
+    // read by the CBE-TDVP methods. Only gs_energy() reads the method.
+    void
+    set_dmrg_method(std::string const& method, double cbe_delta)
+        {
+        if (method!="TWO_SITE" && method!="CBE")
+            throw std::invalid_argument("Chain::set_dmrg_method: unknown method '"
+                    +method+"', expected 'TWO_SITE' or 'CBE'");
+        if (!(cbe_delta>=0))
+            throw std::invalid_argument("Chain::set_dmrg_method: cbe_delta must be >= 0");
+        dmrg_method_ = method;
+        cbe_delta_ = cbe_delta;
         }
 
     void
@@ -600,12 +682,31 @@ class Chain
         int floor_dim = 0;
         if (have_wf0_) floor_dim = maxLinkDim(wf0_);
         auto sweeps = make_sweeps_ramped(nsweeps_,maxm_,floor_dim);
+        bool fresh = !have_wf0_;
         if (!have_wf0_)
             {
+            if (dmrg_method_=="CBE") reject_sector("dmrg_method='CBE'"); // cbe.h is dense-only
             wf0_ = default_mps(sweeps.maxdim(1));
             have_wf0_ = true;
             }
-        double energy = dmrg(wf0_,solver_hamiltonian(H_),sweeps,dmrg_args())/hscale_up_;
+        double energy;
+        if (dmrg_method_=="CBE")
+            {
+            reject_sector("dmrg_method='CBE'"); // cbe.h is dense-only
+            // the same schedule as two-site dmrg(), with the noise mixed
+            // into the Davidson start of the first sweep of a fresh start
+            // only, as pyitensor/cbe.py's dmrg_cbe does
+            std::vector<cbe::SweepParams> sp;
+            for (int sw=1;sw<=sweeps.nsweep();sw++)
+                sp.push_back({sweeps.maxdim(sw),sweeps.cutoff(sw),
+                              (fresh && sw==1) ? sweeps.noise(1) : 0.0,
+                              dmrg_niter_});
+            announce_solver_scale();
+            energy = cbe::dmrg_cbe(wf0_,solver_hamiltonian(H_),sp,cbe_delta_,
+                                   true,!verbose_)/hscale_up_;
+            }
+        else
+            energy = dmrg(wf0_,solver_hamiltonian(H_),sweeps,dmrg_args())/hscale_up_;
         check_sector(wf0_,"gs_energy"); // no-op unless sector mode is on
         wf0_energy_ = energy;
         have_wf0_energy_ = true;
@@ -1565,6 +1666,89 @@ class Chain
             if (it<gse_sweeps)
                 psi = global_subspace_expand(H,psi,krylov_order,gse_cutoff,0);
             psi = tdvp_step(H,psi,dt,1);
+            psi.normalize();
+            psi *= norm0;
+            }
+        out.final_wf = psi;
+        return out;
+        }
+
+    // CBE counterparts of quench_tdvp()/evolve_and_measure_tdvp(): the same
+    // setup and measurement, with each step one-site TDVP with controlled
+    // bond expansion (cbe.h's tdvp_cbe_step), as pyitensor/chain.py's
+    // quench_tdvp_cbe()/evolve_and_measure_tdvp_cbe(). The bond grows at
+    // every step, up to maxm, unlike TDVP_GSE, which expands only during
+    // its first tdvp_gse_sweeps steps. Dense indices only (cbe.h).
+    MPS
+    tdvp_cbe_step(MPO const& H, MPS psi, Cplx dt) const
+        {
+        reject_sector("tevol_method='TDVP_CBE'");
+        cbe::tdvp_cbe_step(psi,H,dt,cutoff_,maxm_,cbe_delta_,50,true);
+        return psi;
+        }
+
+    // One two-site TDVP step exp(-i*dt*H) whose local exponentials are
+    // Arnoldi (cbe.h's tdvp_arnoldi_step), for a non-Hermitian MPO such as
+    // a Lindbladian, where tdvp_step()'s Lanczos applyExp does not
+    // converge. dt may be complex; the norm is not restored. Dense
+    // indices only.
+    MPS
+    tdvp_arnoldi_step(MPO const& H, MPS psi, Cplx dt, int niter=50) const
+        {
+        reject_sector("tdvp_arnoldi_step");
+        cbe::tdvp_arnoldi_step(psi,H,dt,cutoff_,maxm_,niter);
+        return psi;
+        }
+
+    TimeEvolutionResult
+    quench_tdvp_cbe(std::vector<MOTerm> const& terms_h,
+                    std::vector<MOTerm> const& terms_i,
+                    std::vector<MOTerm> const& terms_j,
+                    int nt, double dt)
+        {
+        reject_sector("tevol_method='TDVP_CBE'");
+        if (!have_wf0_) gs_energy();
+        auto H = mpo_from_terms(terms_h);
+        auto args = Args("Cutoff",cutoff_,"MaxDim",maxm_);
+        double EGS = innerC(wf0_,H,wf0_).real()/innerC(wf0_,wf0_).real();
+        auto ampo = ampo_from_terms(terms_h);
+        ampo += -EGS,"Id",1;
+        auto Hshift = to_mpo_unit(ampo);
+        auto A1 = mpo_from_terms(terms_i);
+        auto A2 = mpo_from_terms(terms_j);
+        auto psi1 = apply_mpo(A1,wf0_,args);
+        auto psi2 = apply_mpo(A2,wf0_,args);
+        Cplx norm0 = std::sqrt(innerC(psi1,psi1));
+        TimeEvolutionResult out;
+        for (int it=0;it<nt;it++)
+            {
+            // measure before evolving, see quench_tdvp()
+            out.correlator.push_back(innerC(psi2,psi1));
+            cbe::tdvp_cbe_step(psi1,Hshift,dt,cutoff_,maxm_,cbe_delta_,50,true);
+            psi1.normalize();
+            psi1 *= norm0;
+            }
+        out.final_wf = psi1;
+        return out;
+        }
+
+    TimeEvolutionResult
+    evolve_and_measure_tdvp_cbe(std::vector<MOTerm> const& terms_h,
+                                std::vector<MOTerm> const& terms_op,
+                                MPS const& wf, int nt, double dt)
+        {
+        reject_sector("tevol_method='TDVP_CBE'");
+        auto H = mpo_from_terms(terms_h);
+        auto A = mpo_from_terms(terms_op);
+        auto psi = wf;
+        // the SVD that trims each bond discards weight, so the input norm
+        // is put back after every step (see evolve_and_measure_tdvp())
+        auto norm0 = std::sqrt(std::real(innerC(psi,psi)));
+        TimeEvolutionResult out;
+        for (int it=0;it<nt;it++)
+            {
+            out.correlator.push_back(innerC(psi,A,psi));
+            cbe::tdvp_cbe_step(psi,H,dt,cutoff_,maxm_,cbe_delta_,50,true);
             psi.normalize();
             psi *= norm0;
             }
@@ -5278,6 +5462,91 @@ class Chain
     // (m = maxm_, i.e. the wavefunction's own target bond dimension) is
     // what actually reproduces v2's effective behavior of an unconstrained
     // search that isn't trapped at a symmetric starting point.
+    // A normalized random MPS of bond dimension at most m, real Gaussian
+    // tensors drawn from gen, in left-canonical-to-site-1 gauge.
+    MPS
+    seeded_random_mps(int m, std::mt19937_64& gen) const
+        {
+        std::normal_distribution<double> normal(0.0,1.0);
+        int n = sites_.length();
+        std::vector<long> left(n+1,1);
+        for (int j=1;j<n;j++)
+            {
+            double grow = (double)left[j-1]*dim(sites_(j));
+            long tail = 1;
+            for (int k=j+1;k<=n && tail<m;k++) tail *= dim(sites_(k));
+            left[j] = (long)std::min<double>({(double)m,grow,(double)tail});
+            }
+        std::vector<Index> links(n+1);
+        for (int j=1;j<n;j++)
+            links[j] = Index(left[j],TagSet("Link,l="+std::to_string(j)));
+        MPS psi(sites_);
+        for (int j=1;j<=n;j++)
+            {
+            ITensor T;
+            if (n==1) T = ITensor(sites_(j));
+            else if (j==1) T = ITensor(sites_(j),links[j]);
+            else if (j==n) T = ITensor(links[j-1],sites_(j));
+            else T = ITensor(links[j-1],sites_(j),links[j]);
+            T.generate([&]() { return normal(gen); });
+            psi.ref(j) = T;
+            }
+        psi.position(1);
+        psi.normalize();
+        return psi;
+        }
+
+    // The pair identity of doubled_identity_mps() (q<0) or
+    // sector_identity_mps(q) (q>=0), built tensor by tensor.
+    MPS
+    pair_charge_identity(int q) const
+        {
+        reject_sector("the vectorized identity");
+        int n = sites_.length();
+        if (n%2) throw std::invalid_argument("the vectorized identity needs a doubled chain, "
+                                             "an even number of sites");
+        int npair = n/2;
+        int nq = q<0 ? 1 : q+1; // counter dimension between pairs
+        MPS psi(n);
+        Index left;
+        for (int p=0;p<npair;p++)
+            {
+            int a = 2*p+1, b = 2*p+2;
+            auto sa = sites_.si(a), sb = sites_.si(b);
+            int d = dim(sa);
+            if (dim(sb)!=d) throw std::invalid_argument("the vectorized identity: the two sites "
+                                                        "of a pair have different dimensions");
+            bool last = (p==npair-1);
+            int nin = (p==0) ? 1 : nq;
+            int nout = last ? 1 : nq;
+            auto in = Index(nin*d,TagSet("Link,l="+std::to_string(a)));
+            Index right;
+            if (!last) right = Index(nout,TagSet("Link,l="+std::to_string(b)));
+            auto A = left ? ITensor(left,sa,in) : ITensor(sa,in);
+            auto B = right ? ITensor(in,sb,right) : ITensor(in,sb);
+            for (int k=0;k<nin;k++)
+                for (int st=0;st<d;st++)
+                    {
+                    if (left) A.set(left=k+1,sa=st+1,in=k*d+st+1,1.0);
+                    else A.set(sa=st+1,in=k*d+st+1,1.0);
+                    int total = k+st;
+                    if (q<0)
+                        {
+                        if (right) B.set(in=k*d+st+1,sb=st+1,right=1,1.0);
+                        else B.set(in=k*d+st+1,sb=st+1,1.0);
+                        }
+                    else if (last && total==q) B.set(in=k*d+st+1,sb=st+1,1.0);
+                    else if (!last && total<=q) B.set(in=k*d+st+1,sb=st+1,right=total+1,1.0);
+                    }
+            psi.set(a,A);
+            psi.set(b,B);
+            left = right;
+            }
+        psi.leftLim(0);
+        psi.rightLim(n+1);
+        return psi;
+        }
+
     MPS
     default_mps() const { return default_mps(maxm_); }
 
@@ -12691,6 +12960,11 @@ class Chain
     int ramp_start_ = 10;
     double ramp_fraction_ = 0.5;
     double ramp_noise_decay_ = 0.1;
+    // Ground-state solver, see set_dmrg_method(): "TWO_SITE" is ITensor's
+    // dmrg(), "CBE" one-site DMRG with controlled bond expansion (cbe.h).
+    // cbe_delta_ is also what the CBE-TDVP methods read.
+    std::string dmrg_method_ = "TWO_SITE";
+    double cbe_delta_ = 0.1;
 
     // -- IBC-window real-time dynamical correlator (td_dynamical_correlator_window,
     // below) -- idmrg_ground_state's own converged-environment snapshot

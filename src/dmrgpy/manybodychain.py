@@ -169,8 +169,9 @@ class Many_Body_Chain():
       self.dmrg_method = "TWO_SITE" # ground-state solver: "TWO_SITE"
           # (two-site DMRG, every backend) or "CBE" (one-site DMRG with
           # controlled bond expansion, Gleis, Li, von Delft, PRL 130,
-          # 246402 (2023); itensor_version="python" only, pyitensor/cbe.py;
-          # any other backend raises). Only the ground-state solve reads
+          # 246402 (2023); itensor_version in ("python",3), pyitensor/cbe.py
+          # and mpscpp3/cbe.h, the latter not in a conserved sector; any
+          # other backend raises). Only the ground-state solve reads
           # it; the excited-state, generalized and non-Hermitian solves
           # raise under "CBE" (groundstate.require_two_site).
       self.cbe_delta = 0.1 # "CBE" and tevol_method="TDVP_CBE": each bond is
@@ -187,8 +188,9 @@ class Many_Body_Chain():
           # Krylov global subspace expansion, arXiv:2005.06104 -- same
           # itensor_version support as "TDVP"; see tdvp_gse_* below),
           # "TDVP_CBE" (one-site TDVP with controlled bond expansion
-          # before every local step, arXiv:2208.10972, pyitensor/cbe.py --
-          # itensor_version="python" only, every other backend raises; the
+          # before every local step, arXiv:2208.10972, pyitensor/cbe.py and
+          # mpscpp3/cbe.h -- itensor_version in ("python",3), every other
+          # backend raises; the
           # bond grows up to maxm at every step, see cbe_delta),
           # "TEBD" (2nd-order-Trotter TEBD, pyitensor/tebd.py or
           # mpscpp3/tebd.h -- itensor_version in (3,"python"), and only

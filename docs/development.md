@@ -3194,14 +3194,15 @@ Notable, deliberate implementation details (not bugs to "fix"):
   under a second for the same computation on `itensor_version=3`) that
   couldn't be root-caused in the time available — see git history around
   `mpscpp2/TDVP/` if picking this up again.
-- `tevol_method="TDVP_CBE"` (`itensor_version="python"` only) runs
+- `tevol_method="TDVP_CBE"` (`itensor_version="python"` and 3) runs
   one-site TDVP with controlled bond expansion before every local forward
-  step (`pyitensor/cbe.py`, see "Controlled bond expansion" in section
-  4.5). Every other backend raises `NotImplementedError` naming
-  `"python"`, from `timedependent.check_tevol_method()`, which all three
+  step (`pyitensor/cbe.py` and `mpscpp3/cbe.h`, see "Controlled bond
+  expansion" in section 4.5). v2 and `julia_live` raise
+  `NotImplementedError` naming `"python"`, from
+  `timedependent.check_tevol_method()`, which all three
   dispatch sites (`evolution_dmrg_DC`, `evolve_and_measure_dmrg`,
   `tdz._advance_complex_time_step`) call before any branch: each chain ends
-  in the MPO-Taylor `else`, which v2 and v3 would otherwise reach with this
+  in the MPO-Taylor `else`, which v2 would otherwise reach with this
   name. The session methods are `quench_tdvp_cbe`,
   `evolve_and_measure_tdvp_cbe` and the one-step `tdvp_cbe_step` (TDZ).
 - `tevol_method="TEBD"` (`itensor_version="python"` via
@@ -3759,9 +3760,10 @@ over an ensemble sampled from every sector at once.
 **Spectrum from time-evolved snapshots (`pyitensor/clik.py`,
 `krylovspectrum.py`).** `Many_Body_Chain.get_krylov_spectrum` is the
 eigensolver of arXiv:2509.07709 for any generator G (default `-H`), and is
-Phase 1 of `docs/clik_mps_lindblad_plan.md`. It exists on `"python"` only.
-Every other backend raises `NotImplementedError`, and so does a conserved
-sector, since the random starts are not confined to it. `mode="ED"` is a
+Phase 1 of `docs/clik_mps_lindblad_plan.md`. It exists on `"python"` and
+on `itensor_version=3`. v2 and `julia_live` raise `NotImplementedError`,
+and so does a conserved sector, since the random starts are not confined
+to it. `mode="ED"` is a
 dense `eig` of G in the same order. The evolution is `tdvp_step` with
 `dt -> i z` on the MPO of G itself, so G's Hermiticity picks the
 exponentiator once, as in the chain loops. Two things are easy to get
@@ -3780,11 +3782,45 @@ it agrees with the residual of the reconstructed MPS to three digits. Random sta
 `randomMPS(..., rng=)`, never from the global stream (2026-10-23 finding
 11).
 
+On v3 the same algorithm runs in `cliksession.py`: the orchestration of
+`clik.py` is repeated there, every MPS and MPO operation goes to the
+session, and the small projected problem uses `clik.py`'s own host
+functions, so the two backends cannot drift in the parts that decide the
+numbers. A Hermitian G steps with the session's `tdvp_step`, and any other
+G with `tdvp_arnoldi_step`, two-site TDVP whose local exponentials are an
+Arnoldi port of `tdvp._arnoldi_expm_multiply` (`mpscpp3/cbe.h`). This
+split is needed: ITensor's Lanczos `applyExp` does not converge on a
+Lindbladian (on the seeded 3-site Bose-Hubbard one at dt=0.5 it stops at
+its iteration cap and the next SVD meets a NaN). On a Hermitian H the
+Arnoldi sweep agrees with the vendored TDVP to 5e-15 in the overlap. The
+starts are Gaussian MPS from a `std::mt19937_64` seeded with `seed`
+(`clik_random_starts`), not ITensor's `randomMPS`, whose `randomOrthog`
+draws from `std::random_device` and so cannot be seeded (and `seedRNG(0)`
+is a no-op besides). A v3 run is then reproducible, but its starts are
+not those of `"python"`: over seeds 0 to 4 on the non-Hermitian chains of
+the tests the worst of the four lowest levels spreads the same way on both
+backends, up to 6.4e-4 on v3 and 4.1e-4 on `"python"` for the PT chain.
+The seeded Lindblad starts (`product_mps`) are the same on both. `krylov_spectrum_dmrg` asks `is_hermitian(G)` before it
+sends the sweep parameters, because the witness probe leaves the session
+at a bond dimension of 8: in the other order the whole v3 evolution ran
+at 8 and the levels were 1e-3 off.
+
+Measured on one P-core, BLAS at one thread, nk=20, wall time of the whole
+call (v3 / `"python"`): Heisenberg spin 1/2, maxm=32, dt=0.5, n=12 5.3 s /
+7.2 s and n=24 20.3 s / 32.1 s, the two lowest levels equal to 1e-8 and
+5e-6; driven XXZ (the test model), maxm=64, dt=2, n=4 5.0 s / 3.0 s and n=6
+43.8 s / 26.5 s, steady states agreeing to 1e-4 in `<Sz_0>`; seeded
+Bose-Hubbard, two bosons, dt=0.5, L=3 7.0 s / 3.7 s and L=4 23.4 s /
+11.0 s, the same `<N_0>` to 2e-7. So v3 wins where the step is the
+vendored Lanczos TDVP, and loses by about 2 where it is the Arnoldi sweep
+of `cbe.h`, which is built on ITensor objects and pays their overhead on
+every Krylov vector.
+
 **Open systems (`lindblad.py`, `pyitensor/vectorize.py`).**
 `Lindblad_Chain(chain, jumps, H=None)` builds the vectorized Lindbladian as
 a `MultiOperator` on a doubled chain of the same model class, `Spin_Chain`
-or `Bosonic_Chain` on `"python"`, so that the doubled chain also has the
-model's ED route. Physical site i becomes 2i (the ket) and 2i+1 (the bra).
+or `Bosonic_Chain`, on `"python"` or on v3 when the physical chain is v3,
+so that the doubled chain also has the model's ED route. Physical site i becomes 2i (the ket) and 2i+1 (the bra).
 The bra side needs the transpose of every operator, and `get_dagger`
 cannot give it. `lindblad.transpose` uses an explicit table of names
 instead: `Sy` and `ISy` change sign, ladder operators swap, a listed set of
@@ -3793,7 +3829,9 @@ sites raise, since Jordan-Wigner strings on a doubled chain need the
 superfermion treatment. The spectrum is `krylov_spectrum_dmrg` on the
 doubled chain. Traces come from `vectorize.identity_mps`, which has bond
 dimension d inside each pair and 1 between pairs, so
-`Tr(O r) = <<1|O x 1|r>>` is one linear functional per stored state.
+`Tr(O r) = <<1|O x 1|r>>` is one linear functional per stored state. On
+v3 the same identity and its sector version are built in C++
+(`doubled_identity_mps`, `sector_identity_mps`).
 `mode="ED"` builds `kron(A, B^T)` from the physical matrices, an
 independent route; `tests/test_lindblad.py` matches its `Tr(L^k)` against
 the doubled-chain operator. Strong symmetries are not projected out, so
@@ -3828,8 +3866,11 @@ is reused unchanged: noise on the first sweep of a fresh start only.
 Dispatch: `groundstate.check_dmrg_method` runs in `gs_energy`/`get_gs`
 before `get_mode`, so the ED fallback of a missing extension cannot answer
 a CBE request; it raises `ValueError` for an unknown name or a bad
-`cbe_delta` and `NotImplementedError` naming `"python"` on v2, v3 and
-`julia_live`. The excited-state search and both non-Hermitian routes call
+`cbe_delta` and `NotImplementedError` naming `"python"` on v2 and
+`julia_live`. On v3 `require_cbe_session` raises too when the extension is
+missing or was built before `cbe.h` (no `set_dmrg_method`); the setter
+call in `_session_parameters` is `hasattr`-guarded like `set_bond_ramp`,
+so `"TWO_SITE"` still runs on such a build. The excited-state search and both non-Hermitian routes call
 `require_two_site` and raise too. `method_key` is part of `solver_key`
 and `_send_key`, so switching `dmrg_method` re-solves. `"TWO_SITE"` and
 `"CBE"` are uppercase like `tevol_method`, and `"TDVP_CBE"` follows
@@ -3855,6 +3896,48 @@ rule is left open. Neel quench of the Heisenberg chain, n=14, maxm=32,
 dt=0.1, 60 steps, `<Sz_7>` against ED: TDVP 0.200 s/step, max error
 1.8e-3; TDVP_GSE 0.078 s/step, 1.3e-2, bond stuck at 26; TDVP_CBE 0.116
 s/step, 2.0e-3, bond 32.
+
+On `itensor_version=3` the kernel is `mpscpp3/cbe.h`, a port of `cbe.py`
+on dense ITensor indices, so a conserved sector is refused there. Three
+choices in it were measured. The noise of a fresh start follows the
+local tensor (`random(phi,{"Complex",isComplex(phi)})`): complex noise
+made every tensor of a real Heisenberg solve complex and the whole solve
+about 4x slower. The weight factors of the shrewd selection, steps (a)
+and (b), come from the Gram matrix `T T^dag` (one `diagHermitian`), which
+is safe there because they only rank directions; the isometries, step (c)
+and the final split, stay on full SVDs for the reason above, and step (c)
+takes the orthonormal complement directly instead of a separate SVD.
+Together these took one L=40, maxm=100 Heisenberg solve from 43.5 s to
+11.6 s. The TDVP local steps are ITensor's Lanczos `applyExp`, so
+`TDVP_CBE` on v3 assumes a Hermitian H; the Arnoldi exponential that
+CLIK uses (`cbe::arnoldi_exp`) is not wired into it yet.
+
+Measured on one P-core (`taskset -c 2`), BLAS at one thread (v3 links
+OpenBLAS, numpy here uses MKL), 10 sweeps from a random start, cutoff
+1e-12, s/sweep, with other users' jobs on the other cores:
+
+| model | maxm | v3 two-site | v3 CBE | python two-site | python CBE |
+|---|---|---|---|---|---|
+| Heisenberg S=1/2 L=40 | 50 | 0.097 | 0.142 | 0.274 | 0.424 |
+| Heisenberg S=1/2 L=40 | 100 | 0.264 | 0.413 | 0.918 | 1.529 |
+| Heisenberg S=1 L=40 | 50 | 0.230 | 0.225 | 0.839 | 0.867 |
+| Heisenberg S=1 L=40 | 100 | 2.45 | 2.39 | 4.18 | 4.56 |
+| Hubbard U=4 L=20 (d=2 sites) | 100 | 1.57 | 2.08 | 2.84 | 18.8 |
+| Hubbard U=4 L=40 (d=2 sites) | 100 | 3.61 | 4.80 | 5.52 | not run |
+| Hubbard U=4 L=16 (`_Native`, d=4) | 50 | 0.241 | 0.144 | 0.523 | 0.345 |
+| Hubbard U=4 L=16 (`_Native`, d=4) | 100 | 2.15 | 1.58 | 4.79 | 1.92 |
+| Hubbard U=4 L=32 (`_Native`, d=4) | 100 | 4.13 | 2.11 | 8.13 | 4.77 |
+
+The energies of the four columns agree to 1e-9 on S=1/2, where every
+solve converges; on S=1 and on the d=4 chains they differ from the fifth
+to the eighth digit, which is convergence in 10 sweeps, not the method
+(CBE gives the lower energy in eight of the ten pairs there). So on v3, as in
+pure Python and as the paper predicts, CBE does not pay at d=2, is even at
+d=3 and wins for d=4, by 1.4x to 2x. The `"python"` columns of the first
+six rows are from a run earlier the same day under the same pinning. The
+Neel quench of a Heisenberg chain, L=30, maxm=64, dt=0.1, 20 steps, costs
+0.092 s/step with TDVP and 0.145 with TDVP_CBE on v3, against 0.186 and
+0.117 on `"python"`, with `<Sz_15>` equal between backends to 3e-10.
 
 ### 4.6 The Julia backend (`mpsjulialive/`)
 

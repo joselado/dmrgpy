@@ -192,6 +192,11 @@ PYBIND11_MODULE(_dmrgcpp, m)
              "it there, with the noise term decaying by `noise_decay` per "
              "ramping sweep and off entirely afterwards. enabled=false "
              "restores a flat schedule.")
+        .def("set_dmrg_method",&Chain::set_dmrg_method,py::arg("method"),
+             py::arg("cbe_delta")=0.1,
+             "Ground-state solver of gs_energy(): \"TWO_SITE\" (ITensor's "
+             "dmrg()) or \"CBE\" (one-site DMRG with controlled bond "
+             "expansion, cbe.h). cbe_delta is also read by TDVP_CBE.")
         .def("set_conserved_sector",&Chain::set_conserved_sector,py::arg("qns"),
              "Confine every calculation on this chain to one quantum-number "
              "sector, e.g. [(\"Nf\",6)] for exactly 6 particles, [(\"Sz\",0)] "
@@ -220,6 +225,16 @@ PYBIND11_MODULE(_dmrgcpp, m)
              "Enable/disable ITensor's per-sweep DMRG progress output "
              "(disabled by default)")
         .def("random_mps",&Chain::random_mps)
+        .def("site_dim",&Chain::site_dim,py::arg("site"),"Local dimension at a 1-based site")
+        .def("clik_random_starts",&Chain::clik_random_starts,py::arg("m"),py::arg("seed"),
+             "Two random MPS of bond dimension m from ITensor's generator "
+             "seeded with seed (the CLIK-MPS branch starts)")
+        .def("product_mps",&Chain::product_mps,py::arg("vecs"),
+             "The product state with one local vector per site")
+        .def("doubled_identity_mps",&Chain::doubled_identity_mps,
+             "The vectorized identity |1>> of a doubled chain")
+        .def("sector_identity_mps",&Chain::sector_identity_mps,py::arg("q"),
+             "The vectorized identity of the sector of total charge q")
         .def("set_hamiltonian",[](Chain& self, std::vector<PyTerm> const& terms) {
                 self.set_hamiltonian(terms_from_python(terms));
             }, py::arg("terms"))
@@ -761,6 +776,37 @@ PYBIND11_MODULE(_dmrgcpp, m)
                py::arg("krylov_order"),py::arg("gse_cutoff"),
                "One-site-TDVP-with-global-subspace-expansion counterpart of "
                "evolve_and_measure_tdvp(). Returns (correlator, final_wf)")
+        .def("quench_tdvp_cbe",[](Chain& self, std::vector<PyTerm> const& terms_h,
+                          std::vector<PyTerm> const& terms_i,
+                          std::vector<PyTerm> const& terms_j,
+                          int nt, double dt) {
+                auto out = self.quench_tdvp_cbe(terms_from_python(terms_h),
+                    terms_from_python(terms_i),terms_from_python(terms_j),
+                    nt,dt);
+                return py::make_tuple(out.correlator,out.final_wf);
+            }, py::arg("terms_h"),py::arg("terms_i"),py::arg("terms_j"),
+               py::arg("nt"),py::arg("dt"),
+               "One-site-TDVP-with-controlled-bond-expansion counterpart of "
+               "quench_tdvp(). Returns (correlator, final_wf)")
+        .def("evolve_and_measure_tdvp_cbe",
+            [](Chain& self, std::vector<PyTerm> const& terms_h,
+               std::vector<PyTerm> const& terms_op, MPS const& wf,
+               int nt, double dt) {
+                auto out = self.evolve_and_measure_tdvp_cbe(terms_from_python(terms_h),
+                    terms_from_python(terms_op),wf,nt,dt);
+                return py::make_tuple(out.correlator,out.final_wf);
+            }, py::arg("terms_h"),py::arg("terms_op"),py::arg("wf"),
+               py::arg("nt"),py::arg("dt"),
+               "One-site-TDVP-with-controlled-bond-expansion counterpart of "
+               "evolve_and_measure_tdvp(). Returns (correlator, final_wf)")
+        .def("tdvp_cbe_step",&Chain::tdvp_cbe_step,
+             py::arg("H"),py::arg("wf"),py::arg("dt"),
+             "One CBE-TDVP step of size dt (may be complex) on a copy of wf, "
+             "for a caller that drives the evolution itself (tdz.py)")
+        .def("tdvp_arnoldi_step",&Chain::tdvp_arnoldi_step,
+             py::arg("H"),py::arg("wf"),py::arg("dt"),py::arg("niter")=50,
+             "One two-site TDVP step of size dt (may be complex) with Arnoldi "
+             "local exponentials, for a non-Hermitian H; returns a new MPS")
         .def("quench_tebd",[](Chain& self, std::vector<PyTerm> const& terms_h,
                           std::vector<PyTerm> const& terms_i,
                           std::vector<PyTerm> const& terms_j,

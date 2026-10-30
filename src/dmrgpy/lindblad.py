@@ -114,16 +114,18 @@ def _check_sites(sites):
 
 
 def _doubled_chain(chain):
-    """A chain of the same model with every site doubled, on "python",
-    so that it also has the model's ED route."""
+    """A chain of the same model with every site doubled, so that it also
+    has the model's ED route: on itensor_version=3 when the chain is on 3
+    (cliksession.py), on "python" otherwise."""
     from .bosonchain import Bosonic_Chain
     from .spinchain import Spin_Chain
+    version = 3 if chain.itensor_version == 3 else "python"
     if isinstance(chain, Bosonic_Chain):
         maxnb = [m for m in chain.maxnb for _ in (0, 1)]
-        return Bosonic_Chain(len(maxnb), maxnb=maxnb, itensor_version="python")
+        return Bosonic_Chain(len(maxnb), maxnb=maxnb, itensor_version=version)
     if all(2 <= s <= 6 for s in chain.sites):
         return Spin_Chain([s for s in chain.sites for _ in (0, 1)],
-                          itensor_version="python")
+                          itensor_version=version)
     raise NotImplementedError("Lindblad_Chain: build the chain as a "
                               "Spin_Chain or a Bosonic_Chain")
 
@@ -158,7 +160,8 @@ class Lindblad_Chain():
         operator O of the physical chain. Only the steady state has a
         nonzero trace, so for k > 0 obs gives Tr(O r_k) with ||r_k|| = 1.
         DMRG is get_krylov_spectrum on the doubled chain
-        (itensor_version="python"); mode="ED" diagonalizes L densely.
+        (itensor_version="python", or 3 for a chain on 3); mode="ED"
+        diagonalizes L densely.
 
         The real branch reaches the steady state only once nk*dt is several
         times the inverse dissipative gap: on a driven 4-site XXZ chain with
@@ -210,8 +213,6 @@ class Lindblad_Chain():
     def _spectrum_dmrg(self, nk, dt, alpha, gram_tol, seed, start=None,
                        exact_residuals=False, substeps=1):
         from .krylovspectrum import _res, krylov_spectrum_dmrg
-        from .pyitensor.mpsalgebra import inner
-        from .pyitensor.vectorize import identity_mps
         dc = self.doubled
         starts = None if start is None else self._seeds(*start)
         ks = krylov_spectrum_dmrg(dc, self.L, nk=nk, dt=dt, alpha=alpha,
@@ -225,12 +226,13 @@ class Lindblad_Chain():
         if start is not None and ks.sector_deflation:
             keep = self._in_sector(ks, sum(start[0])) <= 0.5
             lam, res, C = lam[keep], res[keep], C[:, keep]
-        one = identity_mps(dc._session.sites)
+        inner, sandwich, mpo = self._algebra()
+        one = self._identity()
         traces = np.array([inner(one, rho) for rho in ks.states])
 
         def obs(O, k):
-            Om = dc._session._mpo(on_sublattice(O, 0).to_terms())
-            t = np.array([inner(one, Om, rho) for rho in ks.states])
+            Om = mpo(on_sublattice(O, 0))
+            t = np.array([sandwich(one, Om, rho) for rho in ks.states])
             c = C[:, k]
             value = c @ t
             tr = c @ traces
@@ -238,6 +240,25 @@ class Lindblad_Chain():
                 return value / tr
             return value / np.sqrt(abs(np.vdot(c, ks.M @ c)))
         return lam, res, obs
+
+    def _algebra(self):
+        """(inner, sandwich, mpo) on the doubled chain's session."""
+        dc = self.doubled
+        if dc.itensor_version == 3:
+            s = dc._session
+            return (lambda a, b: complex(s.overlap(a, b)),
+                    lambda a, A, b: complex(s.overlap_aMb_operator(a, A, b)),
+                    lambda op: dc.toMPO(op).cpp_handle)
+        from .pyitensor.mpsalgebra import inner
+        return (inner, inner, lambda op: dc._session._mpo(op.to_terms()))
+
+    def _identity(self):
+        """|1>> of the doubled chain."""
+        dc = self.doubled
+        if dc.itensor_version == 3:
+            return dc._session.doubled_identity_mps()
+        from .pyitensor.vectorize import identity_mps
+        return identity_mps(dc._session.sites)
 
     def _charge(self, j):
         """The charge of site j of the doubled chain, the index of its
@@ -253,14 +274,20 @@ class Lindblad_Chain():
         matrix elements between the stored snapshots. A mode of another
         sector has at least 1, since the charges are integers; a mode of
         the seed's sector only the leak of the snapshots."""
-        from .pyitensor.mpsalgebra import BatchedBras, mpo_arrays_device
         n = len(self.chain.sites)
         qk = sum(self._charge(2 * i) for i in range(n)) - q
         qb = sum(self._charge(2 * i + 1) for i in range(n)) - q
-        W = mpo_arrays_device(self.doubled._session._mpo((qk * qk + qb * qb)
-                                                         .to_terms()))
-        bb = BatchedBras(ks.states)
-        Qm = np.array([bb.sandwiches(W, rho) for rho in ks.states]).T
+        Q = qk * qk + qb * qb
+        if self.doubled.itensor_version == 3:
+            _, sandwich, mpo = self._algebra()
+            Qmpo = mpo(Q)
+            Qm = np.array([[sandwich(a, Qmpo, b) for b in ks.states]
+                           for a in ks.states])
+        else:
+            from .pyitensor.mpsalgebra import BatchedBras, mpo_arrays_device
+            W = mpo_arrays_device(self.doubled._session._mpo(Q.to_terms()))
+            bb = BatchedBras(ks.states)
+            Qm = np.array([bb.sandwiches(W, rho) for rho in ks.states]).T
         C = ks.coefficients
         num = np.einsum("ik,ij,jk->k", C.conj(), Qm, C)
         den = np.einsum("ik,ij,jk->k", C.conj(), ks.M, C)
@@ -272,10 +299,14 @@ class Lindblad_Chain():
         if len(psi) != n or len(phi) != n:
             raise ValueError("Lindblad_Chain: start=(psi, phi) needs one "
                              "basis state per site, %d of them" % n)
-        sites = self.doubled._session.sites
+        dc = self.doubled
+        if dc.itensor_version == 3:
+            dim = dc._session.site_dim
+        else:
+            dim = dc._session.sites.dim
 
         def basis(k, j):
-            v = np.zeros(sites.dim(k), dtype=complex)
+            v = np.zeros(dim(k), dtype=complex)
             v[j] = 1.0
             return v
         p = [basis(2 * i + o, psi[i]) for i in range(n) for o in (1, 2)]

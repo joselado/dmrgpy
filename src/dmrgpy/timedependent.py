@@ -45,18 +45,23 @@ def check_tevol_method(self):
             +", ".join(repr(m) for m in TEVOL_METHODS)
             +". (An unrecognized method used to run the legacy MPO-Taylor "
             "integrator silently.)")
-    # "TDVP_CBE" exists on itensor_version="python" only. Every dispatch
-    # below ends in the MPO-Taylor else-branch, which v2 and v3 would reach
-    # with this name, and julia_live has no such integrator either, so the
-    # request is refused here, ahead of every branch, rather than answered
-    # by a different integrator.
-    if self.tevol_method=="TDVP_CBE" and self.itensor_version!="python":
+    # "TDVP_CBE" exists on itensor_version="python" and 3 only. Every
+    # dispatch below ends in the MPO-Taylor else-branch, which v2 would
+    # reach with this name, and julia_live has no such integrator either,
+    # so the request is refused here, ahead of every branch, rather than
+    # answered by a different integrator.
+    from .groundstate import CBE_BACKENDS
+    if self.tevol_method=="TDVP_CBE" and self.itensor_version not in CBE_BACKENDS:
         raise NotImplementedError(
             "tevol_method='TDVP_CBE' (one-site TDVP with controlled bond "
-            "expansion) is implemented on itensor_version=\"python\" only, "
-            "and this chain uses itensor_version=%r. Switch the chain with "
-            "setup_python(), or use tevol_method=\"TDVP\" or \"TDVP_GSE\"."
+            "expansion) is implemented on itensor_version=\"python\" and 3 "
+            "only, and this chain uses itensor_version=%r. Switch the chain "
+            "with setup_python() or setup_cpp(version=3), or use "
+            "tevol_method=\"TDVP\" or \"TDVP_GSE\"."
             %(self.itensor_version,))
+    if self.tevol_method=="TDVP_CBE":
+        from .groundstate import require_cbe_session
+        require_cbe_session(self,"tevol_method='TDVP_CBE'")
 
 
 def _is_tebd_nn_error(exc):
@@ -205,7 +210,7 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
                 lambda: self._session.quench_tdvp(
                     self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
                     int(nt),dt))
-    elif self.itensor_version=="python" and self.tevol_method=="TDVP_CBE":
+    elif self.itensor_version in (3,"python") and self.tevol_method=="TDVP_CBE":
         correlator,_wf = self._session.quench_tdvp_cbe(
                 self.hamiltonian.to_terms(),A.to_terms(),B.to_terms(),
                 int(nt),dt)
@@ -323,7 +328,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
                 lambda: self._session.evolve_and_measure_tdvp(
                     h.to_terms(),operator.to_terms(),wf.cpp_handle,
                     int(nt),dt))
-    elif self.itensor_version=="python" and self.tevol_method=="TDVP_CBE":
+    elif self.itensor_version in (3,"python") and self.tevol_method=="TDVP_CBE":
         correlator,_wf = self._session.evolve_and_measure_tdvp_cbe(
                 h.to_terms(),operator.to_terms(),wf.cpp_handle,
                 int(nt),dt)
