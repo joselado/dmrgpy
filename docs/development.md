@@ -5776,6 +5776,53 @@ one level, 2n+1 for two, measured in ED), so it is degenerate and one
 member of it looks unscreened, and `anderson_chain` warns. Tests are in
 `tests/test_kondo_screening.py`.
 
+### 4.8e Open and renormalized Wilson chains (`wilsonchain.py`)
+
+This is Bruognolo et al., PRB 95, 121115(R) (2017), arXiv:1611.05291. We
+found no open-source implementation to mirror (the authors used their own
+QSpace code), so it is written from the paper and its supplement.
+`open_wilson_chain()` builds the continued fraction of the bath correlator
+with the paper's "version 2" windows, the slow window shrinking by Lambda
+per site, and returns an `OpenWilsonChain` with the chain (`eps`, `tS`),
+the own bath of every site (`tF`, `fast`), the last slow bath (`slow`) and
+the static shifts (`dF`, `dS`); `renormalized(n, kind)` gives the C0, C1
+and C2 chains of eq. 4. The continuum is represented by a fine star,
+`bath_star()`, with `nsub` levels per factor Lambda, each at the harmonic
+mean of its interval so that `int A/omega` is exact, and every step of the
+continued fraction is then exact algebra on poles: the poles of Sigma_k
+are the zeros of G_k, found by a vectorized bisection relative to the pole
+on their left (so energies down to Lambda^-nint keep their relative
+precision), with weights 1/|G_k'|. As a result the open chain gives the
+star's correlator to 1e-11 at any complex frequency, and C2 gives
+Re G_bath(0) of the continuum to 1e-10 at every length whenever the
+spectrum vanishes at omega=0 (a bosonic omega^s bath, a pseudogap). The
+coefficients themselves converge to the continuum ones as 1/nsub (about
+1% at nsub=8, compared with nsub=16). With a finite density of states at
+the Fermi level a pole of Sigma_k can sit at omega=0 (exactly at 0 on a
+symmetric band), so the shifts there are principal values, regularized by
+a Lorentzian of width 3 Dmax Lambda^-nint; C2 is then an approximation,
+since Im Sigma(0) is not zero. The paper's finite-temperature NRG
+averages (TW, GW) are left out: we use its GV scheme, the ground state of
+a chain of length N_T, which is what DMRG gives. Its multilevel VMPS for
+level flow diagrams and its optimized boson basis are not implemented.
+
+The statistics do not enter the construction. `boson_bath_chain()` gives
+the chain of Gamma = 2 alpha wc^(1-s) omega^s, `spin_boson_chain()` and
+`oscillator_chain()` put the spin-boson model and the dissipative
+oscillator on it as a `Bosonic_Chain`, with the spin as a two-level boson
+site (sz = 2N-1, sx = A + A^dag) because `SpinBoson_Chain` has no ED
+backend; that is exact and gives the ED cross-check. `anderson_chain`
+takes `kind=` and builds the renormalized chains with sqrt(Lambda) per
+site, so that site n has the energy D Lambda^-n/2 on every kind.
+`star_levels`/`wilson_chain` accept a one-sided band (emin = 0), which is
+the standard Wilson chain of a bosonic bath. On the dissipative
+oscillator at alpha=0.1, s=0.4, Omega=1, Lambda=2 (exact chi = 2) the
+standard chain gives 1.49 on 2 sites, 1.90 on 12 and saturates at 1.93,
+C0 saturates at 1.54, C1 reaches 1.98 on 12 sites, and C2 gives 2 to
+1e-10 at every length; DMRG on "python" on a C2 chain matches ED to 1e-8
+and the exact value to 4e-6 (8 bosons per site). Tests are in
+`tests/test_open_wilson_chain.py`.
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,
@@ -6506,7 +6553,7 @@ design history is in `docs/pyitensor_gpu_port_plan.md`.
 | `src/dmrgpy/kpmdmrg.py` | Kernel Polynomial Method dynamical correlators |
 | `src/dmrgpy/nonhermitian/kpm.py` | non-Hermitian KPM dynamical correlator (NHKPM.jl port, ED + itensor_version=3) |
 | `src/dmrgpy/tdz.py` | complex-time-evolution dynamical correlator ("TDZ", arXiv:2311.10909) |
-| `src/dmrgpy/wilsonchain.py`, `kondoscreening.py` | Wilson chain of a band, Anderson impurity on it, and the NRG-MPS screening diagnostics (arXiv:2501.10746) |
+| `src/dmrgpy/wilsonchain.py`, `kondoscreening.py` | Wilson chain of a band, open and renormalized Wilson chains (arXiv:1611.05291), Anderson and spin-boson impurities on them, and the NRG-MPS screening diagnostics (arXiv:2501.10746) |
 | `examples/` | 100+ self-contained example scripts (also the regression suite) |
 | `examples/backend_comparison/`, `v2_VS_v3_*` examples within each theme folder | backend-vs-backend correctness comparisons |
 | `examples/groundstate/backend_timing_gs_energy/` | backend-vs-backend timing comparison |

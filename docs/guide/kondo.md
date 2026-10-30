@@ -316,3 +316,94 @@ The diagnostics are expectation values, so `mode="ED"` gives the exact
 values on a short chain, and `get_kondo_screening(imp=..., bath=...)`
 works on any spinful chain. See `examples/kondo/kondo_screening_field` and
 `examples/kondo/kondo_screening_su4`.
+
+## Open Wilson chains
+
+We now see how to keep the bath modes that a Wilson chain drops. We follow
+Bruognolo et al., arXiv:1611.05291. A chain of $N$ sites stands for the
+bath at the temperature $T \sim \Lambda^{-N}$, and the modes below that
+scale are missing. They do not only broaden the levels, they also shift
+them, because the bath correlator at zero frequency,
+
+$$
+\mathrm{Re}\, G_{\text{bath}}(0) = -\int d\omega \, \frac{A(\omega)}{\omega},
+$$
+
+is not zero when the spectrum $A(\omega)$ is not symmetric. For a bosonic
+bath it is never symmetric. A chain that misses part of this shift gives a
+renormalized impurity energy that depends on $N$, so on $T$. This is what
+is called the mass-flow problem.
+
+The open Wilson chain is a continued fraction of the bath correlator. At
+site $k$ the self-energy is split by energy: the part inside the window
+$\Lambda^{-(k+1)}$ times the band becomes site $k+1$, the rest stays as
+the own bath $F_k$ of site $k$, with the coupling $t^F_k$. The chain with
+all these baths is exact. The renormalized chain keeps only the static
+part of the baths it drops, as onsite shifts,
+
+$$
+\tilde\epsilon_k = \epsilon_k + \delta\epsilon^F_k
+  + \delta_{k,N-1}\,\delta\epsilon^S_{N-1}, \qquad
+\delta\epsilon^X_k = \mathrm{Re}\,\Sigma^X_k(0).
+$$
+
+Chain C0 has no shifts, C1 the fast shifts only, C2 also the slow shift of
+the last site. C2 gives $\mathrm{Re}\, G_{\text{bath}}(0)$ exactly at any
+length, meaning that a static quantity does not drift with $N$.
+
+```python
+from dmrgpy import wilsonchain
+owc = wilsonchain.open_wilson_chain(20, Lambda=2.0, band=(0.0, 1.0),
+                                    dos=lambda e: e**0.4)
+for kind in ["C0", "C1", "C2"]:
+    eps, t = owc.renormalized(10, kind=kind)
+    print(kind, wilsonchain.chain_green(eps, t).real)
+
+bc = wilsonchain.spin_boson_chain(6, alpha=0.1, s=0.4, Delta=0.1, eps=0.01,
+                                  kind="C2", maxnb=8)
+bc.maxm = 40
+bc.nsweeps = 20
+print(bc.vev(bc.x_imp).real)
+```
+
+For the sub-Ohmic bath $A \propto \omega^{0.4}$ the exact value is
+$-(s+1)/s = -3.5$. On 10 sites C0 gives $-2.44$, C1 gives $-3.42$, and C2
+gives $-3.5$ to 1e-15. The arrays `owc.eps`, `owc.tS`, `owc.tF`, `owc.dF`
+and `owc.dS` are the chain, and `owc.bath_spectrum(k, omega, eta)` is the
+spectrum $\Gamma^F_k(\omega)$ of the own bath of site $k$.
+
+The second part is the spin-boson model,
+$H = -\frac{\Delta}{2}\sigma_x + \frac12\sigma_z\left(\epsilon + t_{\text{imp}}(b+b^\dagger)\right) + H_{\text{bath}}$,
+with $\Gamma(\omega) = 2\alpha\,\omega_c^{1-s}\omega^s$, on a C2 chain of 6
+bosonic sites. The spin is site 0, a two-level site, and `bc.x_imp` is
+$\sigma_z$. Its response to the bias, $\chi = d\langle\sigma_z\rangle/d\epsilon$
+on a chain of length $N$, is the susceptibility at $T \sim \Lambda^{-N}$,
+as in the paper. `oscillator_chain` builds the dissipative harmonic
+oscillator in the same way. That model is quadratic, so its
+susceptibility $1/(\Omega - 2\alpha/s)$ is known exactly. The standard
+Wilson chain at $\Lambda=2$, $\alpha=0.1$, $s=0.4$, $\Omega=1$ gives 1.67 on
+4 sites and 1.93 on 40 sites instead of 2, while C2 gives 2 at every
+length, and DMRG on C2 agrees with it to 1e-5.
+
+- `n`: the number of chain sites. Site $k$ has the energy
+  $\Lambda^{-k}$ times the band, on a bosonic and on a fermionic bath.
+- `Lambda`: the factor by which the slow window shrinks per site.
+- `band`, `dos`: the support and the shape of the bath spectrum. A
+  bosonic bath has `band=(0, wc)`.
+- `kind`: `"C0"`, `"C1"` or `"C2"`. Use C2 to remove the mass flow.
+  `anderson_chain(..., kind="C2")` and `boson_bath_chain` take it too,
+  and `"standard"` is the Wilson chain of the section above.
+- `nsub`: levels per factor $\Lambda$ in the fine discretization of the
+  bath. The chain coefficients converge as $1/\texttt{nsub}$, about 1% at
+  the default 8. The static identities hold at any value.
+- `maxnb`: bosons per chain site. The C2 shift lowers the energy of the
+  last site, so that site needs more bosons near a critical point.
+
+What we neglect is the dynamics of the dropped baths: only their static
+shift is kept, so the chain has no dissipation. For a fermionic band with
+a finite density of states at the Fermi level the self-energies have an
+imaginary part at $\omega=0$, and then C2 is an approximation, not an
+identity. For a symmetric band all the shifts vanish, and C0, C1 and C2
+are the same chain. The finite-temperature NRG averages of the paper are
+not used: as in its variational MPS results, the temperature is the length
+of the chain. See `examples/kondo/open_wilson_chain_mass_flow`.

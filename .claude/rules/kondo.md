@@ -125,3 +125,11 @@ diagnostic is a vev (M_imp = 4<Sz_imp^2>, M_n = 4<Sz_imp Sz_n>, Schmidt
 coefficients from the single-occupancy block of the impurity density
 matrix), so ED cross-checks it; what limits it is `maxm`, see
 `docs/development.md` 4.8d. `tests/test_kondo_screening.py`.
+
+**Open Wilson chains (2026-10-30)**, arXiv:1611.05291, are in `wilsonchain.py`
+(`open_wilson_chain`, `renormalized_wilson_chain`, `boson_bath_chain`,
+`spin_boson_chain`, `oscillator_chain`, `anderson_chain(kind=)`): C2 must give
+Re G_bath(0) of the continuum at every length for a spectrum that vanishes
+at omega=0, which `tests/test_open_wilson_chain.py` pins to 1e-10; for a
+finite density of states at the Fermi level the shifts are regularized
+principal values and C2 is only approximate. See `docs/development.md` 4.8e.
