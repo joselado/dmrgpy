@@ -550,6 +550,26 @@ the trace by more than $10^{-2}$ of $\lVert 1_q\rVert$. On 3 sites with
 ten times the dissipation it settles on 8 and takes the occupations from
 0.86 to 3e-4 off ED at the same cost.
 
+A rejected step restarts the whole branch at the doubled count, since at
+5 sites the first step at one sub-step passes the gate (the trace off by
+6e-3 of $\lVert 1_q\rVert$, the state already 3e-4 out of the sector)
+and only the second fails. The trace test cannot be made tighter instead:
+on the guide's 6-site XXZ chain, where nothing is unstable, truncation
+moves the trace by up to 1.2e-3 of $\lVert 1\rVert$, and a stable
+sub-stepped 5-site step by 1.3e-3. Norm growth and overflow are checked
+on both branches whenever a left steady state is known.
+
+**A looser Krylov error goal is not a lever.** Earlier tonight
+`errgoal=1e-6` looked 2.3 times faster on 5 sites; that was the broken
+stopping test, and its result was garbage. With the test relative to the
+result, `errgoal=1e-6` on the stiff 3-site case gives occupations 0.26 off
+ED, against 3e-4 at the default 1e-10. The goal stays where it is.
+
+**The contour angle may matter more than the probe assumes.** On the
+seeded 3-site Bose-Hubbard case at dt=0.5, the probe picks 0.39 and the
+slowest pair is 2.6e-4 off ED; at a fixed angle of 0.2 it is 2.9e-6 off.
+One data point, recorded and not acted on.
+
 **The Davidson commit broke five tests**, all outside the Lindblad code.
 `b131b53` (2026-10-25) fails them and its parent passes them:
 `test_audit_2026_09_24b_groundstate.py` (three Kondo crossing tests),
