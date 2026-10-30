@@ -40,7 +40,9 @@ def _check_tevol_method(self,methods=("TDVP","TDVP_GSE")):
         raise NotImplementedError(
             "itensor_version='julia_live' implements tevol_method "
             +", ".join(repr(m) for m in methods)+" for this operation "
-            "(got "+repr(self.tevol_method)+")")
+            "(got "+repr(self.tevol_method)+")"
+            +("; 'TDVP_CBE' exists on itensor_version=\"python\" only"
+              if self.tevol_method=="TDVP_CBE" else ""))
 
 
 def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,**kwargs):

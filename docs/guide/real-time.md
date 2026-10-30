@@ -98,6 +98,17 @@ example the return amplitude $\langle\psi(0)|\psi(t)\rangle$.
   `sc.tdvp_gse_sweeps` steps (default 3); the other settings are
   `sc.tdvp_gse_krylov_order` (default 3) and `sc.tdvp_gse_cutoff`
   (default $10^{-8}$).
+- `"TDVP_CBE"`: one-site TDVP with controlled bond expansion (Li, Gleis
+  and von Delft, [arXiv:2208.10972](https://arxiv.org/abs/2208.10972)).
+  Before each local step, the bond gets the few new states on which
+  $H|\psi\rangle$ has weight outside the current bond space, and after it
+  the bond is cut back to `sc.maxm`. Like `"TDVP_GSE"` it starts well from
+  a product state, but the bond keeps growing at every step, so it follows
+  a quench whose entanglement grows for a long time. Its accuracy is the
+  one of `"TDVP"`. `sc.cbe_delta` (default 0.1) sets how far a bond is
+  expanded, to $(1+\delta)$`maxm` states. Only on
+  `itensor_version="python"`; the other backends raise an error. See
+  `examples/time_evolution/tdvp_cbe_VS_ED_time_evolution`.
 - `"TEBD"`: second-order Trotter evolution with two-site gates. Faster
   than TDVP, but only for nearest-neighbor Hamiltonians; otherwise it
   raises an error. A `Spinful_Fermionic_Chain_Native` Hubbard chain is

@@ -166,6 +166,16 @@ class Many_Body_Chain():
       # entirely once the schedule reaches the full self.maxm, so the
       # final, converged sweeps are noise-free.
       self.bond_ramp_noise_decay = 0.1
+      self.dmrg_method = "TWO_SITE" # ground-state solver: "TWO_SITE"
+          # (two-site DMRG, every backend) or "CBE" (one-site DMRG with
+          # controlled bond expansion, Gleis, Li, von Delft, PRL 130,
+          # 246402 (2023); itensor_version="python" only, pyitensor/cbe.py;
+          # any other backend raises). Only the ground-state solve reads
+          # it; the excited-state, generalized and non-Hermitian solves
+          # raise under "CBE" (groundstate.require_two_site).
+      self.cbe_delta = 0.1 # "CBE" and tevol_method="TDVP_CBE": each bond is
+          # expanded to (1+cbe_delta)*maxm before a one-site update and
+          # trimmed back to maxm after it (the paper's delta)
       self.verbose = False # print the C++ DMRG per-sweep progress output
       self.kpmcutoff = 1e-12 # cutoff in KPM
       self.cutoff = 1e-12 # cutoff in ground state
@@ -176,6 +186,10 @@ class Many_Body_Chain():
           # evolve_and_measure_tdvp()), "TDVP_GSE" (one-site TDVP with
           # Krylov global subspace expansion, arXiv:2005.06104 -- same
           # itensor_version support as "TDVP"; see tdvp_gse_* below),
+          # "TDVP_CBE" (one-site TDVP with controlled bond expansion
+          # before every local step, arXiv:2208.10972, pyitensor/cbe.py --
+          # itensor_version="python" only, every other backend raises; the
+          # bond grows up to maxm at every step, see cbe_delta),
           # "TEBD" (2nd-order-Trotter TEBD, pyitensor/tebd.py or
           # mpscpp3/tebd.h -- itensor_version in (3,"python"), and only
           # for a strictly nearest-neighbor Hamiltonian; gates are built
@@ -1336,6 +1350,8 @@ class Many_Body_Chain():
       solvers, and returns the stored state under the same condition. With
       best=True the lowest of n solves is kept (groundstate.best_gs), and
       every keyword but wf0= goes to each solve."""
+      if mode=="DMRG" and self.mode!="ED":
+          groundstate.check_dmrg_method(self) # see gs_energy()
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG": # DMRG mode
         # stored and still valid, and the call asks nothing the stored
@@ -1384,6 +1400,10 @@ class Many_Body_Chain():
       maxdepth= are met by the exact solve; any other keyword raises
       TypeError. The energy returned there is the lowest eigenvalue, also
       after wf0=x with reconverge=False, as after set_gs(x)."""
+      if mode=="DMRG" and self.mode!="ED":
+          # before the mode is resolved, so that a missing extension's ED
+          # fallback cannot answer a "CBE" request either
+          groundstate.check_dmrg_method(self)
       mode = self.get_mode(mode=mode) # overwrite mode
       if mode=="DMRG":
           # not just computed_gs: a stored energy is only an answer to
