@@ -602,7 +602,10 @@ matches ED ($\lambda_1$: 2.1e-4). A mode of another sector has at least
 checks out now drops the modes above 0.5. On the 5-site run the list
 that remains is the steady state ($-0.0057$), $\lambda_1$ (7e-4 off),
 its partner (8e-3), $-1.328$ (2e-2 off $-1.348$), $-1.453+1.450i$
-(4e-3) and $-1.492-1.477i$ (5e-2): the ED spectrum in order. The steady
+(4e-3) and $-1.492-1.477i$ (5e-2): the ED spectrum in order. This was
+then run end to end on the committed code (`bh5_head.py`, 2438 s): the
+filter kept 19 of the 40 Ritz modes, and the list above came out as
+stated. The steady
 state eigenvalue, 5.7e-3 from zero, is the largest remaining error; the
 occupations are 1e-3 off.
 
