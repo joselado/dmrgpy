@@ -148,8 +148,9 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
 
 def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
                     angles=None, niter=50, hermitian=None, one_site=False):
-    """The first angle of `angles` at which the complex contour stops being
-    stable, or pi/2 if none does (the paper's Algorithm 3).
+    """The first angle of the increasing grid `angles` at which the
+    complex contour stops being stable, or pi/2 if none does (the paper's
+    Algorithm 3), found by bisection.
 
     Along z = dt exp(-i a), the log-norm of exp(G z m)|psi0> is shifted by
     Re(lam0 z m), lam0 the slowest eigenvalue found on the real contour, so
@@ -168,7 +169,8 @@ def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
         hermitian = mpo_is_hermitian(G)
     if angles is None:
         angles = np.pi / 2 * np.arange(1, 8) / 8.0
-    for a in angles:
+
+    def unstable(a):
         z = dt * np.exp(-1j * a)
         psi = psi0.copy()
         psi.normalize()
@@ -177,9 +179,27 @@ def probe_alpha_max(G, psi0, lam0, dt, cutoff, maxdim, nsteps=8,
             psi, lognorm = _step(psi, G, z, cutoff, maxdim, niter, hermitian,
                                  one_site)
             increments.append(lognorm - (lam0 * z).real)
-        if np.mean(increments[nsteps // 2:]) > 0.0:
-            return float(a)
-    return np.pi / 2
+        return np.mean(increments[nsteps // 2:]) > 0.0
+
+    # Bisection for the first unstable angle. For each mode, xi_k - xi_0 is
+    # A cos(a) + B sin(a) with A > 0, which changes sign at most once on
+    # (0, pi/2), so once some mode overtakes it stays ahead at every larger
+    # angle. The smallest angle is tried first, since it is already
+    # unstable on some chains (the driven 4-site XXZ chain), and the rest
+    # of the grid is bisected: 1 to 4 probes on the default grid. The scan
+    # this replaces ran all 7 (56 evolution steps) whenever every angle
+    # was stable, as on the 3-site Bose-Hubbard Lindbladian, more than the
+    # two branches together at nk=20.
+    if len(angles) == 0 or unstable(angles[0]):
+        return float(angles[0]) if len(angles) else np.pi / 2
+    lo, hi = 1, len(angles)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if unstable(angles[mid]):
+            hi = mid
+        else:
+            lo = mid + 1
+    return float(angles[lo]) if lo < len(angles) else np.pi / 2
 
 
 def _deflated(psi, d):
