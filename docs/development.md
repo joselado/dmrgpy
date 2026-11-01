@@ -3923,11 +3923,19 @@ difference built as an exact direct sum), taken once per
 `tdvp_cbe_step`, as `"python"` does. On a driven XXZ Lindbladian on the
 doubled chain of 3 sites, 20 steps exp(dt L) at dt=0.1 from a product
 state give the same `<Sz_i>` on v3 and `"python"` to 1e-13; the Lanczos
-route was 3e-10 away, so it did not fail there, it only stopped following
-`"python"`. Both backends approach exp(tL) linearly in dt, 0.075 at
-dt=0.5, 0.012 at dt=0.1 and 0.0023 at dt=0.02 on the worst `<Sz_i>`,
-which is a property of one-site CBE-TDVP on a non-Hermitian generator and
-is left open.
+route was 9e-10 away (3e-10 at dt=0.5, 4 steps), so it did not fail there,
+it only stopped following `"python"`, and the test's 1e-11 bound catches
+it. Per step, on one P-core with BLAS at one thread (v3 / `"python"`): the
+Neel quench of a Heisenberg chain, L=30, maxm=64, dt=0.1, 0.065 s / 0.107 s
+on the Lanczos route; the driven XXZ Lindbladian above on the Arnoldi
+route, maxm=64, dt=0.1, 0.0137 s / 0.0152 s on 4 physical sites and
+0.155 s / 0.121 s on 8. So v3 wins on the Lanczos route and loses by about
+1.3x on the Arnoldi one, which is built on ITensor objects, as for CLIK. Both backends approach exp(tL) linearly in dt, 0.075 at
+dt=0.5, 0.012 at dt=0.1 and 0.0023 at dt=0.02 on the worst `<Sz_i>`.
+The two-site Arnoldi TDVP (`tdvp_arnoldi_step`) gives the same three
+numbers from the same start, at a bond dimension that truncates nothing,
+so this is the TDVP integrator on this generator and not the expansion;
+it is left open.
 
 Measured on one P-core (`taskset -c 2`), BLAS at one thread (v3 links
 OpenBLAS, numpy here uses MKL), 10 sweeps from a random start, cutoff

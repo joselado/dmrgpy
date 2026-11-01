@@ -211,7 +211,7 @@ def _sz_profile(d, psi):
 
 def test_cbe_tdvp_on_a_lindbladian_follows_python_and_exact():
     """Arnoldi local steps on v3 reproduce "python" step for step (the
-    Lanczos applyExp route was 3e-10 away), and both approach exp(t L)
+    Lanczos applyExp route is 9e-10 away here), and both approach exp(t L)
     linearly in dt, 0.075 at dt=0.5 and 0.012 at dt=0.1 on <Sz_i>."""
     from dmrgpy.multioperator import MO2matrix
     d3, psi3, v = _lindblad_cbe_steps(3, 0.1, 20)

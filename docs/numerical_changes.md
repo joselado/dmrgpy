@@ -1269,3 +1269,11 @@ $\langle(Q_\mathrm{ket}-q)^2+(Q_\mathrm{bra}-q)^2\rangle$ exceeds 0.5. So
 `lam`, `res` and the index `k` of `obs` can shift where such modes were
 present. On the 5-site Bose-Hubbard check four of the five slowest values
 were dropped, all with variance 2.4 to 8.8; on 3 and 4 sites nothing is.
+
+## The 2026-11-01 non-Hermitian TDVP_CBE on v3
+
+`tevol_method="TDVP_CBE"` on `itensor_version=3` now takes Arnoldi local
+steps for a non-Hermitian H, as `"python"` does, and Lanczos steps for a
+Hermitian one, which are unchanged. On a driven 3-site XXZ Lindbladian on
+the doubled chain, 20 steps exp(dt L) at dt=0.1 from a product state, the
+worst `<Sz_i>` moves by 9e-10 and now equals the `"python"` value to 1e-13.
