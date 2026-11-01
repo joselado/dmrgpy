@@ -147,8 +147,9 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,restart=True,**kwargs):
     self.tevol_method="TDVP_CBE" runs one-site TDVP with controlled bond
     expansion before every local step (pyitensor/cbe.py, Li, Gleis, von
     Delft, arXiv:2208.10972), so the bond keeps growing up to maxm at every
-    step; itensor_version="python" only, every other backend raises
-    (check_tevol_method).
+    step; itensor_version="python" and 3 (mpscpp3/cbe.h) only, every
+    other backend raises (check_tevol_method). Both take Arnoldi local
+    steps for a non-Hermitian H and Lanczos ones otherwise.
 
     self.tevol_method="TEBD" instead runs 2nd-order-Trotter TEBD (gates
     built once from the bare nearest-neighbor bond Hamiltonians, reused

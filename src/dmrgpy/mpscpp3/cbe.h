@@ -473,24 +473,37 @@ dmrg_cbe(MPS& psi, MPO const& H, std::vector<SweepParams> const& sweeps,
 // CBE-TDVP
 // ------------------------------------------------------------------------
 
+// Forward declaration: the Arnoldi exponential is defined further below,
+// with the two-site TDVP that also uses it.
+template<class BigM>
+void
+arnoldi_exp(BigM const& A, ITensor& phi, Cplx coeff, int niter,
+            double errgoal=1e-10, double tol=1e-12, int max_substeps=1000);
+
+// The local exponentials of CBE-TDVP: ITensor's Lanczos applyExp() for a
+// Hermitian H, as in TDVP/tdvp.h, and arnoldi_exp() otherwise, which is
+// cbe.py's _krylov(hermitian) switch.
 inline void
 forward(ITensor const& L, ITensor const& W, ITensor const& R, ITensor& phi,
-        Cplx tau, int niter)
+        Cplx tau, int niter, bool hermitian)
     {
     OneSiteH Heff(L,W,R,phi);
-    applyExp(Heff,phi,Cplx(0,-1)*tau,{"MaxIter",niter});
+    if (hermitian) applyExp(Heff,phi,Cplx(0,-1)*tau,{"MaxIter",niter});
+    else arnoldi_exp(Heff,phi,Cplx(0,-1)*tau,niter);
     }
 
 inline void
-backward(ITensor const& L, ITensor const& R, ITensor& phi, Cplx tau, int niter)
+backward(ITensor const& L, ITensor const& R, ITensor& phi, Cplx tau,
+         int niter, bool hermitian)
     {
     ZeroSiteH Heff(L,R,phi);
-    applyExp(Heff,phi,Cplx(0,1)*tau,{"MaxIter",niter});
+    if (hermitian) applyExp(Heff,phi,Cplx(0,1)*tau,{"MaxIter",niter});
+    else arnoldi_exp(Heff,phi,Cplx(0,1)*tau,niter);
     }
 
 inline void
 half_sweep_lr(MPS& psi, MPO const& H, Cplx tau, double cutoff, int maxdim,
-              double delta, int niter, bool shrewd)
+              double delta, int niter, bool shrewd, bool hermitian)
     {
     int n = length(psi);
     std::vector<ITensor> Lenv, Renv;
@@ -507,7 +520,7 @@ half_sweep_lr(MPS& psi, MPO const& H, Cplx tau, double cutoff, int maxdim,
             Rn = extend(Renv[i+2],psi(i+1),H(i+1));
             }
         auto phi = psi(i);
-        forward(Lenv[i-1],H(i),Rn,phi,tau,niter);
+        forward(Lenv[i-1],H(i),Rn,phi,tau,niter,hermitian);
         if (i==n) { psi.ref(i) = phi; continue; }
         ITensor U = (i>1) ? ITensor(leftLinkIndex(psi,i),siteIndex(psi,i))
                           : ITensor(siteIndex(psi,i));
@@ -516,14 +529,14 @@ half_sweep_lr(MPS& psi, MPO const& H, Cplx tau, double cutoff, int maxdim,
         auto C = S*V;
         psi.ref(i) = U;
         Lenv[i] = extend(Lenv[i-1],U,H(i));
-        backward(Lenv[i],Rn,C,tau,niter);
+        backward(Lenv[i],Rn,C,tau,niter,hermitian);
         psi.ref(i+1) = C*psi(i+1);
         }
     }
 
 inline void
 half_sweep_rl(MPS& psi, MPO const& H, Cplx tau, double cutoff, int maxdim,
-              double delta, int niter, bool shrewd)
+              double delta, int niter, bool shrewd, bool hermitian)
     {
     int n = length(psi);
     std::vector<ITensor> Lenv, Renv;
@@ -540,32 +553,63 @@ half_sweep_rl(MPS& psi, MPO const& H, Cplx tau, double cutoff, int maxdim,
             Ln = extend(Lenv[i-2],psi(i-1),H(i-1));
             }
         auto phi = psi(i);
-        forward(Ln,H(i),Renv[i+1],phi,tau,niter);
+        forward(Ln,H(i),Renv[i+1],phi,tau,niter,hermitian);
         if (i==1) { psi.ref(i) = phi; continue; }
         ITensor U(leftLinkIndex(psi,i)), S, V;
         svd(phi,U,S,V,args);
         auto C = U*S;
         psi.ref(i) = V;
         Renv[i] = extend(Renv[i+1],V,H(i));
-        backward(Ln,Renv[i],C,tau,niter);
+        backward(Ln,Renv[i],C,tau,niter,hermitian);
         psi.ref(i-1) = psi(i-1)*C;
         }
+    }
+
+// ||D||_F^2 of an MPO, Tr(D^dag D), by one transfer contraction.
+inline double
+mpo_frobenius2(MPO const& D)
+    {
+    ITensor E;
+    for (int i=1;i<=length(D);i++)
+        {
+        auto Di = D(i);
+        auto Dc = dag(prime(Di,"Link"));
+        E = E ? E*Di : Di;
+        E *= Dc;
+        }
+    return std::abs(eltC(E));
+    }
+
+// Whether ||H - H^dagger||_F <= rtol*||H||_F, pyitensor's
+// mpsalgebra.mpo_is_hermitian(): the difference is an exact direct sum
+// (ITensor's sum() at Cutoff 0), so its norm is not a small difference of
+// two numbers of order ||H||_F^2. An exact zero operator counts as
+// Hermitian.
+inline bool
+mpo_is_hermitian(MPO const& H, double rtol=1e-12)
+    {
+    double scale2 = mpo_frobenius2(H);
+    if (scale2==0) return true;
+    auto Hd = H;
+    for (int j=1;j<=length(Hd);j++)
+        Hd.ref(j) = dag(swapPrime(H(j),0,1,TagSet("Site")));
+    auto D = sum(H,Hd*(-1.0),{"Cutoff",0.0});
+    return std::sqrt(mpo_frobenius2(D)) <= rtol*std::sqrt(scale2);
     }
 
 // One step exp(-i*dt*H) of one-site TDVP with controlled bond expansion
 // before every local forward step, cbe.py's tdvp_cbe_step(): a
 // left-to-right half sweep by dt/2, then a right-to-left one by dt/2. dt
-// may be complex. The local exponentials are ITensor's Lanczos applyExp(),
-// as in TDVP/tdvp.h, so H is taken as Hermitian (cbe.py switches to
-// Arnoldi for a non-Hermitian MPO; v3's two-site TDVP does not either).
+// may be complex. The local exponentials are ITensor's Lanczos applyExp()
+// for a Hermitian H and arnoldi_exp() otherwise, as cbe.py picks them.
 inline void
 tdvp_cbe_step(MPS& psi, MPO const& H, Cplx dt, double cutoff, int maxdim,
-              double delta, int niter, bool shrewd)
+              double delta, int niter, bool shrewd, bool hermitian=true)
     {
     Cplx tau = dt/2.0;
     psi.position(1);
-    half_sweep_lr(psi,H,tau,cutoff,maxdim,delta,niter,shrewd);
-    half_sweep_rl(psi,H,tau,cutoff,maxdim,delta,niter,shrewd);
+    half_sweep_lr(psi,H,tau,cutoff,maxdim,delta,niter,shrewd,hermitian);
+    half_sweep_rl(psi,H,tau,cutoff,maxdim,delta,niter,shrewd,hermitian);
     psi.leftLim(0);
     psi.rightLim(2);
     }
@@ -583,7 +627,7 @@ tdvp_cbe_step(MPS& psi, MPO const& H, Cplx dt, double cutoff, int maxdim,
 template<class BigM>
 void
 arnoldi_exp(BigM const& A, ITensor& phi, Cplx coeff, int niter,
-            double errgoal=1e-10, double tol=1e-12, int max_substeps=1000)
+            double errgoal, double tol, int max_substeps)
     {
     double beta0 = norm(phi);
     if (beta0==0) return;

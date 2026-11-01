@@ -17,8 +17,9 @@ code and are not read or modified here; the dmrgpy-owned C++ is
 `chain_session.h`, `bindings.cc`, `check_task.h`, `get_sites.h` and
 `mo_terms.h` in each `mpscppN/`, plus `mpscpp3/TDVP/`, `mpscpp3/tebd.h`
 and `mpscpp3/cbe.h` (controlled bond expansion, a port of
-`pyitensor/cbe.py`: dense indices only, so `reject_sector`, and Lanczos
-`applyExp` local steps, so Hermitian H only, like v3's two-site TDVP;
+`pyitensor/cbe.py`: dense indices only, so `reject_sector`; its TDVP
+local steps are Lanczos `applyExp` for a Hermitian H and `arnoldi_exp`
+otherwise, chosen by `cbe::mpo_is_hermitian` as `cbe.py` chooses them;
 it also holds `arnoldi_exp` and `tdvp_arnoldi_step`, two-site TDVP with
 Arnoldi local steps, which `cliksession.py` uses for a non-Hermitian
 generator, since the Lanczos `applyExp` does not converge on a

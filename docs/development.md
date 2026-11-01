@@ -3914,9 +3914,20 @@ is safe there because they only rank directions; the isometries, step (c)
 and the final split, stay on full SVDs for the reason above, and step (c)
 takes the orthonormal complement directly instead of a separate SVD.
 Together these took one L=40, maxm=100 Heisenberg solve from 43.5 s to
-11.6 s. The TDVP local steps are ITensor's Lanczos `applyExp`, so
-`TDVP_CBE` on v3 assumes a Hermitian H; the Arnoldi exponential that
-CLIK uses (`cbe::arnoldi_exp`) is not wired into it yet.
+11.6 s. The TDVP local steps follow `cbe.py`: ITensor's Lanczos
+`applyExp` for a Hermitian H and `cbe::arnoldi_exp`, the exponential CLIK
+uses, otherwise. The choice is `cbe::mpo_is_hermitian`, the same test as
+`mpsalgebra.mpo_is_hermitian` (`||H-H^dag||_F <= 1e-12 ||H||_F`, the
+difference built as an exact direct sum), taken once per
+`quench_tdvp_cbe`/`evolve_and_measure_tdvp_cbe` and on every
+`tdvp_cbe_step`, as `"python"` does. On a driven XXZ Lindbladian on the
+doubled chain of 3 sites, 20 steps exp(dt L) at dt=0.1 from a product
+state give the same `<Sz_i>` on v3 and `"python"` to 1e-13; the Lanczos
+route was 3e-10 away, so it did not fail there, it only stopped following
+`"python"`. Both backends approach exp(tL) linearly in dt, 0.075 at
+dt=0.5, 0.012 at dt=0.1 and 0.0023 at dt=0.02 on the worst `<Sz_i>`,
+which is a property of one-site CBE-TDVP on a non-Hermitian generator and
+is left open.
 
 Measured on one P-core (`taskset -c 2`), BLAS at one thread (v3 links
 OpenBLAS, numpy here uses MKL), 10 sweeps from a random start, cutoff

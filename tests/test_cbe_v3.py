@@ -11,6 +11,8 @@ kernel itself); these tests pin the port through the public API:
   to the accuracy of two-site TDVP, where TDVP_GSE stops growing its bonds;
 - the one-step route TDZ takes, with a complex step, matches exp(-i dz H);
 - a conserved sector is refused on v3, since cbe.h works on dense indices.
+- for a non-Hermitian generator (a Lindbladian) the local steps are
+  Arnoldi, as on "python", and the two backends agree step for step.
 
 Every DMRG case pins its sweep schedule.
 """
@@ -156,6 +158,71 @@ def test_cbe_tdvp_complex_time_step_matches_exact():
         exact = (v.conj() @ Sz @ v).real / (v.conj() @ v).real
         got = (psi.dot(sc.Sz[i] * psi) / psi.dot(psi)).real
         assert got == pytest.approx(exact, abs=1e-6)
+
+
+def test_mpo_hermiticity_test_on_v3():
+    sc, h = _heisenberg(5, maxm=10, nsweeps=2)
+    groundstate.send_hamiltonian(sc)
+    s = sc._session
+    assert s.mpo_is_hermitian(sc.toMPO(h).cpp_handle)
+    assert s.mpo_is_hermitian(sc.toMPO(1e-6 * h).cpp_handle)
+    assert not s.mpo_is_hermitian(sc.toMPO(h + 1e-3j * sc.Sz[2]).cpp_handle)
+    assert not s.mpo_is_hermitian(sc.toMPO(1j * sc.Sx[0] * sc.Sy[1]).cpp_handle)
+    assert s.mpo_is_hermitian(sc.toMPO(sc.Sx[0] * sc.Sy[1]).cpp_handle)
+
+
+def _lindblad_cbe_steps(version, dt, nst):
+    """nst CBE-TDVP steps exp(dt*L) of a driven XXZ Lindbladian on the
+    doubled chain, from a product state; returns the doubled chain, the
+    evolved MPS, the exact vector and L."""
+    import scipy.linalg as sla
+    from dmrgpy.lindblad import Lindblad_Chain
+    from dmrgpy.multioperator import MO2matrix
+    n = 3
+    sc = spinchain.Spin_Chain([2] * n, itensor_version=version)
+    sc.maxm = 64
+    sc.set_hamiltonian(sum(sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
+                           + 0.5 * sc.Sz[i] * sc.Sz[i + 1] for i in range(n - 1)))
+    jumps = [0.6 * (sc.Sx[0] + 1j * sc.Sy[0]), 0.6 * (sc.Sx[n - 1] - 1j * sc.Sy[n - 1])]
+    jumps += [0.4 * sc.Sz[i] for i in range(n)]
+    lc = Lindblad_Chain(sc, jumps)
+    d = lc.doubled
+    d.maxm, d.nsweeps = 64, 6
+    # a product state: the ground state of single-site fields only
+    d.set_hamiltonian(sum((-1) ** (i // 2) * d.Sz[i] + 0.3 * d.Sx[i]
+                          for i in range(2 * n)))
+    wf, wfed = d.get_gs(), d.get_gs(mode="ED")
+    d.set_hamiltonian(1j * lc.L)  # exp(-i dt (iL)) = exp(dt L)
+    groundstate.send_hamiltonian(d)
+    G = d.toMPO(1j * lc.L)
+    assert not d._session.mpo_is_hermitian(G.cpp_handle) if version == 3 else True
+    psi = wf.cpp_handle
+    for _ in range(nst):
+        psi = d._session.tdvp_cbe_step(G.cpp_handle, psi, dt)
+    Lm = np.array(MO2matrix(lc.L, d.get_ED_obj()).todense())
+    v = sla.expm(nst * dt * Lm) @ np.asarray(wfed.v).reshape(-1)
+    return d, mps.MPS(d, cpp_handle=psi), v
+
+
+def _sz_profile(d, psi):
+    return np.array([psi.dot(d.Sz[i] * psi) / psi.dot(psi)
+                     for i in range(d.ns)])
+
+
+def test_cbe_tdvp_on_a_lindbladian_follows_python_and_exact():
+    """Arnoldi local steps on v3 reproduce "python" step for step (the
+    Lanczos applyExp route was 3e-10 away), and both approach exp(t L)
+    linearly in dt, 0.075 at dt=0.5 and 0.012 at dt=0.1 on <Sz_i>."""
+    from dmrgpy.multioperator import MO2matrix
+    d3, psi3, v = _lindblad_cbe_steps(3, 0.1, 20)
+    dp, psip, _ = _lindblad_cbe_steps("python", 0.1, 20)
+    z3, zp = _sz_profile(d3, psi3), _sz_profile(dp, psip)
+    assert np.max(np.abs(z3 - zp)) < 1e-11
+    assert abs(psi3.dot(psi3) - psip.dot(psip)) < 1e-11
+    ed = d3.get_ED_obj()
+    zed = np.array([(v.conj() @ np.array(MO2matrix(d3.Sz[i], ed).todense()) @ v)
+                    / (v.conj() @ v) for i in range(d3.ns)])
+    assert np.max(np.abs(z3 - zed)) < 2e-2
 
 
 def test_an_extension_built_before_cbe_refuses_cbe_and_still_runs_two_site():

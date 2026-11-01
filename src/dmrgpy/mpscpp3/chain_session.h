@@ -1683,7 +1683,8 @@ class Chain
     tdvp_cbe_step(MPO const& H, MPS psi, Cplx dt) const
         {
         reject_sector("tevol_method='TDVP_CBE'");
-        cbe::tdvp_cbe_step(psi,H,dt,cutoff_,maxm_,cbe_delta_,50,true);
+        cbe::tdvp_cbe_step(psi,H,dt,cutoff_,maxm_,cbe_delta_,50,true,
+                           cbe::mpo_is_hermitian(H));
         return psi;
         }
 
@@ -1719,12 +1720,16 @@ class Chain
         auto psi1 = apply_mpo(A1,wf0_,args);
         auto psi2 = apply_mpo(A2,wf0_,args);
         Cplx norm0 = std::sqrt(innerC(psi1,psi1));
+        // once, not per step: Lanczos local steps for a Hermitian H,
+        // Arnoldi otherwise, as pyitensor's quench_tdvp_cbe()
+        bool herm = cbe::mpo_is_hermitian(Hshift);
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
             // measure before evolving, see quench_tdvp()
             out.correlator.push_back(innerC(psi2,psi1));
-            cbe::tdvp_cbe_step(psi1,Hshift,dt,cutoff_,maxm_,cbe_delta_,50,true);
+            cbe::tdvp_cbe_step(psi1,Hshift,dt,cutoff_,maxm_,cbe_delta_,50,true,
+                               herm);
             psi1.normalize();
             psi1 *= norm0;
             }
@@ -1744,11 +1749,13 @@ class Chain
         // the SVD that trims each bond discards weight, so the input norm
         // is put back after every step (see evolve_and_measure_tdvp())
         auto norm0 = std::sqrt(std::real(innerC(psi,psi)));
+        bool herm = cbe::mpo_is_hermitian(H); // once, not per step
         TimeEvolutionResult out;
         for (int it=0;it<nt;it++)
             {
             out.correlator.push_back(innerC(psi,A,psi));
-            cbe::tdvp_cbe_step(psi,H,dt,cutoff_,maxm_,cbe_delta_,50,true);
+            cbe::tdvp_cbe_step(psi,H,dt,cutoff_,maxm_,cbe_delta_,50,true,
+                               herm);
             psi.normalize();
             psi *= norm0;
             }

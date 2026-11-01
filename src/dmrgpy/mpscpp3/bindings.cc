@@ -803,6 +803,11 @@ PYBIND11_MODULE(_dmrgcpp, m)
              py::arg("H"),py::arg("wf"),py::arg("dt"),
              "One CBE-TDVP step of size dt (may be complex) on a copy of wf, "
              "for a caller that drives the evolution itself (tdz.py)")
+        .def("mpo_is_hermitian",[](Chain const&, MPO const& H, double rtol) {
+                return cbe::mpo_is_hermitian(H,rtol);
+            }, py::arg("H"),py::arg("rtol")=1e-12,
+             "Whether ||H-H^dagger||_F <= rtol*||H||_F, the test that picks "
+             "Lanczos or Arnoldi local steps in tdvp_cbe_step")
         .def("tdvp_arnoldi_step",&Chain::tdvp_arnoldi_step,
              py::arg("H"),py::arg("wf"),py::arg("dt"),py::arg("niter")=50,
              "One two-site TDVP step of size dt (may be complex) with Arnoldi "
