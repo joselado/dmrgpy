@@ -1277,3 +1277,17 @@ steps for a non-Hermitian H, as `"python"` does, and Lanczos steps for a
 Hermitian one, which are unchanged. On a driven 3-site XXZ Lindbladian on
 the doubled chain, 20 steps exp(dt L) at dt=0.1 from a product state, the
 worst `<Sz_i>` moves by 9e-10 and now equals the `"python"` value to 1e-13.
+
+## The 2026-11-01 Gram threshold of the `"python"` SVD
+
+`pyitensor/svd.py` now trusts its Gram-matrix route only while the
+smallest kept singular value is at least 1e-5 of the largest, up from
+1e-7, and takes the exact SVD below that. Since the 2026-10-30
+refactorization of the Gram factors, the stiff seeded Bose-Hubbard
+Lindbladian (3 sites, kappa=10, dt=0.5) came out 8.6e-3 off ED in the
+occupations; it is 5.4e-5 now, against 2.6e-5 with the exact SVD
+everywhere, and its slowest pair is unchanged at 1.2e-3 and 6.9e-3. On a
+30-site Heisenberg chain at maxm=50 the ground-state energy moves by 9e-14
+and a KPM `Sz Sz` correlator by 3e-7 at a peak of 0.17. Every `"python"`
+result whose SVD keeps singular values between 1e-7 and 1e-5 of the
+largest moves at this level.

@@ -92,15 +92,19 @@ def eigh_truncate(rho, cutoff, maxdim, mindim=1):
 # Smallest kept singular value, relative to the largest, that the
 # Gram-matrix route below is still trusted for. It diagonalizes M M^dag (or
 # M^dag M) instead of factorizing M, so a singular value comes back as the
-# square root of an eigenvalue known only to ~eps*s_max**2 absolute -- i.e.
-# with a *relative* error ~eps*(s_max/s)**2/2, which stays negligible only
-# while s/s_max stays well above sqrt(eps)~1.5e-8. Anything the caller's
-# Cutoff actually keeps is normally far above that (Cutoff is a weight,
-# s**2/sum(s**2), so the library's own 1e-12 corresponds to s/s_max ~ 1e-6),
-# but a caller keeping a genuinely rank-deficient block down to maxdim would
-# not be -- hence the explicit guard and exact-SVD fallback in
-# _svd_truncated() rather than an unconditional switch.
-_GRAM_MIN_RELATIVE_SV = 1e-7
+# square root of an eigenvalue known only to ~eps*s_max**2 absolute, with a
+# relative error ~eps*(s_max/s)**2/2, and its singular vector is off by an
+# angle of the same order. At 1e-7 that angle reaches 1e-2 for the smallest
+# kept vectors, and the 1e-12 Cutoff keeps s/s_max down to ~1e-6. A unitary
+# sweep does not notice; a dissipative TDVP step does, since its backward
+# bond step amplifies the error by exp(tau R): the stiff seeded
+# Bose-Hubbard Lindbladian (tests/test_lindblad.py) came out 8.6e-3 off ED
+# in the occupations at 1e-7 and 5.4e-5 at 1e-5, against 2.6e-5 with the
+# full SVD. At 1e-5 the angle is below ~1e-6. The price, measured on one
+# core: a 30-site Heisenberg ground state at maxm=50 1.34 s -> 1.53 s, a KPM
+# correlator at kpmmaxm=50 55.4 s -> 59.3 s, since more bonds now take the
+# exact SVD.
+_GRAM_MIN_RELATIVE_SV = 1e-5
 
 # Below this size the O(min(m,n)^3) eigendecomposition doesn't dominate
 # anything and the extra matmuls aren't worth their own call overhead.
