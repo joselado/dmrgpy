@@ -105,9 +105,11 @@ Two remarks on the closure. First, G is not symmetrized: G_ab and G_ba
 have different outgoing energies and different cuts, and with
 anisotropy or a tilted field the flow makes G non-Hermitian and also
 generates a small potential scattering. Then the tip vertex at
-omega = e_f - e_i is the sample vertex G_if^*/g only up to a term of
-order g^2 with no log (5.0e-3 relative at g=-0.05 and 1.2e-3 at
-g=-0.025 on the S=1 model of section 5). For S=1/2 in a field G stays
+omega = e_f - e_i is the sample vertex G_if^*/g only up to a term
+beyond leading log (5.0e-3 relative at g=-0.05 and 1.2e-3 at g=-0.025
+on the S=1 model of section 5; at fixed g it grows only 2 to 4 times
+while ln(omega0/Gamma0) grows by 9, much slower than a power of the
+log). For S=1/2 in a field G stays
 Hermitian and the identity is exact. This is a choice beyond leading
 log, between G at incoming energy zero and G on shell on the
 right-hand side, and the code takes the first one. Second, the first
