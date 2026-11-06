@@ -290,8 +290,12 @@ is guarded rather than merely documented, and
 and the iMPS algebra over `IDMRGResult` (`imps_overlap`/`apply_mpo`/
 `imps_sum`), exposed since 2026-10-15 as
 `Infinite_Many_Body_Chain.overlap`/`apply_operator`/`summps` on
-`itensor_version="python"` for both `gs_method`s (the VUMPS `Chain` methods
-on v3 are not wired to them yet); `overlap` returns the fidelity per site
+`itensor_version="python"` for both `gs_method`s, and on
+`itensor_version=3` for `gs_method="vumps"` only (grouped cells; through
+`vumps_apply_mpo`/`vumps_imps_sum`, the result loaded into a fresh Chain
+by `vumps_load_uniform_state`; v3 `gs_method="idmrg"` raises, since its
+cell has no export or load accessor; `kpm_finite`'s window chain follows
+the chain's own backend); `overlap` returns the fidelity per site
 as the spectral radius of the mixed transfer matrix, not one eigenvalue,
 since a state and its spin-flipped copy give a tied pair of opposite sign.
 

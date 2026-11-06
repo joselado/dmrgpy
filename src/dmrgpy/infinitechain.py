@@ -243,6 +243,19 @@ def _window_hamiltonian(h_intra, h_inter, n_uc, n_window):
     return _wrap_terms(terms, "h_window")
 
 
+class _V3Uniform:
+    """A grouped mixed-gauge VUMPS state of an itensor_version=3 chain as
+    plain arrays: AL, AR of shape (D, d_g, D), C of shape (D, D), the
+    pyitensor `sites_uc` of the cell and the norm factor `eta`. It carries
+    what `overlap`, `_cell_operator_mpo` and `_cell_norm` read off a
+    pyitensor state (`AL`, `sites_uc`), so they run on it unchanged."""
+
+    def __init__(self, sites_uc, n_uc, D, d_g, AL, AR, C, eta):
+        self.sites_uc, self.n_uc, self.D, self.d_g = sites_uc, n_uc, int(D), int(d_g)
+        self.AL, self.AR, self.C = (np.asarray(a) for a in (AL, AR, C))
+        self.eta = eta
+
+
 class Infinite_Many_Body_Chain:
     """iDMRG-only counterpart of Many_Body_Chain (manybodychain.py) -- see
     this module's docstring. Exposes only a narrow subset of modes:
@@ -1070,12 +1083,13 @@ class Infinite_Many_Body_Chain:
         solver, taken for n_uc>2 or a coupling reaching past one cell,
         stores AL/AR/C as per-site lists that pyitensor.vumps's apply_mpo/
         imps_sum do not accept)."""
+        if self.itensor_version == 3:
+            return self._v3_state(caller)
         if self.itensor_version != "python":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.{}: only itensor_version=\"python\" "
-                "is supported (the mpscpp3 backend keeps its state inside "
-                "the C++ Chain and this class does not expose the iMPS "
-                "algebra on it) -- got itensor_version={!r}".format(
+                "and itensor_version=3 with gs_method=\"vumps\" are "
+                "supported -- got itensor_version={!r}".format(
                     caller, self.itensor_version))
         if self.gs_method == "idmrg":
             if self._result is None:
@@ -1097,6 +1111,45 @@ class Infinite_Many_Body_Chain:
             "Infinite_Many_Body_Chain.{}: gs_method={!r} is not implemented "
             "-- only \"idmrg\" and \"vumps\"".format(caller, self.gs_method))
 
+    def _v3_state(self, caller):
+        """The grouped VUMPS snapshot of an itensor_version=3 chain as a
+        `_V3Uniform` (AL, AR, C as arrays, plus the pyitensor `sites_uc`
+        that `_cell_operator_mpo` needs), solving the ground state first
+        if there is none yet. The iMPS algebra on v3 exists for
+        gs_method="vumps" only: the iDMRG unit cell lives in ITensor
+        objects inside the C++ Chain, with no accessor to export it or
+        to load a new one back, so gs_method="idmrg" raises."""
+        if self.gs_method != "vumps":
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.{}: on itensor_version=3 the iMPS "
+                "algebra needs gs_method=\"vumps\" (the iDMRG cell of the "
+                "compiled backend cannot be exported or loaded back); use "
+                "itensor_version=\"python\" for gs_method=\"idmrg\", got "
+                "gs_method={!r}".format(caller, self.gs_method))
+        if self._session3 is None or not self._session3_has_vumps:
+            self.gs_energy()
+        try:
+            D, d_g, AL, AR, C = self._session3.vumps_get_snapshot()
+        except RuntimeError:
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.{}: the VUMPS state of this "
+                "chain comes from the sequential multi-site solver "
+                "(n_uc>2, or a coupling reaching past one unit cell), "
+                "which keeps no grouped snapshot for the iMPS algebra; "
+                "use a one- or two-site cell with nearest-cell "
+                "couplings".format(caller)) from None
+        from .pyitensor.sites import SiteX
+        return _V3Uniform(SiteX(list(self.site_types)), self.n_uc, D, d_g,
+                          AL, AR, C, 1.0)
+
+    def _v3_derived_state(self, out):
+        """Wrap the (D,d_g,AL,AR,C,AC,eta) tuple that the C++
+        `vumps_apply_mpo`/`vumps_imps_sum` return."""
+        from .pyitensor.sites import SiteX
+        D, d_g, AL, AR, C, _AC, eta = out
+        return _V3Uniform(SiteX(list(self.site_types)), self.n_uc, D, d_g,
+                          AL, AR, C, eta)
+
     def _derived_chain(self, state, origin):
         """A new chain holding `state` (a PeriodicMPS or UniformMPS from
         pyitensor.idmrg/vumps) in place of the solved ground state, with
@@ -1105,7 +1158,18 @@ class Infinite_Many_Body_Chain:
         never mutated in place, or a cache reset here."""
         import copy
         new = copy.copy(self)
-        if self.gs_method == "idmrg":
+        if isinstance(state, _V3Uniform):
+            # a fresh compiled Chain of its own: the shallow copy would
+            # share (and overwrite) the parent's snapshot
+            new._result = None
+            new._vumps_result = None
+            sess = self._make_cpp_chain()
+            sess.vumps_load_uniform_state(
+                state.D, state.d_g, state.AL.flatten().tolist(),
+                state.AR.flatten().tolist(), state.C.flatten().tolist())
+            new._session3 = sess
+            new._session3_has_vumps = True
+        elif self.gs_method == "idmrg":
             new._result = state
             new._vumps_result = None
         else:
@@ -1116,8 +1180,9 @@ class Infinite_Many_Body_Chain:
         new._gauge_mismatch = None
         new._cell_asymmetry = None
         new._excitation_env = None
-        new._session3 = None
-        new._session3_has_vumps = False
+        if not isinstance(state, _V3Uniform):
+            new._session3 = None
+            new._session3_has_vumps = False
         eta = complex(state.eta)
         new.eta = eta.real if abs(eta.imag) <= 1e-12 * max(1.0, abs(eta)) else eta
         new._state_origin = origin
@@ -1302,10 +1367,12 @@ class Infinite_Many_Body_Chain:
         (pyitensor.idmrg._term_site_matrices); a parity-odd term raises
         ValueError, since its string would run across every cell.
 
-        itensor_version="python" only (NotImplementedError otherwise), under
-        gs_method="idmrg" (pyitensor.idmrg.apply_mpo) and gs_method="vumps"
-        (pyitensor.vumps.apply_mpo, grouped cells only, i.e. n_uc<=2 with
-        nearest-cell couplings). `cutoff`/`maxdim` default to this chain's
+        itensor_version="python" under gs_method="idmrg"
+        (pyitensor.idmrg.apply_mpo) and gs_method="vumps"
+        (pyitensor.vumps.apply_mpo), and itensor_version=3 under
+        gs_method="vumps" (Chain::vumps_apply_mpo); grouped cells only,
+        i.e. n_uc<=2 with nearest-cell couplings. itensor_version=3 with
+        gs_method="idmrg" raises NotImplementedError. `cutoff`/`maxdim` default to this chain's
         own `cutoff`/`maxm`; an operator whose MPO bond dimension is above
         1 (a two-site gate) grows the bond dimension by that factor, and
         truncating it back to a `maxdim` that discards more than about
@@ -1334,13 +1401,21 @@ class Infinite_Many_Body_Chain:
         norm_w, norm_self = self._cell_norm(result, W_bulk, opnorm)
         eta = norm_w / norm_self
         W_bulk[0] = ITensor(W_bulk[0].inds, W_bulk[0].array / np.sqrt(norm_w))
-        if self.gs_method == "idmrg":
-            from .pyitensor import idmrg
-            fn = idmrg.apply_mpo
+        if self.itensor_version == 3:
+            out = self._session3.vumps_apply_mpo(
+                [w.array.flatten().tolist() for w in W_bulk],
+                [int(w.array.shape[0]) for w in W_bulk],
+                [int(w.array.shape[-1]) for w in W_bulk],
+                float(cutoff), int(maxdim or 0))
+            new = self._v3_derived_state(out)
         else:
-            from .pyitensor import vumps
-            fn = vumps.apply_mpo
-        new = self._canonicalized("apply_operator", fn, (result, W_bulk), cutoff, maxdim)
+            if self.gs_method == "idmrg":
+                from .pyitensor import idmrg
+                fn = idmrg.apply_mpo
+            else:
+                from .pyitensor import vumps
+                fn = vumps.apply_mpo
+            new = self._canonicalized("apply_operator", fn, (result, W_bulk), cutoff, maxdim)
         new.eta = eta
         return self._derived_chain(new, "apply_operator")
 
@@ -1415,7 +1490,8 @@ class Infinite_Many_Body_Chain:
         sign that alternates with the number of sites and not a
         degeneracy of the fidelity.
 
-        itensor_version="python" only. Under gs_method="idmrg" the two
+        itensor_version="python" (both gs_method) and itensor_version=3
+        (gs_method="vumps"). Under gs_method="idmrg" the two
         gauge-consistent cells are compared; under gs_method="vumps" the
         two grouped left-canonical tensors AL (grouped cells only, see
         apply_operator). Both chains must have the same gs_method and the
@@ -1475,7 +1551,8 @@ class Infinite_Many_Body_Chain:
         through the public API this method raises for any pair of chains;
         the well-posed case needs a state rescaled by hand, as the imps_sum
         examples do. The error is left to propagate with the underlying
-        function's message. itensor_version="python" only, same gs_method
+        function's message. itensor_version="python" (both gs_method) and
+        itensor_version=3 (gs_method="vumps"), same gs_method
         and unit cell on both chains (ValueError otherwise); `cutoff`/
         `maxdim` default to this chain's own `cutoff`/`maxm`."""
         state_a = self._python_state("summps")
@@ -1484,6 +1561,17 @@ class Infinite_Many_Body_Chain:
             cutoff = self.cutoff
         if maxdim is None:
             maxdim = self.maxm
+        if self.itensor_version == 3:
+            if state_a.AL.shape[1] != state_b.AL.shape[1]:
+                raise ValueError(
+                    "Infinite_Many_Body_Chain.summps: grouped physical "
+                    "dimension mismatch ({} and {})".format(
+                        state_a.AL.shape[1], state_b.AL.shape[1]))
+            out = self._session3.vumps_imps_sum(
+                int(state_b.D), state_b.AL.flatten().tolist(),
+                float(cutoff), int(maxdim or 0))
+            new = self._v3_derived_state(out)
+            return self._derived_chain(new, "summps")
         if self.gs_method == "idmrg":
             from .pyitensor import idmrg
             fn = idmrg.imps_sum
@@ -1880,7 +1968,9 @@ class Infinite_Many_Body_Chain:
         sites p_i/p_i+r of the window's *central* unit cell (as far as
         possible from both open ends), and delegates directly to
         kpmdmrg.get_dynamical_correlator on that ordinary finite
-        Many_Body_Chain (itensor_version="python") -- the exact same KPM
+        Many_Body_Chain on this chain's own backend (itensor_version=3 when
+        the infinite chain is on 3, "python" otherwise;
+        `window_chain_kwargs` may not override it) -- the exact same KPM
         code path an ordinary finite Spin_Chain/Fermionic_Chain uses
         today. (kpmdmrg.get_dynamical_correlator is called directly,
         bypassing dynamics.py's own is_hermitian() gate -- see
@@ -2018,14 +2108,17 @@ class Infinite_Many_Body_Chain:
         from .manybodychain import Many_Body_Chain
         from . import kpmdmrg
         window_sites = self.site_types * n_window
-        wc = Many_Body_Chain(window_sites, itensor_version="python")
+        # the window follows this chain's own backend: ITensor v3 when the
+        # infinite chain is on 3, the pure-Python one otherwise
+        window_backend = 3 if self.itensor_version == 3 else "python"
+        wc = Many_Body_Chain(window_sites, itensor_version=window_backend)
         window_chain_kwargs = dict(window_chain_kwargs or {})
         fixed = sorted(k for k in window_chain_kwargs
                        if k in ("itensor_version", "mode"))
         if fixed:
             raise TypeError(
                 "kpm_finite: window_chain_kwargs cannot set %s: the finite "
-                "window is always built with itensor_version=\"python\" and "
+                "window is always built on this chain's own backend and "
                 "run through its KPM (DMRG) route, so the value would be "
                 "stored on the temporary chain and ignored"
                 % ", ".join(fixed))

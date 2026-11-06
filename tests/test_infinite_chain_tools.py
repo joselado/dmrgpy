@@ -373,11 +373,15 @@ def test_summps_norm_mismatch_keeps_larger_branch(gs_method):
 # -- backend guards ------------------------------------------------------------
 
 def test_itensor_version3_raises_not_implemented():
-    """All three methods refuse itensor_version=3 before touching the C++
-    backend, so this holds whether or not mpscpp3 is compiled."""
+    """On itensor_version=3 only gs_method="vumps" has the iMPS algebra
+    (tests/test_infinite_chain_algebra_v3.py); gs_method="idmrg" refuses
+    before touching the C++ backend, so this holds whether or not mpscpp3
+    is compiled."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    ic.gs_method = "idmrg"
     ic.set_hamiltonian(-5.0 * ic.SzC[0])
     other = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
+    other.gs_method = "idmrg"
     other.set_hamiltonian(5.0 * other.SzC[0])
     with pytest.raises(NotImplementedError, match="python"):
         ic.apply_operator(2 * ic.SxC[0])
