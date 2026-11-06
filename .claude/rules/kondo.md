@@ -151,12 +151,16 @@ is a new method documented in `docs/new_methods/kondo_leading_log/README.md`
 frequency-dependent couplings (Rosch, Paaske, Kroha, Woelfle,
 cond-mat/0408506 eq. 6; cond-mat/0301106) in the impurity eigenbasis, every
 vertex four impurity matrices (mu=0 potential, 1..3 exchange). The sample
-vertex G(0) flows alone, the tip vertex A(eV) linearly on top; the smooth
+vertex G(0) and the on-shell tip vertex A_on (element (x,y) at e_x-e_y) flow
+together, as in the papers, and A(eV) is a quadrature over them (the first
+commit kept the running A(eV) on the right-hand side, a different closure at
+O(g^2) without a log; do not go back to it); the smooth
 kernel 1/(D+r_x) - 1/(D+omega0+|x|) integrates exactly to F0, so its first
 order IS `conductance.py`'s third order (tested as g^2 and odd-part g^3
 scaling), and `SIGN=+1` maps g to `Jrho_s`. G(0) is not Hermitian; do not
-symmetrize it. T=0 only, fixed Gamma0, no level renormalization; the flow
-stops with NaN plus a warning when the coupling reaches order one.
+symmetrize it. T=0 only, fixed Gamma0, no level renormalization; NaN plus a
+warning when the sample coupling or the per-bias tip coupling
+(`info["coupling"]`) reaches order one, a warning above 0.5.
 `tests/test_kondo_leading_log.py`. Public as `get_kondo_spectrum(order="LL")`,
 `mode="ED"` and `T=0` only; `mode="DMRG"` raises because the TASK space does
 not close under the products of spin operators the flow needs.

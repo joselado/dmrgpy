@@ -113,11 +113,13 @@ eV, dIdV = sc.get_kondo_spectrum(eV, Jrho_s=-0.05, U=0.0, T=0.0, order="LL")
 ```
 
 At the coupling of the paper the zero-bias peak is higher than at third
-order: $dI/dV/2\pi$ is 1.93 at $eV=10$ $\mu$eV against 1.31, and 1.05 at
-1 meV against 0.98. Far from zero bias the two agree, 0.91 against 0.88 at
+order: $dI/dV/2\pi$ is 1.95 at $eV=10$ $\mu$eV against 1.31, and 1.06 at
+1 meV against 0.98. Far from zero bias the two agree, 0.92 against 0.88 at
 4 meV. The method is still perturbative. It fails at the Kondo temperature,
 where the running coupling reaches order one, and there it returns NaN
-with a warning (for example at $J\rho_s=-0.2$ near zero bias). It
+with a warning (for example at $J\rho_s=-0.2$ near zero bias). It also
+warns when the running coupling passes 0.5, which can happen near a step
+while the zero-bias coupling is still small. It
 renormalizes the couplings and not the energies, so the steps stay at the
 bare excitation energies. The derivation and its checks are in
 `docs/new_methods/kondo_leading_log/` in the repository.

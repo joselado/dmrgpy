@@ -27,9 +27,11 @@ def _K(x, D):
 
 def test_spin_half_at_zero_field_has_the_closed_form():
     """Every process is elastic, so the sample coupling runs as
-    g(D) = g/(1 + g L(D)), L(D) = ln((D+omega0)/(D+Gamma0)), the exchange
-    part of the tip vertex as t = exp(-int g(D) K(eV,D) dD), U does not
-    run, and dI/dV = 2 pi (3/4 t^2 + 4 U^2)."""
+    g(D) = g/(1 + g L(D)), L(D) = ln((D+omega0)/(D+Gamma0)), the on-shell
+    tip coupling as g(D)/g, the exchange part of the tip vertex at eV as
+    t = 1 - int g(D)^2/g K(eV,D) dD, U does not run, and
+    dI/dV = 2 pi (3/4 t^2 + 4 U^2). With a sharp cut, t would be
+    1/(1 - g ln(omega0/|eV|)), the leading log."""
     S = _spin(0.5)
     ks = SimpleNamespace(e=np.zeros(2), p=np.array([.5, .5]), dim=2, T=0.,
                          kB=8.617333262e-5, Sx=S[0], Sy=S[1], Sz=S[2])
@@ -40,10 +42,10 @@ def test_spin_half_at_zero_field_has_the_closed_form():
     def gD(D): return g/(1. + g*np.log((D + W0)/(D + G0)))
 
     def t(v):
-        f = lambda s: gD(np.exp(s))*_K(v, np.exp(s))*np.exp(s)
+        f = lambda s: gD(np.exp(s))**2/g*_K(v, np.exp(s))*np.exp(s)
         val = quad(f, np.log(1e-12), np.log(1e6), limit=400, epsabs=1e-13,
                    points=[np.log(abs(v) + 1e-12), np.log(W0)])[0]
-        return np.exp(-val)
+        return 1. - val
     ref = np.array([2*np.pi*(0.75*t(v)**2 + 4*U**2) for v in eVs])
     got2, info = leadinglog.leading_log_dIdV(ks, eVs, g, U=U, omega0=W0,
                                              Gamma0=G0, return_info=True)
@@ -82,7 +84,7 @@ def test_spin_half_in_a_field_follows_the_published_equations():
     ref = solve_ivp(rhs, (np.log(Dmax), np.log(Dmin)), [-g/2, -g/2],
                     method="DOP853", rtol=1e-11, atol=1e-14, dense_output=True)
     for s in np.linspace(np.log(Dmax), np.log(Dmin), 40):
-        G = sol.sol(s).view(complex).reshape(4, 2, 2)
+        G = sol.sol(s).view(complex).reshape(3, 4, 2, 2)[0]
         gz0 = G[3, 0, 0]/(ks.Sz[0, 0]/2); gz1 = G[3, 1, 1]/(ks.Sz[1, 1]/2)
         gpx = G[1, 0, 1]/(ks.Sx[0, 1]/2); gpy = G[2, 0, 1]/(ks.Sy[0, 1]/2)
         gz_t, gp_t = ref.sol(s)
@@ -91,6 +93,83 @@ def test_spin_half_in_a_field_follows_the_published_equations():
         for x in (gpx, gpy):
             assert abs(-x/2 - gp_t) < 1e-8
         assert np.max(np.abs(G[0])) < 1e-10 # no potential scattering at omega=0
+
+
+def _paper_spin_half(B, om, g0, Dmax, Dmin):
+    """cond-mat/0301106 eq. 6 (= cond-mat/0408506 eqs. 14, 15) at any
+    omega, with the smooth kernel: the right-hand side holds only the
+    Fermi-level couplings z = g_z(0) and p = g_perp(B/2). Returns
+    g_z+(om), g_z-(om), g_perp(om-B/2), g_perp(om+B/2)."""
+    def rhs(s, y):
+        D = np.exp(s); z, p = y[0], y[1]
+        return [-2*p*p*D*_K(B, D), -p*z*D*(_K(B, D) + _K(0., D)),
+                -2*p*p*D*_K(om + B, D), -2*p*p*D*_K(om - B, D),
+                -p*z*D*(_K(om, D) + _K(om - B, D)),
+                -p*z*D*(_K(om + B, D) + _K(om, D))]
+    sol = solve_ivp(rhs, (np.log(Dmax), np.log(Dmin)), [g0]*6, method="DOP853",
+                    rtol=1e-11, atol=1e-16)
+    return sol.y[2:, -1]
+
+
+def test_spin_half_tip_vertex_follows_the_published_equations_at_any_omega():
+    """The tip vertex at omega != 0 against _paper_spin_half, in the
+    paper's convention (spin up at -B/2, g_paper = -Jrho_s/2,
+    g_z_sigma = 4 g_paper sigma (A^0 + sigma A^z) on the up diagonal,
+    g_perp(omega -+ B/2) from A^x below and above the diagonal)."""
+    B, g = 1e-3, -0.08
+    S = _spin(0.5)
+    ks = SimpleNamespace(e=np.array([-B/2, B/2]), p=np.array([1., 0.]), dim=2,
+                         T=0., kB=8.617333262e-5, Sx=S[0], Sy=S[1], Sz=S[2])
+    oms = np.array([0.3e-3, 0.7e-3, -0.99e-3, 2.5e-3])
+    A, _ = leadinglog.tip_vertex(ks, oms, 0.0, g, omega0=W0, Gamma0=G0)
+    g0 = -g/2
+    for a, om in zip(A, oms):
+        Dmax, Dmin = 1e10*(W0 + B + abs(om)), 1e-10*G0
+        ref = _paper_spin_half(B, om, g0, Dmax, Dmin)
+        got = [4*g0*(a[0, 0, 0] + a[3, 0, 0]), -4*g0*(a[0, 0, 0] - a[3, 0, 0]),
+               g0*a[1, 1, 0]/(S[0][1, 0]/2), g0*a[1, 0, 1]/(S[0][0, 1]/2)]
+        assert np.max(np.abs(np.array(got) - ref)) < 1e-8
+
+
+def test_spin_half_tip_vertex_on_shell_is_the_sample_vertex():
+    """For S=1/2 in a field G(0) stays Hermitian, and the tip vertex at
+    omega = e_f - e_i is the sample vertex G_if^* / g, the identity the
+    published scheme keeps. (For a non-Hermitian G(0), as in an
+    anisotropic S=1 in a tilted field, it holds only to O(g^2): see the
+    README.)"""
+    B, g = 1e-3, -0.08
+    S = _spin(0.5)
+    ks = SimpleNamespace(e=np.array([-B/2, B/2]), p=np.array([1., 0.]), dim=2,
+                         T=0., kB=8.617333262e-5, Sx=S[0], Sy=S[1], Sz=S[2])
+    sol, _ = leadinglog.onshell_flow(ks, g, omega0=W0, Gamma0=G0)
+    G = sol.y[:, -1].view(complex).reshape(3, 4, 2, 2)[0]
+    for f, i in [(1, 0), (0, 1)]:
+        A, _ = leadinglog.tip_vertex(ks, [ks.e[f] - ks.e[i]], 0.0, g, omega0=W0, Gamma0=G0)
+        assert np.max(np.abs(A[0, 1:, f, i] - np.conj(G[1:, i, f])/g)) < 1e-8
+
+
+def test_a_large_tip_coupling_is_flagged():
+    """S=3/2, D=1 meV, B=0.3 meV, Jrho_s=-0.1: the sample coupling stays
+    small, but at the threshold eV=B the tip vertex is several times its
+    bare value. The result must say so."""
+    S = _spin(1.5)
+    H = 1e-3*S[2]@S[2] + 0.3e-3*S[2]
+    ks = _ks(H, S)
+    eVs = np.array([0.3e-3 + 1e-6, 2.5e-3])
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        got, info = leadinglog.leading_log_dIdV(ks, eVs, -0.1, omega0=W0,
+                                                Gamma0=G0, return_info=True)
+    assert info["coupling"][0] >= leadinglog.WARN_COUPLING
+    assert any("running coupling" in str(x.message) for x in w)
+
+
+def test_gamma0_must_be_positive():
+    S = _spin(0.5)
+    ks = SimpleNamespace(e=np.zeros(2), p=np.array([.5, .5]), dim=2, T=0.,
+                         kB=8.617333262e-5, Sx=S[0], Sy=S[1], Sz=S[2])
+    with pytest.raises(ValueError):
+        leadinglog.leading_log_dIdV(ks, [1e-3], -0.05, Gamma0=0.0)
 
 
 @pytest.mark.parametrize("name", list(MODELS))

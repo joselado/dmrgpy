@@ -13,10 +13,15 @@ docs/new_methods/kondo_leading_log/README.md.
 Every vertex is stored as four impurity matrices A[mu], mu=0 (potential
 scattering, electron identity) and mu=1,2,3 (exchange, Pauli matrix
 sigma^mu on the electron), indexed [a,b] = <a|...|b> in the impurity
-eigenbasis, the convention of KondoSpectrum. The sample vertex G is
-needed only with its incoming electron at the Fermi level, so it is one
-such set of matrices that flows alone; the tip vertex at bias omega is a
-second set that flows linearly, driven by G.
+eigenbasis, the convention of KondoSpectrum.
+
+As in the papers, the couplings on the right-hand side of the flow are
+taken on shell, where the intermediate electron sits at the Fermi level:
+the sample vertex G with its incoming electron at the Fermi level, and
+the tip vertex element (x,y) at its own on-shell energy e_x - e_y (A_on).
+These two sets of matrices flow together and close. The tip vertex at a
+bias omega is then a quadrature over the cutoff of G times A_on, with the
+cuts of omega.
 """
 import warnings
 
@@ -44,6 +49,10 @@ _CR = np.transpose(_C, (1, 0, 2))
 # antiferromagnetic (Kondo) sign, is the one whose coupling grows.
 SIGN = 1.0
 
+# a running coupling above this is reported with a warning: the
+# leading-log result is then only qualitative
+WARN_COUPLING = 0.5
+
 
 def _kernel(x, D, omega0, Gamma0):
     """K(x,D) = 1/(D+r_x) - 1/(D+omega0+|x|), r_x = sqrt(x^2+Gamma0^2):
@@ -53,18 +62,33 @@ def _kernel(x, D, omega0, Gamma0):
     return 1./(D + np.sqrt(ax*ax + Gamma0*Gamma0)) - 1./(D + omega0 + ax)
 
 
-def _rate(G, A, Kmat):
-    """The bracket of the flow, R[lam] = sum_c sum_{mu nu}
-    C[mu,nu,lam] G[mu]_ac (K*A[nu])_cb - C[nu,mu,lam] (A[mu]*K)_ac G[nu]_cb.
-    G: (4,d,d); A: (...,4,d,d); Kmat: (...,d,d), Kmat[x,y] = K(omega-(e_x-e_y)).
-    Both cuts are read off the same matrix: the direct one at
-    omega-(e_c-e_b) is Kmat[c,b], the exchange one at omega-(e_a-e_c) is
-    Kmat[a,c]."""
-    KA = A*Kmat[..., None, :, :]
-    part = np.matmul(G[:, None], KA[..., None, :, :, :]) # (...,mu,nu,d,d)
-    hole = np.matmul(KA[..., :, None, :, :], G[None]) # (...,mu,nu,d,d)
+def _combine(part, hole):
     return (np.einsum('mnl,...mnab->...lab', _C, part)
             - np.einsum('mnl,...mnab->...lab', _CR, hole))
+
+
+def _rate(G, A, Kmat):
+    """The bracket of the flow of a vertex with incoming energy omega,
+    R[lam] = sum_c sum_{mu nu} C[mu,nu,lam] G[mu]_ac A[nu]_cb K[c,b]
+                             - C[nu,mu,lam] A[mu]_ac G[nu]_cb K[a,c],
+    with Kmat[x,y] = K(omega-(e_x-e_y)): the direct cut at
+    omega-(e_c-e_b), the exchange cut at omega-(e_a-e_c).
+    G: (4,d,d); A: (...,4,d,d), the on-shell vertex on the right-hand
+    side; Kmat: (...,d,d)."""
+    KA = A*Kmat[..., None, :, :]
+    part = np.matmul(G[:, None], KA[..., None, :, :, :])
+    hole = np.matmul(KA[..., :, None, :, :], G[None])
+    return _combine(part, hole)
+
+
+def _onshell_rate(G, A, Kfix):
+    """The same bracket for the element (a,b) taken at its own on-shell
+    energy omega = e_a - e_b: the direct cut becomes e_a - e_c and the
+    exchange cut e_c - e_b, Kfix[x,y] = K(e_x - e_y)."""
+    GK = G*Kfix
+    part = np.matmul(GK[:, None], A[..., None, :, :, :])
+    hole = np.matmul(A[..., :, None, :, :], GK[None])
+    return _combine(part, hole)
 
 
 def _spin_ops(ks):
@@ -89,18 +113,18 @@ def _energy_range(ks, omega0, eVs, Gamma0):
     return 1e10*scale, 1e-10*Gamma0
 
 
-def sample_flow(ks, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
-                atol=1e-14, pole_threshold=1.0, Dmax=None, Dmin=None):
-    """Flow of the sample vertex G (incoming electron at the Fermi level)
-    from D=Dmax down to Dmin. Returns (sol, D_stop): sol.sol(ln D) gives
-    G flattened, and D_stop is the cutoff where the coupling reached
-    order one (None if it never did). Below D_stop G is held at its value
-    there, and results that depend on that range are not leading-log
-    results any more.
-
-    pole_threshold: the flow stops once max |G| over the exchange
-    components exceeds pole_threshold times max|S|/2, i.e. once the
-    running dimensionless coupling reaches about pole_threshold."""
+def onshell_flow(ks, Jrho_s, U=0.0, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
+                 atol=1e-14, pole_threshold=1.0, Dmax=None, Dmin=None):
+    """Flow of the on-shell couplings from D=Dmax down to Dmin: the sample
+    vertex G and the tip vertex A_on for bare potential scattering +U and
+    -U (the second one is the s->t direction). Returns (sol, D_stop):
+    sol.sol(ln D) gives the state, of shape (3,4,d,d) once viewed as
+    complex, in the order G, A_on(+U), A_on(-U). D_stop is the cutoff where
+    the sample coupling reached pole_threshold (None if it never did);
+    below it the state is held at its value there. sol.max_coupling is
+    the largest running sample coupling, in units of the bare S/2."""
+    if not Gamma0 > 0.:
+        raise ValueError("Gamma0 must be positive, it cuts the logs")
     S = _spin_ops(ks)
     d = S.shape[-1]
     e = np.asarray(ks.e, dtype=float)
@@ -109,59 +133,71 @@ def sample_flow(ks, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
         Dmax0, Dmin0 = _energy_range(ks, omega0, np.zeros(1), Gamma0)
         Dmax = Dmax0 if Dmax is None else Dmax
         Dmin = Dmin0 if Dmin is None else Dmin
-    G0 = _bare_vertex(S, SIGN*Jrho_s, 0.)
+    y0 = np.stack([_bare_vertex(S, SIGN*Jrho_s, 0.), _bare_vertex(S, 1., U),
+                   _bare_vertex(S, 1., -U)])
     smax = np.max(np.abs(S))/2.
     ref = pole_threshold*smax
 
     def rhs(s, y):
         D = np.exp(s)
-        G = y.view(complex).reshape(4, d, d)
-        K = _kernel(dE, D, omega0, Gamma0)
-        return (-D*_rate(G, G, K)).reshape(-1).view(float)
+        X = y.view(complex).reshape(3, 4, d, d)
+        Kf = _kernel(dE, D, omega0, Gamma0)
+        out = np.empty_like(X)
+        out[0] = -D*_rate(X[0], X[0], Kf)
+        out[1:] = -D*_onshell_rate(X[0], X[1:], Kf)
+        return out.reshape(-1).view(float)
 
     def pole(s, y):
-        G = y.view(complex).reshape(4, d, d)
+        G = y.view(complex).reshape(3, 4, d, d)[0]
         return ref - np.max(np.abs(G[1:]))
     pole.terminal = True
     pole.direction = -1
 
-    sol = solve_ivp(rhs, (np.log(Dmax), np.log(Dmin)), G0.reshape(-1).view(float),
+    sol = solve_ivp(rhs, (np.log(Dmax), np.log(Dmin)), y0.reshape(-1).view(float),
                     method="DOP853", rtol=rtol, atol=atol, dense_output=True,
                     events=pole)
     if not sol.success:
-        raise RuntimeError("leading-log sample flow failed: "+str(sol.message))
+        raise RuntimeError("leading-log flow failed: "+str(sol.message))
     D_stop = None
     if len(sol.t_events[0]) > 0:
         D_stop = float(np.exp(sol.t_events[0][0]))
-    # the largest running coupling reached, in units of the bare spin
-    # vertex S/2: the leading-log result is controlled only while it is small
-    sol.max_coupling = float(np.max([np.max(np.abs(y.view(complex).reshape(4, d, d)[1:]))
+    sol.max_coupling = float(np.max([np.max(np.abs(y.view(complex).reshape(3, 4, d, d)[0, 1:]))
                                      for y in sol.y.T])/smax)
     return sol, D_stop
 
 
+def sample_flow(ks, Jrho_s, **kwargs):
+    """The sample vertex part of onshell_flow: (sol, D_stop) with
+    sol.sol(ln D) viewed as complex and reshaped to (3,4,d,d), element 0."""
+    return onshell_flow(ks, Jrho_s, **kwargs)
+
+
 def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
                atol=1e-14, pole_threshold=1.0, chunk=None):
-    """The flowed tip vertex A(omega) at D -> 0 for each incoming energy
-    omegas[k], with bare potential scattering Us[k]; shape (n,4,d,d).
-    Also returns the sample flow's info: D_stop (see sample_flow) and
-    max_coupling, the largest running coupling it reached."""
+    """The tip vertex A(omega) at D -> 0 for each incoming energy
+    omegas[k], with bare potential scattering Us[k], which must be +U or
+    -U for one U; shape (n,4,d,d). Also returns the flow's info: D_stop
+    and max_coupling (see onshell_flow)."""
     omegas = np.asarray(omegas, dtype=float)
     Us = np.broadcast_to(np.asarray(Us, dtype=float), omegas.shape)
+    U = float(Us[0]) if len(Us) else 0.
+    if not np.all(np.isclose(np.abs(Us), abs(U))):
+        raise ValueError("tip_vertex takes one U and its opposite only")
+    sel = np.where(np.isclose(Us, U), 1, 2) # which A_on drives each bias
     S = _spin_ops(ks)
     d = S.shape[-1]
     e = np.asarray(ks.e, dtype=float)
     dE = e[:, None] - e[None, :]
     Dmax, Dmin = _energy_range(ks, omega0, omegas, Gamma0)
-    gsol, D_stop = sample_flow(ks, Jrho_s, omega0=omega0, Gamma0=Gamma0,
-                               rtol=rtol, atol=atol,
-                               pole_threshold=pole_threshold, Dmax=Dmax, Dmin=Dmin)
-    s_stop = gsol.t[-1] # the flow ran from log(Dmax) down to here
-    G_frozen = gsol.y[:, -1].view(complex).reshape(4, d, d)
+    fsol, D_stop = onshell_flow(ks, Jrho_s, U=U, omega0=omega0, Gamma0=Gamma0,
+                                rtol=rtol, atol=atol, pole_threshold=pole_threshold,
+                                Dmax=Dmax, Dmin=Dmin)
+    s_stop = fsol.t[-1] # the flow ran from log(Dmax) down to here
+    X_frozen = fsol.y[:, -1].view(complex).reshape(3, 4, d, d)
 
-    def G_at(s):
-        if s <= s_stop: return G_frozen
-        return gsol.sol(s).view(complex).reshape(4, d, d)
+    def X_at(s):
+        if s <= s_stop: return X_frozen
+        return fsol.sol(s).view(complex).reshape(3, 4, d, d)
 
     if chunk is None: chunk = max(1, int(2e6)//(16*d*d))
     out = np.empty((len(omegas), 4, d, d), dtype=complex)
@@ -170,19 +206,20 @@ def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
         n = len(w)
         A0 = np.stack([_bare_vertex(S, 1.0, u) for u in Us[k0:k0+chunk]])
         x = w[:, None, None] - dE[None]
+        idx = sel[k0:k0+chunk]
 
         def rhs(s, y):
             D = np.exp(s)
-            A = y.view(complex).reshape(n, 4, d, d)
+            X = X_at(s)
             K = _kernel(x, D, omega0, Gamma0)
-            return (-D*_rate(G_at(s), A, K)).reshape(-1).view(float)
+            return (-D*_rate(X[0], X[idx], K)).reshape(-1).view(float)
 
         sol = solve_ivp(rhs, (np.log(Dmax), np.log(Dmin)), A0.reshape(-1).view(float),
                         method="DOP853", rtol=rtol, atol=atol)
         if not sol.success:
-            raise RuntimeError("leading-log tip flow failed: "+str(sol.message))
+            raise RuntimeError("leading-log tip vertex failed: "+str(sol.message))
         out[k0:k0+n] = sol.y[:, -1].view(complex).reshape(n, 4, d, d)
-    return out, {"D_stop": D_stop, "max_coupling": gsol.max_coupling}
+    return out, {"D_stop": D_stop, "max_coupling": fsol.max_coupling}
 
 
 def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
@@ -193,16 +230,19 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     second_order_dIdV + third_order_kondo_dIdV + third_order_potential_dIdV
     exactly; see docs/new_methods/kondo_leading_log/README.md.
 
-    T=0 only (ks.T must be 0). If the sample coupling reaches order one
-    during the flow (the Kondo scale is above Gamma0), the flow is stopped
-    at that cutoff D_stop, and every bias within stop_margin*D_stop of a
-    threshold e_f - e_i out of an occupied state, or of zero bias, is
-    returned as NaN with a warning: the method is not valid there.
+    T=0 only (ks.T must be 0). Two checks of validity, per bias:
+      - the running tip coupling, |Jrho_s| times the largest ratio of the
+        flowed to the bare spin vertex over the transitions out of occupied
+        states. Above WARN_COUPLING it warns, at pole_threshold the bias is
+        NaN.
+      - if the sample coupling reaches pole_threshold during the flow (the
+        Kondo scale is above Gamma0), the flow stops at that cutoff D_stop,
+        and every bias within stop_margin*D_stop of zero or of any energy
+        difference e_x - e_y of the spectrum is NaN, with a warning.
 
-    return_info=True also returns a dict with D_stop and max_coupling,
-    the largest running sample coupling of the flow in units of its bare
-    spin vertex (Jrho_s itself at the start): the result is a controlled
-    leading-log one only while it stays well below 1."""
+    return_info=True also returns a dict with D_stop, max_coupling (the
+    largest running sample coupling, Jrho_s itself at the start) and
+    coupling (the running tip coupling at each bias)."""
     if ks.T != 0.:
         raise NotImplementedError("leading_log_dIdV is T=0 only for now; "
                                   "see docs/new_methods/kondo_leading_log")
@@ -214,9 +254,8 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     # t->s at (eV, U) and its particle-hole conjugate s->t at (-eV, -U)
     omegas = np.concatenate([eVs, -eVs])
     Us = np.concatenate([np.full(n, U), np.full(n, -U)])
-    A, info = tip_vertex(ks, omegas, Us, Jrho_s, omega0=omega0,
-                           Gamma0=Gamma0, rtol=rtol, atol=atol,
-                           pole_threshold=pole_threshold)
+    A, info = tip_vertex(ks, omegas, Us, Jrho_s, omega0=omega0, Gamma0=Gamma0,
+                         rtol=rtol, atol=atol, pole_threshold=pole_threshold)
     D_stop = info["D_stop"]
     # W[k,f,i] = 4 sum_lam |A^lam_fi(omega_k)|^2, i over occupied states
     W = 4.*np.sum(np.abs(A[:, :, :, occ])**2, axis=1)
@@ -224,16 +263,32 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     Th = _theta_raw(ks, omegas[:, None, None] - eps_if[None])
     g = np.einsum('i,kfi,kfi->k', p, W, Th)
     dIdV = 2*np.pi*T0**2*(g[:n] + g[n:])
+    # the running tip coupling at each bias
+    S = _spin_ops(ks)
+    bare = np.sqrt(np.sum(np.abs(S[:, :, occ]/2.)**2, axis=0)) # [f,i]
+    mask = bare > 1e-8*np.max(bare)
+    flow = np.sqrt(np.sum(np.abs(A[:, 1:, :, :][:, :, :, occ])**2, axis=1)) # [k,f,i]
+    ratio = np.max(np.where(mask[None], flow/np.where(mask, bare, 1.)[None], 0.), axis=(1, 2))
+    coupling = abs(Jrho_s)*np.maximum(ratio[:n], ratio[n:])
+    info["coupling"] = coupling
+    bad = coupling >= pole_threshold
+    if np.any(coupling >= WARN_COUPLING):
+        warnings.warn("leading_log_dIdV: the running coupling reaches %.2g at "
+                      "%d bias points; the leading-log result is not "
+                      "controlled there%s" % (np.max(coupling), int(np.sum(coupling >= WARN_COUPLING)),
+                                              " (NaN where it passes %g)" % pole_threshold
+                                              if np.any(bad) else ""))
     if D_stop is not None:
-        thr = np.concatenate([[0.], np.abs(eps_if).ravel()])
-        bad = np.min(np.abs(np.abs(eVs)[:, None] - thr[None]), axis=1) < stop_margin*D_stop
-        if np.any(bad):
+        thr = np.unique(np.concatenate([[0.], np.abs(e[:, None] - e[None, :]).ravel()]))
+        near = np.min(np.abs(np.abs(eVs)[:, None] - thr[None]), axis=1) < stop_margin*D_stop
+        if np.any(near):
             warnings.warn("leading_log_dIdV: the sample coupling reached order "
                           "one at D = %.3g (the Kondo scale is above Gamma0); "
-                          "%d bias points within %g*D of a threshold are not "
-                          "leading-log results and are returned as NaN"
-                          % (D_stop, int(np.sum(bad)), stop_margin))
-            dIdV = np.where(bad, np.nan, dIdV)
+                          "%d bias points within %g*D of an energy difference "
+                          "of the spectrum are not leading-log results and are "
+                          "returned as NaN" % (D_stop, int(np.sum(near)), stop_margin))
+        bad = bad | near
+    dIdV = np.where(bad, np.nan, dIdV)
     if return_info:
         return dIdV, info
     return dIdV

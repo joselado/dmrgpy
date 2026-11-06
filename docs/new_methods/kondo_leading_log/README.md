@@ -72,29 +72,50 @@ such processes, as in the third order:
 These are the two arguments of `conductance.py`'s third-order terms,
 F(eV - eps_im) and F(eV - (e_f - e_m)) (the second departs from the
 paper's eq. 25; see the docstring of `conductance.py` and
-`.claude/rules/kondo.md`). For the tip vertex this gives
-
-    dA^lambda_ab(omega) = - sum_c sum_{mu nu} [
-          C^{mu nu}_lambda G^mu_ac A^nu_cb(omega) K(omega - (e_c - e_b))
-        - C^{nu mu}_lambda A^mu_ac(omega) G^nu_cb K(omega - (e_a - e_c)) ] dD,
-
-and the same equation with A replaced by G and omega = 0 for the sample
-vertex. The overall sign and the normalization of g are fixed in
-section 5.
+`.claude/rules/kondo.md`).
 
 The approximation that makes this closed is the one of Rosch et al.
 (cond-mat/0408506, eq. 6 and the text after it). The couplings on the
-right-hand side are taken at the energies where the intermediate
-electron sits at the Fermi level, so that the frequency dependence enters
-only through the cut. Then the sample vertex is needed only at
-omega = 0 (its incoming electron at the Fermi level), its flow is
-closed, and the tip vertex at each bias is a linear flow driven by it.
-For S=1/2 in a field these equations are eqs. 14 and 15 of
-cond-mat/0408506 and eq. 6 of cond-mat/0301106, and the second of these
+right-hand side are taken on shell, at the energies where the
+intermediate electron sits at the Fermi level, so that the frequency
+dependence enters only through the cut. This means two sets of
+matrices:
+
+- the sample vertex G, with its incoming electron at the Fermi level;
+- the tip vertex element (a,b) at its own on-shell energy e_a - e_b,
+  called A_on.
+
+For the tip vertex at a bias omega this gives
+
+    dA^lambda_ab(omega) = - sum_c sum_{mu nu} [
+          C^{mu nu}_lambda G^mu_ac A_on^nu_cb K(omega - (e_c - e_b))
+        - C^{nu mu}_lambda A_on^mu_ac G^nu_cb K(omega - (e_a - e_c)) ] dD,
+
+so A(omega) is a quadrature over D once G and A_on are known. These two
+flow together and close: G with the same equation at omega = 0 (cuts
+|e_c - e_b| direct and |e_a - e_c| exchange), A_on with the cuts read at
+its own on-shell energy (|e_a - e_c| direct and |e_c - e_b| exchange).
+The overall sign and the normalization of g are fixed in section 5.
+For S=1/2 in a field these are eqs. 14 and 15 of cond-mat/0408506 and
+eq. 6 of cond-mat/0301106, at every omega, and the second of these
 papers checks them against bare perturbation theory to order
-g^3 ln^2. Note that G(0) is not a Hermitian matrix: G_ab and G_ba have
-different outgoing energies and different cuts, so it is not
-symmetrized.
+g^3 ln^2.
+
+Two remarks on the closure. First, G is not symmetrized: G_ab and G_ba
+have different outgoing energies and different cuts, and with
+anisotropy or a tilted field the flow makes G non-Hermitian and also
+generates a small potential scattering. Then the tip vertex at
+omega = e_f - e_i is the sample vertex G_if^*/g only up to a term of
+order g^2 with no log (5.0e-3 relative at g=-0.05 and 1.2e-3 at
+g=-0.025 on the S=1 model of section 5). For S=1/2 in a field G stays
+Hermitian and the identity is exact. This is a choice beyond leading
+log, between G at incoming energy zero and G on shell on the
+right-hand side, and the code takes the first one. Second, the first
+version of this code (commit 5f845c0) kept the running tip vertex
+A(omega) on the right-hand side instead of A_on. It agreed with this
+one at g^3 ln^2, and it differed by a term of order g^2 with no log,
+1 to 3% of the vertex at g=0.04 for S=1/2 in a field; an independent
+review found it, and the code now follows the papers.
 
 **The kernel.** The sharp cut Theta(D - |x|) is replaced by the smooth
 kernel
@@ -122,8 +143,18 @@ potential term is odd.
 ## 4. What the method does not contain
 
 - It is perturbative. It fails at T_K by construction, where the
-  couplings reach order 1. The code stops the flow and says so when the
-  sample coupling passes a threshold (section 5).
+  couplings reach order 1. Two checks report this. The sample flow
+  stops when the sample coupling passes `pole_threshold` (1 by
+  default); then the biases within 10 D_stop of any energy difference
+  of the spectrum are NaN. And at each bias the running tip coupling,
+  |Jrho_s| times the largest ratio of the flowed to the bare spin
+  vertex out of the occupied states, is returned as `info["coupling"]`;
+  above 0.5 the code warns, at `pole_threshold` the bias is NaN. The
+  second check matters near a threshold, where the tip vertex can grow
+  while the sample coupling is still small: S=3/2 with D=1 meV,
+  B=0.3 meV and Jrho_s=-0.1 has a running coupling of 0.89 at eV=B and
+  dI/dV/2 pi of 59 there, against 5.5 from the third order. Neither
+  number is reliable there, and the warning says so.
 - One loop renormalizes couplings, not energies. The steps stay at the
   bare excitation energies, so the renormalized anisotropy and g-factor
   (Delgado, Hirjibehedin, Fernandez-Rossier, arXiv:1401.7272; Oberg et
@@ -143,13 +174,20 @@ Each check is in `tests/test_kondo_leading_log.py`.
 1. S=1/2 at B=0, any U. Every process is elastic, and the flow has a
    closed form: the exchange part of the tip vertex goes as
    1/(1 - g F0(eV)). This checks the whole pipeline (kernel, tails,
-   integration) against a formula. Measured: 1.5e-8 relative at g=-0.05, U=0.25, on
-   six biases from -3 to 9 meV.
+   integration) against a formula: with this kernel the tip vertex is
+   t(eV) = 1 - int_0^inf g(D)^2/g K(eV, D) dD, with
+   g(D) = g/(1 + g ln((D + omega0)/(D + Gamma0))), which is
+   1/(1 - g ln(omega0/|eV|)) with a sharp cut. Measured: 1.5e-8
+   relative at g=-0.05, U=0.25, on six biases from -3 to 9 meV.
 2. S=1/2 in a field. The flowed sample vertex against an independent
    integration of eq. 6 of cond-mat/0301106 with the same kernel. This
-   is the check of the multi-level cut structure. Measured: 1.1e-11 in both couplings along the whole
-   flow, at g=-0.08, B=1 meV, and no potential scattering is generated
-   at omega=0, as their g_z(0) does not depend on the electron spin.
+   is the check of the multi-level cut structure. Measured: 1e-8 or
+   better in both couplings along the whole flow, at g=-0.08, B=1 meV,
+   and no potential scattering is generated at omega=0, as their g_z(0)
+   does not depend on the electron spin. The tip vertex at
+   omega = 0.3, 0.7, -0.99 and 2.5 meV against the same equations at
+   that omega (g_z+, g_z-, g_perp(omega -+ B/2)): below 1e-8. And the
+   on-shell identity of the remark above, exact here, below 1e-8.
 3. First order against `conductance.py` on the models of
    `tests/test_kondo_spectrum_tmatrix.py` (anisotropic S=1, coupled
    spins, tilted fields, U on). The difference from the second plus
@@ -162,19 +200,29 @@ Each check is in `tests/test_kondo_leading_log.py`.
    Jrho_s<0 is the sign that grows, as it should.
 4. The stop at the Kondo scale: S=1/2 at B=0 and Jrho_s=-0.2, where
    T_K is above Gamma0. The flow stops, the biases near zero are NaN
-   with a warning, the far ones are finite.
+   with a warning, the far ones are finite. And the S=3/2 case of
+   section 4, where only the tip coupling is large, warns.
+
+An independent review on 2026-11-06 rederived the flow from eq. 6 of
+cond-mat/0408506, checked the ln^2 coefficients of the g^3 terms at
+nonzero omega against eq. 8 of cond-mat/0301106 (agreement to three
+digits on four geometries), and checked invariance under a change of
+basis in a degenerate ground doublet (7e-11) and under a rotation of
+the spin axes (5e-11). Its findings (the closure above, the tip coupling
+check, the NaN mask over all energy differences, `Gamma0 > 0`) are
+fixed.
 
 The tests run in a few seconds. They were run on d22 on 2026-11-06.
 
 ## 6. What the resummation changes
 
 At the paper's own coupling, Jrho_s=-0.05 with omega0=20 meV and
-Gamma0=5 microeV, a free S=1/2 at B=0 with U=0.25 gives at eV=10
-microeV a value of 13.7 against 9.8 from the second plus third order,
-and at 0.4 meV 8.95 against 8.14, in units of 2 pi e^2 T0^2/hbar. The
+Gamma0=5 microeV, a free S=1/2 at B=0 with U=0.25 gives dI/dV/2 pi,
+in units of e^2 T0^2/h, of 2.19 at eV=10 microeV against 1.56 from the
+second plus third order, and 1.44 against 1.29 at 0.4 meV. The
 difference is the g^2 ln^2 and higher terms, and it is large already
 here because g ln(omega0/|eV|) is about 0.38 at 10 microeV. Far from
-zero bias (9 meV) the two agree to 1%.
+zero bias the two agree: 1.10 against 1.09 at 9 meV.
 
 ## 7. References
 
