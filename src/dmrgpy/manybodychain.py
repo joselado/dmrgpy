@@ -238,7 +238,7 @@ class Many_Body_Chain():
           # historical behavior) or "variational" (Jeckelmann's dynamical
           # DMRG: minimize <x|M|x>-2Re<b|x> by two-site sweeping, so the
           # truncation is part of the ansatz instead of an error injected
-          # after every operation -- itensor_version="python" only, and
+          # after every operation -- itensor_version="python" or 3, and
           # only for A=B^dagger; see pyitensor/ddmrg.py)
       self.cvm_nsweeps = 6 # sweeps for cvm_solver="variational"
       self.cvm_maxm = self.maxm # bond dimension for the CVM correction

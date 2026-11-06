@@ -938,6 +938,22 @@ PYBIND11_MODULE(_dmrgcpp, m)
                     omega,eta,energy,tol,max_it);
             }, py::arg("terms_i"),py::arg("terms_j"),py::arg("omega"),
                py::arg("eta"),py::arg("energy"),py::arg("tol"),py::arg("max_it"))
+        .def("ddmrg_correction_vector",
+            [](Chain& self, std::vector<PyTerm> const& terms_i,
+               std::vector<PyTerm> const& terms_j, double omega, double eta,
+               double energy, int maxdim, int nsweeps, py::object x0) {
+                MPS const* p = nullptr;
+                MPS x0v;
+                if (!x0.is_none()) { x0v = x0.cast<MPS>(); p = &x0v; }
+                auto out = self.ddmrg_correction_vector(
+                    terms_from_python(terms_i),terms_from_python(terms_j),
+                    omega,eta,energy,maxdim,nsweeps,p);
+                return py::make_tuple(std::get<0>(out),std::get<1>(out));
+            }, py::arg("terms_i"),py::arg("terms_j"),py::arg("omega"),
+               py::arg("eta"),py::arg("energy"),py::arg("maxdim"),
+               py::arg("nsweeps"),py::arg("x0")=py::none(),
+               "Variational (Jeckelmann) correction vector; returns "
+               "(spectral weight, x), see Chain::ddmrg_correction_vector")
         .def("apply_inverse",[](Chain& self, std::vector<PyTerm> const& terms,
                                  MPS const& wf, double tol, int max_it) {
                 return self.apply_inverse(terms_from_python(terms),wf,tol,max_it);

@@ -92,6 +92,7 @@ or is simply absent) · — not meaningful for this backend/method combo.
 | `KPM` energy truncation (Holzner Sec. III-B) | ✅ | ✅ | ❌ | Net *slower* on both backends where it's measured, kept for regimes/paper-fidelity, not a default. |
 | Non-Hermitian KPM (NHKPM.jl-ported coupled recursion) | ✅ | ✅ | ❌ | Auto-selected instead of plain KPM whenever the Hamiltonian is non-Hermitian, for backends that support it; ED also has this path. |
 | `CVM` (correction-vector / conjugate-gradient resolvent) | ✅ | ✅ | ✅ | Julia's CVM needed no new primitive beyond `set_sweep_params`-equivalent bookkeeping — already backend-agnostic MPS/MPO algebra. |
+| `CVM` variational solver (`cvm_solver="variational"`, Jeckelmann dynamical DMRG, A=B^dagger) | ✅ | ✅ | ❌ | Two-site sweep minimizing `<x|M|x>-2Re<b|x>` with `M=(H-E0-omega)^2+eta^2` as a squared MPO: `pyitensor/ddmrg.py` and, on v3, `Chain::ddmrg_correction_vector` (`mpscpp3/chain_session.h`, local CG on the two-site block, solver scale `hscale_up_` applied to H, omega, eta and b alike). v2 and Julia use the global CG. Cross-checked against `"python"` and ED in `tests/test_ddmrg_v3.py`. |
 | `CVM_explicit`, `CVMimag` (analytic continuation variant) | ✅ | ✅ | ❌ | Only plain `CVM` is wired for Julia so far. |
 | `TDZ` (complex-time evolution correlator) | ✅ | ✅ | ✅ | |
 | `TD` (real-time evolution correlator) | ✅ | ✅ | ✅ | Dispatches through `timedependent.py`, which has its own Julia branch. |

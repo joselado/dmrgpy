@@ -258,10 +258,11 @@ def test_cvm_explicit_returns_the_asked_pair_at_any_scale(version):
         assert _rel(y, ref) < 1e-3, eps
 
 
-def test_variational_gate_sends_a_small_non_adjoint_pair_to_cg():
+@pytest.mark.parametrize("version", [_backend("python"), _backend(3)])
+def test_variational_gate_sends_a_small_non_adjoint_pair_to_cg(version):
     """cvm_solver="variational" reads only B, so (1e-2*Sz0, 1e-2*Sz3)
     came back as C[Sz3,Sz3], 2.124 of the peak off."""
-    sc = _chain("python")
+    sc = _chain(version)
     sc.cvm_solver = "variational"
     eps = 1e-2
     A, B = eps*sc.Sz[0], eps*sc.Sz[3]
@@ -272,10 +273,11 @@ def test_variational_gate_sends_a_small_non_adjoint_pair_to_cg():
     assert _rel(y, ref) < 1e-4
 
 
-def test_variational_gate_falls_back_to_a_relative_numerical_test():
+@pytest.mark.parametrize("version", [_backend("python"), _backend(3)])
+def test_variational_gate_falls_back_to_a_relative_numerical_test(version):
     """4*Sx^3 = Sx on S=1/2 is an identity the canonical form cannot see,
     so the numerical test decides it, the same way at any scale."""
-    sc = _chain("python")
+    sc = _chain(version)
     sc.cvm_solver = "variational"
     for eps in (1.0, 1e-6):
         A = eps*sc.Sx[0]

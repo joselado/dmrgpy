@@ -2275,6 +2275,143 @@ class Chain
         return -G.imag()/M_PI;
         }
 
+    // Variational (Jeckelmann) correction vector, the port of
+    // pyitensor/ddmrg.py: minimize W(x) = <x|M|x> - 2 Re<b|x> over MPS by
+    // two-site sweeping, with M = (H-energy-omega)^2 + eta^2 and
+    // b = -eta B|GS>. Returns (-W_min/(pi*eta), x), A = B^dagger being
+    // checked by cvm.py before the call. The local problem M_eff theta =
+    // rhs is solved by conjugate gradient on the two-site block, which is
+    // exact (no truncation between iterations), and the split back into
+    // two sites is the only truncation, as in ground-state DMRG.
+    //
+    // Scale: the same power of two hscale_up_ that brings H to unit scale
+    // multiplies H-energy-omega, eta and b (by s, s, s^2), so M_s = s^2 M
+    // and b_s = s^2 b give the same x, and W_s = s^2 W is divided back at
+    // the end. The environments are built here, not by dmrg(), so ITensor's
+    // absolute thresholds only see the MPOs, which are at unit scale.
+    // `x0` seeds the ansatz when given (a previous frequency's solution).
+    std::tuple<double,MPS>
+    ddmrg_correction_vector(std::vector<MOTerm> const& terms_i,
+                            std::vector<MOTerm> const& terms_j,
+                            double omega, double eta, double energy,
+                            int maxdim, int nsweeps,
+                            MPS const* x0) const
+        {
+        (void) terms_i; // A = B^dagger, only B enters, as on "python"
+        if (!have_wf0_) Error("Chain::ddmrg_correction_vector called before gs_energy");
+        auto S2 = mpo_from_terms(terms_j);
+        double s = hscale_up_, s2 = s*s;
+        auto margs = Args("Cutoff",cutoff_,"MaxDim",mpomaxm_);
+        auto ampo = AutoMPO(sites_);
+        ampo += -(energy+omega),"Id",1;
+        auto cId = to_mpo_unit(ampo);
+        auto K = sum(H_,cId,margs);
+        K.ref(1) *= s; // exact: s is a power of two
+        auto ampo2 = AutoMPO(sites_);
+        ampo2 += (s*eta)*(s*eta),"Id",1;
+        auto eId = to_mpo_unit(ampo2);
+        auto M = sum(mult_mpo(K,K),eId,margs);
+        auto bargs = Args("Cutoff",cutoff_,"MaxDim",maxdim);
+        MPS b = apply_mpo(S2,wf0_,bargs);
+        b = (-eta*s2)*b;
+        MPS x = x0 ? *x0 : b;
+        int n = length(x);
+        auto xargs = Args("Cutoff",-1.0,"MaxDim",maxdim);
+        x.position(1,xargs);
+        auto sargs = Args("Cutoff",cutoff_,"MaxDim",maxdim);
+        // M environments (bra x primed, ket x), and overlap environments
+        // <x|b> whose free legs are x's (primed) links and b's links.
+        std::vector<ITensor> LM(n+2), RM(n+2), Lo(n+2), Ro(n+2);
+        auto envM = [&](std::vector<ITensor>& E, int i, int prev)
+            {
+            ITensor T = E[prev] ? E[prev]*x.A(i) : x.A(i);
+            T *= M.A(i);
+            T *= dag(prime(x.A(i)));
+            E[i] = T;
+            };
+        auto envO = [&](std::vector<ITensor>& E, int i, int prev)
+            {
+            ITensor bra = dag(x.A(i));
+            for (auto const& I : inds(bra))
+                if (hasTags(I,"Link")) bra = prime(bra,I);
+            ITensor T = E[prev] ? E[prev]*b.A(i) : b.A(i);
+            T *= bra;
+            E[i] = T;
+            };
+        auto cg = [&](std::function<ITensor(ITensor const&)> const& mv,
+                      ITensor const& rhs, ITensor x1)
+            {
+            double bn = norm(rhs);
+            if (bn==0.0) return 0.0*rhs;
+            ITensor r = rhs - mv(x1);
+            ITensor p = r;
+            double rs = norm(r); rs *= rs;
+            for (int it=0;it<200;++it)
+                {
+                if (std::sqrt(rs)<=1E-10*bn) break;
+                ITensor Ap = mv(p);
+                double den = eltC(dag(p)*Ap).real();
+                if (den==0.0) break;
+                double alpha = rs/den;
+                x1 += alpha*p;
+                r -= alpha*Ap;
+                double rsn = norm(r); rsn *= rsn;
+                p = r + (rsn/rs)*p;
+                rs = rsn;
+                }
+            return x1;
+            };
+        auto local = [&](int i, bool right)
+            {
+            ITensor theta = x.A(i)*x.A(i+1);
+            auto mv = [&](ITensor const& v)
+                {
+                ITensor w = v;
+                if (LM[i-1]) w *= LM[i-1];
+                w *= M.A(i);
+                w *= M.A(i+1);
+                if (RM[i+2]) w *= RM[i+2];
+                w.noPrime();
+                return w;
+                };
+            ITensor rhs = b.A(i)*b.A(i+1);
+            if (Lo[i-1]) rhs *= Lo[i-1];
+            if (Ro[i+2]) rhs *= Ro[i+2];
+            rhs.mapPrime(1,0);
+            theta = cg(mv,rhs,theta);
+            if (right)
+                {
+                auto li = commonInds(theta,x.A(i));
+                auto [U,S,V] = svd(theta,li,sargs);
+                x.ref(i) = U;
+                x.ref(i+1) = S*V;
+                }
+            else
+                {
+                auto li = commonInds(theta,x.A(i+1));
+                auto [U,S,V] = svd(theta,li,sargs);
+                x.ref(i+1) = U;
+                x.ref(i) = V*S;
+                }
+            };
+        for (int sw=0;sw<nsweeps;++sw)
+            {
+            for (int i=n;i>=3;--i) { envM(RM,i,i+1); envO(Ro,i,i+1); }
+            for (int i=1;i<n;++i)
+                {
+                local(i,true);
+                if (i<n-1) { envM(LM,i,i-1); envO(Lo,i,i-1); }
+                }
+            for (int i=n-1;i>=1;--i)
+                {
+                local(i,false);
+                if (i>1) { envM(RM,i+1,i+2); envO(Ro,i+1,i+2); }
+                }
+            }
+        double W = innerC(x,M,x).real() - 2.0*innerC(b,x).real();
+        return std::make_tuple(-W/(s2*M_PI*eta),x);
+        }
+
     MPS
     apply_inverse(std::vector<MOTerm> const& terms, MPS const& wf,
                   double tol, int max_it) const

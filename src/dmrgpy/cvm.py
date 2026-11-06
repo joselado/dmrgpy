@@ -21,7 +21,7 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
     """
     AB = operatornames.str2MO(self,name,i=i,j=j) # resolve operators once
     A,B = AB[0],AB[1]
-    if _use_ddmrg(self,A,B): # variational solver (pyitensor only)
+    if _use_ddmrg(self,A,B): # variational solver (python and v3)
         return dynamical_correlator_ddmrg(self,A,B,es=es,delta=delta)
     wf0 = self.get_gs() # computes or returns the cached GS; also sets self.e0
     # sweep parameters used both by B*wf0 below and by every CG solve
@@ -49,16 +49,16 @@ def _use_ddmrg(self,A,B):
 
     * `self.cvm_solver == "variational"` -- opt-in, so the default path
       stays byte-identical on every backend (see manybodychain.py).
-    * `itensor_version == "python"` -- pyitensor is where the two-site
-      environment machinery the solver reuses lives; the compiled
-      backends would need it written again in C++.
+    * `itensor_version in ("python", 3)` -- the two backends that have
+      the two-site sweep (`pyitensor/ddmrg.py`, `Chain::ddmrg_correction_vector`
+      in `mpscpp3/chain_session.h`); v2 and julia_live use the CG.
     * A == B^dagger -- the variational principle needs a real quadratic
       form bounded below, i.e. the same operator on both sides. A general
       off-diagonal <GS|A (z-H)^-1 B|GS> has no such functional, so it
       falls back to CG rather than silently minimizing the wrong thing.
     """
     if getattr(self,"cvm_solver","cg")!="variational": return False
-    if self.itensor_version!="python": return False
+    if self.itensor_version not in ("python",3): return False
     # Unlike the CG path below, which only ever *applies* A and B (so the
     # already-built operators toMPO() returns work there unchanged), this
     # solver hands their symbolic term lists to ddmrg_correction_vector.
