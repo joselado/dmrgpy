@@ -374,14 +374,13 @@ def test_rejects_fermionic_operator():
         ic.spectral_weights("C", 0.0)
 
 
-def test_rejects_itensor_version_3():
-    """The mpscpp3 port of the excitation ansatz returns energies only --
-    deliberately, the same way it has not picked up the iterative
-    eigensolver (docs/idmrg_improvement_plan.md)."""
+def test_itensor_version_3_needs_gs_method_vumps():
+    """itensor_version=3 is supported (tests/test_infinite_chain_spectral_v3.py),
+    like excitation_energies, for gs_method="vumps" only."""
     ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=3)
     ic.set_hamiltonian(-4.0 * ic.SxC[0] * ic.SxR[0] - 5.0 * ic.SzC[0])
-    ic.gs_method = "vumps"
-    with pytest.raises(NotImplementedError, match="itensor_version"):
+    ic.gs_method = "idmrg"
+    with pytest.raises(NotImplementedError, match="gs_method"):
         ic.spectral_weights("Sz", 0.0)
 
 

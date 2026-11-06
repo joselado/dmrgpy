@@ -4479,6 +4479,204 @@ class Chain
         return out;
         }
 
+    // The n lowest eigenpairs of H_eff(k) (raw eigenvalues, not yet
+    // measured from the ground state), the same solver split and the same
+    // fallback as vumps_excitation_energies, but keeping the eigenvectors:
+    // each is a (Dx,D) row-major tangent-space parameter X, flat as
+    // j*D+r, the shape pyitensor idmrg_excitations.excitation_energies(
+    // return_vectors=True) returns. Written beside vumps_excitation_energies
+    // rather than under it so that one's results stay byte-identical.
+    void
+    vumps_excitation_eigenpairs(double k, int n, int dense_max,
+                                 std::vector<double>& evals,
+                                 std::vector<std::vector<Cplx>>& vecs)
+        {
+        int D = vumps_D_, d_g = vumps_dg_;
+        int Dx = D*(d_g-1);
+        int nH = Dx*D;
+        int cut = (dense_max >= 0) ? dense_max : vumps_h_eff_dense_max_;
+        evals.clear(); vecs.clear();
+        if (nH > cut && n < nH)
+            {
+            auto action = [&](std::vector<Cplx> const& x)
+                { return vumps_h_eff_action(k,x); };
+            vx_lanczos_lowest(action,nH,n,vumps_h_eff_lanczos_niter_,
+                               vumps_h_eff_residual_tol_,vumps_h_eff_residual_max_,
+                               evals,vumps_hunit_,&vecs);
+            }
+        if (evals.empty())
+            {
+            auto Hmat = vumps_build_h_eff_dense(k);
+            auto Hh = vx_hermitize(Hmat,nH);
+            std::vector<double> ev; std::vector<Cplx> evec_col;
+            vx_hermitian_eig_full(Hh,nH,ev,evec_col); // ascending
+            int take = std::min(n,nH);
+            evals.assign(ev.begin(),ev.begin()+take);
+            vecs.assign(take,std::vector<Cplx>((size_t)nH));
+            for (int j=0;j<take;++j)
+            for (int i=0;i<nH;++i)
+                vecs[j][i] = evec_col[i+(size_t)j*nH];
+            }
+        }
+
+    // A solver for the transposed, deflated geometric-series map
+    //
+    //     (I - phase*T + Pi)[G] = source,   T[G] = E applied to G,
+    //
+    // with Pi[G] = I * sum(X0*G) the dominant eigenvalue's own projector
+    // in the BILINEAR pairing sum_a X[a]*Y[a] (no conjugation) -- C++
+    // port of pyitensor idmrg_excitations._spectral_resolvent, whose
+    // docstring has the reasoning (Pi at every momentum, not only at
+    // k=0, so that the conditioning is bounded uniformly in k). LU
+    // factored once and reused below vx_resolvent_dense_max_, matrix-free
+    // BiCGSTAB above it with the dense solve as the fallback, the same
+    // split vx_resolvent_build makes.
+    static std::function<std::vector<Cplx>(std::vector<Cplx> const&)>
+    vx_spectral_resolvent(int D, Cplx phase, std::vector<Cplx> const& E,
+                           std::vector<Cplx> const& X0, bool from_left)
+        {
+        int n = D*D;
+        auto action = [=](std::vector<Cplx> const& x)->std::vector<Cplx>
+            {
+            auto Tx = from_left ? vx_apply_transfer_from_left(E,D,x)
+                                : vx_apply_transfer(E,D,x);
+            Cplx s(0,0);
+            for (int i=0;i<n;++i) s += X0[i]*x[i];
+            std::vector<Cplx> out((size_t)n);
+            for (int i=0;i<n;++i) out[i] = x[i] - phase*Tx[i];
+            for (int i=0;i<D;++i) out[i*D+i] += s;
+            return out;
+            };
+        if (n <= vx_resolvent_dense_max_)
+            {
+            auto lu = std::make_shared<std::vector<Cplx>>(vx_build_linear_map(D,action));
+            auto piv = std::make_shared<std::vector<int>>();
+            vx_lu_factor(*lu,n,*piv);
+            return [lu,piv,n](std::vector<Cplx> const& src)
+                { return vx_lu_solve(*lu,*piv,n,src); };
+            }
+        return [action,D,n](std::vector<Cplx> const& src)
+            {
+            bool ok = false;
+            auto sol = vx_bicgstab(action,src,n,1e-12,20*n,ok);
+            if (ok) return sol;
+            auto Mat = vx_build_linear_map(D,action);
+            return vx_solve(Mat,n,src);
+            };
+        }
+
+    // v: the (Dx,D) matrix representing the functional X -> <Phi_k(V_L X)
+    // | O(k) | Psi> as trace(X^dagger v), for the supersite operator M (d_g x
+    // d_g, M[i,o] convention) -- C++ port of pyitensor idmrg_excitations.
+    // _spectral_source_vector, whose docstring derives it: the j=0 term on
+    // AC, a geometric series of (AR,AR) transfers to the right and of
+    // (AL,AL) transfers to the left, each resummed by one transposed solve
+    // so that the whole vector costs two solves per momentum. The fixed
+    // points of the two chains are written in closed form,
+    // C^dagger C and C C^dagger, trace-normalized.
+    std::vector<Cplx>
+    vumps_spectral_source_vector(std::vector<Cplx> const& M, double k) const
+        {
+        int D = vumps_D_, d_g = vumps_dg_;
+        int Dgd = D*d_g, Dx = Dgd-D;
+        auto const& AL = vumps_AL_; auto const& AR = vumps_AR_; auto const& C = vumps_C_;
+        auto AC = vumps_compose_AL_C(AL,C,D,d_g);
+
+        // rho_R = C^dagger C, rho_L = C C^dagger, each of trace 1.
+        auto Cd = vx_dagger(C,D,D);
+        auto rho_R = vx_matmul(Cd,D,D,C,D,D);
+        auto rho_L = vx_matmul(C,D,D,Cd,D,D);
+        Cplx tR(0,0), tL(0,0);
+        for (int i=0;i<D;++i) { tR += rho_R[i*D+i]; tL += rho_L[i*D+i]; }
+        for (auto& z : rho_R) z /= tR;
+        for (auto& z : rho_L) z /= tL;
+
+        auto E_RR = vx_op_transfer_matrix(AR,D,d_g,AR,false,{});
+        auto E_LL = vx_op_transfer_matrix(AL,D,d_g,AL,false,{});
+        Cplx phase = std::exp(Cplx(0.0,k));
+        auto solve_R = vx_spectral_resolvent(D,phase,E_RR,rho_R,false);
+        auto solve_L = vx_spectral_resolvent(D,1.0/phase,E_LL,rho_L,true);
+        auto I = vx_eye(D);
+
+        // j == 0.
+        auto v = vx_apply_op_ket(M,AC,D,d_g);
+
+        // j > 0: the transposed chain starts from apply_transfer(E_RR_O, I).
+        auto E_RR_O = vx_op_transfer_matrix(AR,D,d_g,AR,true,M);
+        auto G = solve_R(vx_apply_transfer(E_RR_O,D,I));
+        auto tr = vx_cap_right(AC,D,d_g,G);
+        for (size_t i=0;i<v.size();++i) v[i] += phase*tr[i];
+
+        // j < 0: the mirror, starting from apply_transfer_from_left(E_LL_O, I).
+        auto E_LL_O = vx_op_transfer_matrix(AL,D,d_g,AL,true,M);
+        G = solve_L(vx_apply_transfer_from_left(E_LL_O,D,I));
+        auto tl = vx_cap_left(G,AC,D,d_g);
+        for (size_t i=0;i<v.size();++i) v[i] += tl[i]/phase;
+
+        // V_L^dagger @ v.
+        std::vector<Cplx> out((size_t)Dx*D,Cplx(0,0));
+        for (int j=0;j<Dx;++j)
+        for (int r=0;r<D;++r)
+            {
+            Cplx acc(0,0);
+            for (int i=0;i<Dgd;++i) acc += std::conj(vumps_VL_[i*Dx+j])*v[i*D+r];
+            out[j*D+r] = acc;
+            }
+        return out;
+        }
+
+    // Result of vumps_spectral_weights: the n lowest excitation energies
+    // (above the ground state) at momentum k, the delta-peak weight
+    // |<k,a|O(k)|Psi>|^2 of each, and the branch-complete total
+    // ||v||^2 = the connected static structure factor at k.
+    struct SpectralWeights
+        {
+        std::vector<double> energies, weights;
+        double total = 0.0;
+        };
+
+    // C++ port of pyitensor idmrg_excitations.spectral_weights for the
+    // operator `opname` on sub-site p of the unit cell. Requires
+    // vumps_ground_state first, like vumps_excitation_energies.
+    SpectralWeights
+    vumps_spectral_weights(std::string const& opname, int p, double k, int n,
+                            int dense_max=-1)
+        {
+        if (!have_vumps_snapshot_)
+            throw ITError("Chain::vumps_spectral_weights: called before "
+                           "vumps_ground_state (no converged grouped VUMPS snapshot)");
+        int n_uc = sites_.length();
+        if (p<0 || p>=n_uc)
+            throw ITError("Chain::vumps_spectral_weights: p must be in 0.."+
+                           std::to_string(n_uc-1)+", got "+std::to_string(p));
+        int D = vumps_D_, d_g = vumps_dg_;
+        int Dx = D*(d_g-1);
+        if (Dx<=0)
+            throw ITError("Chain::vumps_spectral_weights: d_g<=1 (trivial "
+                           "physical dimension) -- no tangent-space excitation");
+        if (n<1)
+            throw ITError("Chain::vumps_spectral_weights: n must be >= 1");
+        if (!have_vumps_exc_env_) vumps_build_excitation_environment();
+
+        std::vector<double> ev; std::vector<std::vector<Cplx>> vecs;
+        vumps_excitation_eigenpairs(k,n,dense_max,ev,vecs);
+        auto M = vumps_embed_group_operator({{p, idmrg_op_dense(p,opname)}});
+        auto v = vumps_spectral_source_vector(M,k);
+
+        SpectralWeights out;
+        for (size_t a=0;a<ev.size();++a)
+            {
+            Cplx ov(0,0); // vdot(X,v)
+            for (size_t i=0;i<v.size();++i) ov += std::conj(vecs[a][i])*v[i];
+            out.energies.push_back(ev[a]-vumps_lam_AC_);
+            out.weights.push_back(std::norm(ov));
+            }
+        double tot = 0.0;
+        for (auto const& z : v) tot += std::norm(z);
+        out.total = tot;
+        return out;
+        }
+
     // <opname> at sub-site p (0..n_uc-1) of a converged vumps_ground_state()
     // -- C++ port of pyitensor/vumps.py's onsite_expectation, computed
     // directly from AC (Vanderstraeten, Haegeman, Verstraete,
@@ -9495,10 +9693,12 @@ class Chain
     static bool
     vx_lanczos_lowest(Fn&& action, int n, int nev, int niter,
                        double residual_tol, double residual_max,
-                       std::vector<double>& evals_out, double unit=1.0)
+                       std::vector<double>& evals_out, double unit=1.0,
+                       std::vector<std::vector<Cplx>>* vecs_out=nullptr)
         {
         unit = std::min(1.0,unit); // see the `unit` comment above
         evals_out.clear();
+        if (vecs_out) vecs_out->clear();
         if (nev < 1 || nev >= n) return false;
         auto dot = [](std::vector<Cplx> const& a, std::vector<Cplx> const& b)
             {
@@ -9660,6 +9860,10 @@ class Chain
             }
 
         evals_out = vals;
+        // The converged, orthonormal eigenvectors, in the same order, for
+        // the caller that needs more than the values (the spectral weights
+        // of vumps_spectral_weights); nullptr, the default, changes nothing.
+        if (vecs_out) *vecs_out = found;
         return true;
         }
 

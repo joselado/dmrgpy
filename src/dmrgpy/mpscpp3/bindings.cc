@@ -404,6 +404,20 @@ PYBIND11_MODULE(_dmrgcpp, m)
                "threshold); 0 forces the Lanczos path, which is how a test "
                "checks the two solvers against each other on a chain small "
                "enough for the dense answer to be the reference.")
+        .def("vumps_spectral_weights",[](Chain& self, std::string const& opname, int p,
+                                          double k, int n, int dense_max) {
+                auto out = self.vumps_spectral_weights(opname,p,k,n,dense_max);
+                return py::make_tuple(out.energies,out.weights,out.total);
+            }, py::arg("opname"),py::arg("p"),py::arg("k"),py::arg("n")=1,
+               py::arg("dense_max")=-1,
+               "(energies, weights, total): the lowest n tangent-space "
+               "excitation energies at momentum k (radians per unit cell), "
+               "the delta-peak weight |<k,a|O(k)|Psi>|^2 each carries for "
+               "opname on sub-site p of the unit cell, and the "
+               "branch-complete total (the connected static structure "
+               "factor at k) -- requires vumps_ground_state first, see "
+               "Chain::vumps_spectral_weights. dense_max is as in "
+               "vumps_excitation_energies.")
         .def("vumps_onsite_expectation",[](Chain& self, std::string const& opname, int p) {
                 return self.vumps_onsite_expectation(opname,p);
             }, py::arg("opname"),py::arg("p"),

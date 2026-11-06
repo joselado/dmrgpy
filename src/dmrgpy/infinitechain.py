@@ -1766,14 +1766,13 @@ class Infinite_Many_Body_Chain:
         single-mode picture is adequate at that momentum. It is free: the
         same source vector every weight is an inner product against.
 
-        Backend support mirrors `excitation_energies`' own
-        itensor_version="python" + gs_method="vumps" requirement, with one
-        further restriction: itensor_version=3 is NOT supported here at all
-        (excitation_energies does support it). The C++ port
-        (Chain::vumps_excitation_energies) has neither the eigenvectors nor
-        the mixed-transfer source vector this needs: its eigensolvers
-        (dense, and the deflated Lanczos vx_lanczos_lowest) return
-        eigenvalues only -- see docs/idmrg_improvement_plan.md.
+        Backend support mirrors `excitation_energies`: itensor_version=
+        "python" or itensor_version=3, both with gs_method="vumps" and
+        n_uc<=2. On itensor_version=3 the eigenvectors of H_eff(k) (dense
+        solver and deflated Lanczos vx_lanczos_lowest) and the
+        mixed-transfer source vector are computed in C++
+        (Chain::vumps_spectral_weights), and every multiplet sum agrees
+        with "python" to ~1e-12.
 
         Two things to know before reading an individual weight. Within a
         degenerate multiplet the split between branches is
@@ -1800,17 +1799,53 @@ class Infinite_Many_Body_Chain:
 
         Sign convention: `k` labels the ansatz's own `sum_n e^{ikn}`; using
         the opposite sign relabels `k <-> -k` and changes nothing else."""
+        if self.itensor_version == 3:
+            return self._spectral_weights_v3(opname, k, p, n, return_total)
         if self.itensor_version != "python":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.spectral_weights: only "
-                "itensor_version=\"python\" is supported (the mpscpp3 port of "
-                "the excitation ansatz returns energies only) -- got "
-                "itensor_version={!r}".format(self.itensor_version))
+                "itensor_version=\"python\" or itensor_version=3 is "
+                "supported -- got itensor_version={!r}".format(
+                    self.itensor_version))
         env = self._get_excitation_environment()
         from .pyitensor import idmrg_excitations
         M = self._spectral_operator_matrix(opname, p)
         return idmrg_excitations.spectral_weights(
             env, k, M, n=n, return_total=return_total)
+
+    def _spectral_weights_v3(self, opname, k, p, n, return_total):
+        """`spectral_weights` on itensor_version=3: the checks
+        `excitation_energies` makes, then Chain::vumps_spectral_weights."""
+        if self.n_uc > 2:
+            raise NotImplementedError(
+                "spectral_weights: n_uc>2 (got {}) is not supported, the "
+                "excitation ansatz expects the grouped single-supersite "
+                "mixed gauge".format(self.n_uc))
+        if self.gs_method != "vumps":
+            raise NotImplementedError(
+                "spectral_weights: itensor_version=3 needs "
+                "gs_method=\"vumps\" -- set self.gs_method = \"vumps\" "
+                "before calling gs_energy()/spectral_weights()")
+        self._require_reach_one("Infinite_Many_Body_Chain.spectral_weights")
+        if not (0 <= p < self.n_uc):
+            raise ValueError("spectral_weights: p must be in 0..{} (n_uc-1), "
+                              "got {!r}".format(self.n_uc - 1, p))
+        if is_fermionic(opname):
+            raise ValueError(
+                "spectral_weights: {!r} is a fermionic (parity-odd) operator, "
+                "whose Jordan-Wigner string cannot be closed inside a single "
+                "unit cell -- only parity-even (e.g. density/spin) operators "
+                "have a well-defined single-site spectral weight here".format(
+                    opname))
+        if self._session3 is None or not self._session3_has_vumps:
+            self.gs_energy()
+        self._warn_unconverged_vumps_state("spectral_weights")
+        w, wt, total = self._session3.vumps_spectral_weights(
+            opname, p, float(k), int(n))
+        w, wt = np.array(w), np.array(wt)
+        if return_total:
+            return w, wt, float(total)
+        return w, wt
 
     def dynamical_structure_factor(self, opname, ks=None, energies=None,
                                     delta=0.05, p=0, n=1):
