@@ -144,3 +144,19 @@ is exact only for a singlet, so L even at N = L; `half_filling=True`
 (the Nf sector) is needed away from ed = -U/2 and did not converge on
 `"python"` at L = 40. `tests/test_kondo_cloud.py`, `docs/development.md`
 4.8d.
+
+**Leading-log resummation (2026-11-06)**, `kondospectrumtk/leadinglog.py`,
+is a new method documented in `docs/new_methods/kondo_leading_log/README.md`
+(derivation, references, measured checks): one-loop poor man's scaling with
+frequency-dependent couplings (Rosch, Paaske, Kroha, Woelfle,
+cond-mat/0408506 eq. 6; cond-mat/0301106) in the impurity eigenbasis, every
+vertex four impurity matrices (mu=0 potential, 1..3 exchange). The sample
+vertex G(0) flows alone, the tip vertex A(eV) linearly on top; the smooth
+kernel 1/(D+r_x) - 1/(D+omega0+|x|) integrates exactly to F0, so its first
+order IS `conductance.py`'s third order (tested as g^2 and odd-part g^3
+scaling), and `SIGN=+1` maps g to `Jrho_s`. G(0) is not Hermitian; do not
+symmetrize it. T=0 only, fixed Gamma0, no level renormalization; the flow
+stops with NaN plus a warning when the coupling reaches order one.
+`tests/test_kondo_leading_log.py`. Public as `get_kondo_spectrum(order="LL")`,
+`mode="ED"` and `T=0` only; `mode="DMRG"` raises because the TASK space does
+not close under the products of spin operators the flow needs.

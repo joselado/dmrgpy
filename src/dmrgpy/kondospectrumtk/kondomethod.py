@@ -60,6 +60,10 @@ class KondoSpectrumMixin():
               eV) and subtract for the potential-interference term (odd in
               eV, the origin of the bias asymmetry) -- see
               kondospectrumtk/conductance.py's module docstring.
+              "LL" sums the leading logs (Jrho_s)^n ln^n to all orders
+              (kondospectrumtk/leadinglog.py); its first order in Jrho_s is
+              exactly order=3. mode="ED" and T=0 only; see
+              docs/new_methods/kondo_leading_log/README.md.
           mode: "ED" (default) always uses full ED diagonalization of this
               chain's Hamiltonian (every eigenstate is needed as a
               possible virtual intermediate state), via
@@ -185,8 +189,21 @@ class KondoSpectrumMixin():
               Hilbert space (cutoff=0) and nkry exhausts the Krylov space.
 
         Returns (eV, dIdV)."""
-        if order not in (2, 3): raise ValueError("order must be 2 or 3")
+        if order not in (2, 3, "LL"):
+            raise ValueError("order must be 2, 3 or \"LL\"")
         eV = np.asarray(eV, dtype=float)
+        if order == "LL" and mode != "ED":
+            # the flow sums over every intermediate state and needs
+            # products of spin operators that the TASK Krylov space built
+            # from S_k|GS> does not hold, so a DMRG spectrum would be a
+            # silently truncated one
+            raise NotImplementedError(
+                "order=\"LL\" is implemented on mode=\"ED\" only; see "
+                "docs/new_methods/kondo_leading_log/README.md")
+        if order == "LL" and T != 0.:
+            raise NotImplementedError(
+                "order=\"LL\" is T=0 only for now (pass T=0); see "
+                "docs/new_methods/kondo_leading_log/README.md")
         if mode == "ED":
             # The ED route reads nothing beyond the named parameters, and
             # a bare **kwargs used to swallow the rest silently: since the
@@ -223,6 +240,10 @@ class KondoSpectrumMixin():
         from . import conductance
         from .stepfunctions import FBuilder
         ks = KondoSpectrum(self, site, T, kB=kB)
+        if order == "LL":
+            from .leadinglog import leading_log_dIdV
+            return eV, leading_log_dIdV(ks, eV, Jrho_s, U=U, T0=T0,
+                                        omega0=omega0, Gamma0=Gamma0)
         dIdV = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
         if order == 3:
             # shared between both calls below: building it tabulates F

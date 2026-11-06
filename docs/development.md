@@ -5912,6 +5912,20 @@ and it checks the sum rule `sum_k int S_kk = S(S+1)` on `Spin_Chain`
 sites, where `S(S+1) = (d^2-1)/4`, warning when more than 1e-2 of the
 weight is missing (finding 14).
 
+`order="LL"` (2026-11-06) is the leading-log resummation of
+`kondospectrumtk/leadinglog.py`, a method new in dmrgpy whose
+derivation, references and measured checks are in
+`docs/new_methods/kondo_leading_log/README.md`. The dispatch is
+deliberately narrow: the ED branch only, and only at `T=0`; `T>0` and
+`mode="DMRG"` raise `NotImplementedError` before any work. The DMRG
+refusal is not a missing wire-up: the flow sums over every intermediate
+state and multiplies spin operators, and the TASK Krylov space built
+from `S_k|GS>` does not hold `S^a S^b|GS>`, so feeding it the
+`TaskKondoSpectrum` would return a silently truncated result. The module
+takes any `KondoSpectrum`-shaped object (`e, p, dim, Sx, Sy, Sz, T`), so
+a DMRG route plugs in at that interface once a space that closes under
+those products exists. `tests/test_kondo_leading_log.py`.
+
 ### 4.8d Kondo screening on a Wilson chain (`wilsonchain.py`, `kondoscreening.py`)
 
 This is the NRG-MPS method of Stocker and Zilberberg, arXiv:2501.10746,

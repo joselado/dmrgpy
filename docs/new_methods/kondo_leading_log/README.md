@@ -1,0 +1,206 @@
+# Leading-log resummation of the STM Kondo spectrum
+
+This folder documents a method that is new in dmrgpy and not taken from
+a single paper: the leading-log resummation of the third-order STM
+spectrum of Ternes (NJP 17 063016, arXiv:1505.04430) for an impurity
+with an arbitrary spectrum (anisotropy, field, coupled spins). It holds
+the derivation, the references it rests on, the checks it passes and
+what it does not contain. The code is
+`src/dmrgpy/kondospectrumtk/leadinglog.py`, the tests are
+`tests/test_kondo_leading_log.py`.
+
+**Status:** see the section "Status".
+
+## 1. Why a resummation and not a fourth order
+
+The third order adds to the golden rule one exchange scattering with a
+sample electron, and this gives the logs F(eV - eps) at each spin
+excitation. Each further order adds one more power of the same log. So
+the expansion parameter is rho J ln(omega0/|x|), not rho J, and it
+reaches 1 at the Kondo scale T_K. A bare fourth order adds nothing
+where the log is large, which is exactly where the third order fails.
+What helps is to sum the leading logs, the terms (rho J)^n ln^n, to all
+orders. This is what the perturbative renormalization group does, and
+in a field or with anisotropy it needs couplings that depend on the
+energy of the scattered electron (Rosch, Paaske, Kroha, Woelfle,
+cond-mat/0202404 and cond-mat/0408506).
+
+## 2. The model and the vertices
+
+The model is Ternes' one. An impurity with eigenstates |a> and energies
+e_a (the `KondoSpectrum` of `edkondo.py`, or any object with the same
+fields) couples to the sample electrons at its site by the exchange
+J psi^dag (sigma/2) psi . S, and the tip tunnels into the same site
+through the vertex T0 (sigma.S/2 + U).
+
+We write every vertex as an operator on the electron spin times an
+operator on the impurity,
+
+    V = sum_mu sigma^mu (x) A^mu,   mu = 0, x, y, z,   sigma^0 = 1,
+
+so A^0 is potential scattering and A^x, A^y, A^z are exchange. The
+product of two electron-spin matrices closes on the same set,
+sigma^mu sigma^nu = sum_lambda C^{mu nu}_lambda sigma^lambda, with
+C^{00}_0 = 1, C^{0a}_a = C^{a0}_a = 1, C^{ab}_0 = delta_ab and
+C^{ab}_c = i eps_abc. So a vertex is four impurity matrices in the
+eigenbasis.
+
+There are two vertices:
+
+- the sample vertex G, with bare value A^a = g S^a / 2 and A^0 = 0,
+  where g is fixed by `Jrho_s` (section 5 gives the sign);
+- the tip vertex A(omega), with bare value A^a = S^a / 2 and A^0 = U,
+  where omega is the energy of the incoming tip electron, so omega = eV.
+
+## 3. The flow
+
+Let us take the band cutoff D down step by step. A second-order process
+with an intermediate impurity state c and an intermediate band electron
+or hole at the cutoff gives a correction to the vertex. There are two
+such processes, as in the third order:
+
+- the direct (particle) one, where the incoming electron scatters first
+  and the intermediate electron is in an empty state. Its log is cut
+  when D drops below |omega - (e_c - e_b)|, the distance of the
+  intermediate state from its own energy shell;
+- the exchange (hole) one, where a sample electron below the Fermi
+  level scatters first into the outgoing state and the incoming
+  electron fills the hole. Its log is cut at |omega - (e_a - e_c)|, and
+  the electron-spin matrices appear in the reversed order, with a minus
+  sign from the fermion exchange.
+
+These are the two arguments of `conductance.py`'s third-order terms,
+F(eV - eps_im) and F(eV - (e_f - e_m)) (the second departs from the
+paper's eq. 25; see the docstring of `conductance.py` and
+`.claude/rules/kondo.md`). For the tip vertex this gives
+
+    dA^lambda_ab(omega) = - sum_c sum_{mu nu} [
+          C^{mu nu}_lambda G^mu_ac A^nu_cb(omega) K(omega - (e_c - e_b))
+        - C^{nu mu}_lambda A^mu_ac(omega) G^nu_cb K(omega - (e_a - e_c)) ] dD,
+
+and the same equation with A replaced by G and omega = 0 for the sample
+vertex. The overall sign and the normalization of g are fixed in
+section 5.
+
+The approximation that makes this closed is the one of Rosch et al.
+(cond-mat/0408506, eq. 6 and the text after it). The couplings on the
+right-hand side are taken at the energies where the intermediate
+electron sits at the Fermi level, so that the frequency dependence enters
+only through the cut. Then the sample vertex is needed only at
+omega = 0 (its incoming electron at the Fermi level), its flow is
+closed, and the tip vertex at each bias is a linear flow driven by it.
+For S=1/2 in a field these equations are eqs. 14 and 15 of
+cond-mat/0408506 and eq. 6 of cond-mat/0301106, and the second of these
+papers checks them against bare perturbation theory to order
+g^3 ln^2. Note that G(0) is not a Hermitian matrix: G_ab and G_ba have
+different outgoing energies and different cuts, so it is not
+symmetrized.
+
+**The kernel.** The sharp cut Theta(D - |x|) is replaced by the smooth
+kernel
+
+    K(x, D) = 1/(D + r_x) - 1/(D + omega0 + |x|),   r_x = sqrt(x^2 + Gamma0^2),
+
+whose integral over D from 0 to infinity is exactly the F0(x) of
+`stepfunctions.py`. So to first order in g the flow gives back the
+third order of `conductance.py` exactly, with the same omega0 and
+Gamma0, and the two methods differ only from order g^2 on. Gamma0 cuts
+the logs, as the decoherence rate Gamma does in cond-mat/0202404.
+
+**The spectrum.** The renormalized tip vertex goes into the golden rule:
+
+    dI/dV(eV) = 2 pi T0^2 sum_{i,f} p_i * 4 sum_lambda |A^lambda_fi(eV)|^2
+                * Theta(eV - (e_f - e_i))  +  (s->t),
+
+which is the second-order formula of `conductance.py` with the bare
+vertex replaced by the flowed one, as in cond-mat/0301106, eq. 11. The
+s->t direction is the particle-hole conjugate of the t->s one: eV goes
+to -eV and U to -U, while the exchange is unchanged. This gives
+`conductance.py`'s rule that the Kondo term is even in eV and the
+potential term is odd.
+
+## 4. What the method does not contain
+
+- It is perturbative. It fails at T_K by construction, where the
+  couplings reach order 1. The code stops the flow and says so when the
+  sample coupling passes a threshold (section 5).
+- One loop renormalizes couplings, not energies. The steps stay at the
+  bare excitation energies, so the renormalized anisotropy and g-factor
+  (Delgado, Hirjibehedin, Fernandez-Rossier, arXiv:1401.7272; Oberg et
+  al., arXiv:1407.1542) are not in this method.
+- Gamma0 is a fixed cut. The Korringa decay of the excited states,
+  which broadens the steps by about (rho J)^2 times the splitting, is
+  not yet included.
+- The populations are the equilibrium ones of the impurity, so there is
+  no spin pumping by the tip.
+- T=0 only for now. At T>0 the kernel becomes its convolution with the
+  derivative of the thermal step, which is the next step.
+
+## 5. Validation
+
+Each check is in `tests/test_kondo_leading_log.py`.
+
+1. S=1/2 at B=0, any U. Every process is elastic, and the flow has a
+   closed form: the exchange part of the tip vertex goes as
+   1/(1 - g F0(eV)). This checks the whole pipeline (kernel, tails,
+   integration) against a formula. Measured: 1.5e-8 relative at g=-0.05, U=0.25, on
+   six biases from -3 to 9 meV.
+2. S=1/2 in a field. The flowed sample vertex against an independent
+   integration of eq. 6 of cond-mat/0301106 with the same kernel. This
+   is the check of the multi-level cut structure. Measured: 1.1e-11 in both couplings along the whole
+   flow, at g=-0.08, B=1 meV, and no potential scattering is generated
+   at omega=0, as their g_z(0) does not depend on the electron spin.
+3. First order against `conductance.py` on the models of
+   `tests/test_kondo_spectrum_tmatrix.py` (anisotropic S=1, coupled
+   spins, tilted fields, U on). The difference from the second plus
+   third order must scale as g^2. This also fixes the sign of g against
+   `Jrho_s`, and we check that `Jrho_s < 0` makes the sample coupling
+   grow as D decreases, which is the Kondo sign in the paper's
+   convention. Measured, with U=0.25: when g is halved from 0.01 the
+   difference drops by 4.10 to 4.13 on the three models, and its odd
+   part in g by 8.02, so the first order is exactly the third order.
+   Jrho_s<0 is the sign that grows, as it should.
+4. The stop at the Kondo scale: S=1/2 at B=0 and Jrho_s=-0.2, where
+   T_K is above Gamma0. The flow stops, the biases near zero are NaN
+   with a warning, the far ones are finite.
+
+The tests run in a few seconds. They were run on d22 on 2026-11-06.
+
+## 6. What the resummation changes
+
+At the paper's own coupling, Jrho_s=-0.05 with omega0=20 meV and
+Gamma0=5 microeV, a free S=1/2 at B=0 with U=0.25 gives at eV=10
+microeV a value of 13.7 against 9.8 from the second plus third order,
+and at 0.4 meV 8.95 against 8.14, in units of 2 pi e^2 T0^2/hbar. The
+difference is the g^2 ln^2 and higher terms, and it is large already
+here because g ln(omega0/|eV|) is about 0.38 at 10 microeV. Far from
+zero bias (9 meV) the two agree to 1%.
+
+## 7. References
+
+- A. Rosch, J. Paaske, J. Kroha, P. Woelfle, PRL 90, 076804 (2003),
+  cond-mat/0202404: frequency-dependent couplings, the cut by Gamma.
+- A. Rosch, J. Paaske, J. Kroha, P. Woelfle, JPSJ 74, 118 (2005),
+  cond-mat/0408506: the general one-loop equation (eq. 6), the
+  approximations that close it, the S=1/2 equations in a field.
+- A. Rosch, T. A. Costi, J. Paaske, P. Woelfle, PRB 68, 014430 (2003),
+  cond-mat/0301106: the same equations in equilibrium, their solution,
+  the check against bare perturbation theory to g^3 ln^2, and the
+  comparison with NRG; the benchmark for a field.
+- J. Paaske, A. Rosch, J. Kroha, P. Woelfle, PRB 70, 155301 (2004),
+  cond-mat/0401180: the decoherence rates that cut the logs.
+- M. Ternes, NJP 17, 063016 (2015), arXiv:1505.04430: the model and the
+  third order this method starts from.
+
+## Status
+
+2026-11-06: `leadinglog.py` implemented and validated on the ED
+`KondoSpectrum` at T=0 (section 5), and exposed as
+`get_kondo_spectrum(order="LL")` on `mode="ED"` with `T=0` (user guide,
+STM and Kondo spectra, "Leading logs"). Open: the thermal kernel (T>0), Korringa rates
+in place of the fixed Gamma0, and the DMRG route. For the DMRG route
+the TASK spectrum has the right shape, but the sum over intermediate
+states is then truncated to the Krylov space, and the flow needs
+products of spin operators that the space built from S_k|GS> does not
+hold; a block-Krylov space from S^a S^b|GS> is the likely fix, and it
+is not tested.

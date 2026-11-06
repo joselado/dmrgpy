@@ -62,7 +62,7 @@ differ by 5 to 20 per cent of the third-order term. The keywords are:
 - `omega0`, `Gamma0`: the band cutoff and the lifetime broadening of the
   Kondo function $F$.
 - `T0`: the tunneling strength. It only sets the overall scale.
-- `order`: 2 or 3.
+- `order`: 2, 3, or `"LL"` (see [Leading logs](#leading-logs)).
 
 ![STM spectra of magnetic atoms and chains](img/kondo_dIdV.png#only-light)
 ![STM spectra of magnetic atoms and chains](img/kondo_dIdV-dark.png#only-dark)
@@ -90,6 +90,40 @@ from `mode="DMRG"` agrees with `mode="ED"` to 0.5 per cent (see
     ```python title="plot.py"
     --8<-- "kondo_dIdV/plot.py"
     ```
+
+## Leading logs
+
+We will now see how to go beyond third order. Each further order adds one
+more power of the same logarithm, $J\rho_s\ln(\omega_0/|eV-\epsilon|)$.
+Near zero bias and near the steps this number is not small, and the third
+order fails there. `order="LL"` sums these leading logarithms to all
+orders with the perturbative renormalization group. The couplings run as
+the band cutoff is lowered, and each logarithm stops at the energy of its
+own virtual process, so in a field or with anisotropy the couplings depend
+on the energy of the electron (Rosch, Paaske, Kroha, Wölfle,
+cond-mat/0408506; Rosch, Costi, Paaske, Wölfle, cond-mat/0301106). The
+renormalized tip vertex then goes into the second-order formula. To first
+order in $J\rho_s$ this is exactly `order=3`.
+
+```python
+sc = spinchain.Spin_Chain(["S=1/2"])
+sc.set_hamiltonian(0*sc.Sz[0])
+eV = np.linspace(-4e-3, 4e-3, 161) + 1e-5
+eV, dIdV = sc.get_kondo_spectrum(eV, Jrho_s=-0.05, U=0.0, T=0.0, order="LL")
+```
+
+At the coupling of the paper the zero-bias peak is higher than at third
+order: $dI/dV/2\pi$ is 1.93 at $eV=10$ $\mu$eV against 1.31, and 1.05 at
+1 meV against 0.98. Far from zero bias the two agree, 0.91 against 0.88 at
+4 meV. The method is still perturbative. It fails at the Kondo temperature,
+where the running coupling reaches order one, and there it returns NaN
+with a warning (for example at $J\rho_s=-0.2$ near zero bias). It
+renormalizes the couplings and not the energies, so the steps stay at the
+bare excitation energies. The derivation and its checks are in
+`docs/new_methods/kondo_leading_log/` in the repository.
+
+!!! note "Backends"
+    `order="LL"` works with `mode="ED"` and `T=0` only.
 
 ## ED and DMRG
 
