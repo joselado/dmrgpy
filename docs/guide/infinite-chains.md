@@ -183,8 +183,8 @@ factor $\sum_re^{ikr}(\langle O_0O_r\rangle-\langle O\rangle^2)$, so
 `w.sum()/total` is the fraction of the weight in the computed branches.
 When it is close to 1, a single-mode picture is valid at that $k$. In
 `dynamical_structure_factor`, `delta` is a Lorentzian broadening for
-plotting. These two methods need `itensor_version="python"` and
-`gs_method="vumps"`, and a parity-even operator. See
+plotting. These two methods need `gs_method="vumps"` and a parity-even
+operator, on `itensor_version="python"` or `3`. See
 `examples/idmrg/dynamical_structure_factor_tfim`.
 
 ![Excitation bands and structure factors of infinite chains](img/infinite-chains_excitations.png#only-light)
@@ -242,8 +242,8 @@ ks, es, Skw = ic.td_dynamical_correlator("Sz", 0, "Sz", n_window=14,
 - `kpm_finite`: the KPM [dynamical correlator](dynamical-correlators.md) on a finite open window of
   `n_window` unit cells. It has finite-size and edge effects, so converge
   it in `n_window`. A small `delta` needs many moments, and then the
-  edges matter even for a long window. The window always runs on
-  `itensor_version="python"`.
+  edges matter even for a long window. The window runs on the same
+  backend as the infinite chain.
 - `td_dynamical_correlator`: real-time evolution of a window whose two
   ends are attached to the converged infinite environment
   (arXiv:1804.09163), so it has no edges. One evolution gives every
@@ -259,8 +259,9 @@ See `examples/idmrg/td_dynamical_correlator` for both.
 
 Three methods act on the converged state itself and return the result as
 a new chain, so that `vev` and `correlator` measure it. Here `ic` and
-`ic2` are two converged chains on the same unit cell, on
-`itensor_version="python"`:
+`ic2` are two converged chains on the same unit cell. They run on
+`itensor_version="python"` with both solvers, and on `itensor_version=3`
+with `gs_method="vumps"`:
 
 ```python
 flipped = ic.apply_operator(2*ic.SxC[0])   # Pauli X on every site

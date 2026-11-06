@@ -232,7 +232,7 @@ def test_every_unknown_window_key_is_named_sorted(heisenberg_ic):
 
 @pytest.mark.parametrize("key,value", [("itensor_version", 3), ("mode", "ED")])
 def test_backend_keys_are_rejected_by_name(heisenberg_ic, key, value):
-    with pytest.raises(TypeError, match=r"cannot set %s: .*itensor_version=\"python\"" % key):
+    with pytest.raises(TypeError, match=r"cannot set %s: .*this chain's own backend" % key):
         _kpm_finite(heisenberg_ic, **{key: value})
 
 

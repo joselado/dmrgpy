@@ -131,6 +131,12 @@ the ground state itself, so `maxm` and `nsweeps` ([Ground state](ground-state.md
   correction vector and the relative tolerance of its solver (default
   $10^{-5}$). If a frequency point warns that it did not converge,
   increase `cvm_maxm`.
+- `sc.cvm_solver="variational"` (CVM, `itensor_version=3` and `"python"`,
+  only for `A` equal to `B^dagger`): the dynamical DMRG of Jeckelmann,
+  [PRB 66, 045114 (2002)](https://doi.org/10.1103/PhysRevB.66.045114).
+  The correction vector is found by minimizing a functional with two-site
+  sweeps, so the truncation is part of the ansatz. Set `cvm_nsweeps` and
+  `cvm_maxm`. The default `"cg"` works on every backend.
 - `N` and `nkry` (ROOTN, defaults 8 and 20): the number of steps and the
   Krylov dimension. Larger `N` helps at high frequency when `nkry` is
   small.
