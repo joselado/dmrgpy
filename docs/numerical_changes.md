@@ -1291,3 +1291,17 @@ everywhere, and its slowest pair is unchanged at 1.2e-3 and 6.9e-3. On a
 and a KPM `Sz Sz` correlator by 3e-7 at a peak of 0.17. Every `"python"`
 result whose SVD keeps singular values between 1e-7 and 1e-5 of the
 largest moves at this level.
+
+## The 2026-11-06 ports of `"python"` methods to v3
+
+Two calls on `itensor_version=3` now take a different route, so their
+results move. `cvm_solver="variational"` on a v3 chain used to fall back
+to the conjugate gradient without a word; it now runs the variational
+correction vector, which agrees with `"python"` and with ED to about
+5e-12 of the peak on 6-site Heisenberg and spinless fermion chains.
+`kpm_finite` on a v3 infinite chain used to build its finite window on
+`"python"`; the window now runs on v3, and on a 4-site TFIM window the two
+spectra agree to better than 1e-3 relative. The iMPS algebra
+(`apply_operator`, `overlap`, `summps` under `gs_method="vumps"`) and
+`spectral_weights` raised on v3 before, so no earlier v3 number exists for
+them.

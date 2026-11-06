@@ -10,11 +10,10 @@ dense-array translation sharing no code with pyitensor/vumps.py beyond the
 algorithm itself, so this is a genuine cross-check, not a shared-bug blind
 spot (same reasoning as test_vumps_correlator_v3.py's own docstring).
 
-On itensor_version=3 there is no `Infinite_Many_Body_Chain`-level wrapper for apply_mpo on
-EITHER backend (matches pyitensor's own scope, see docs/user_guide.md's
-own "Applying an operator/gate to a converged VUMPS iMPS" section) -- v3's
-own apply_mpo is reached directly via `ic._session3.vumps_apply_mpo(...)`,
-working against `ic._session3`'s own converged VUMPS snapshot.
+These tests call v3's apply_mpo directly, through
+`ic._session3.vumps_apply_mpo(...)`, on `ic._session3`'s own converged
+VUMPS snapshot. The public wrapper is `Infinite_Many_Body_Chain.apply_operator`,
+tested on v3 in test_infinite_chain_algebra_v3.py.
 
 Skipped automatically if mpscpp3 isn't compiled, exactly like
 test_vumps_v3.py's own tests.
