@@ -534,7 +534,19 @@ def _davidson_ground_state(matvec, x0, diag, niter, rtol, hdiag=None, vtol=None)
             t = t - Vm @ (Vm.conj().T @ t)
         nt = float(bk.to_host(xp.linalg.norm(t)))
         if not nt > 1e-10 * nt0:
-            break                    # the correction lies in the basis
+            # The preconditioned correction lies in the basis. This happens
+            # when H is nearly diagonal, since (D - theta)^-1 r is then
+            # almost u itself, and stopping here left a residual of 5e-4 on
+            # a field-polarized S=1 chain whose energies are 1e-2 (excited
+            # states 1e-5 to 6e-5 off ED). Take the residual itself, the
+            # Lanczos direction, and stop only when that lies in the basis.
+            t = r
+            nt0 = rn
+            for _ in range(2):
+                t = t - Vm @ (Vm.conj().T @ t)
+            nt = float(bk.to_host(xp.linalg.norm(t)))
+            if not nt > 1e-10 * nt0:
+                break                # the residual lies in the basis
         V.append(t / nt)
         AV.append(matvec(V[-1]))
     return theta, u / xp.linalg.norm(u)

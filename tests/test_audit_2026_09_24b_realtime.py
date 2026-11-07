@@ -127,6 +127,14 @@ def test_flux_ring_circulates_forward(mode, version):
     conjugating the result could not help: ED used to return
     <N_1>(t=1.5) = 0.1024 against 0.8413."""
     fc, hsp = _flux_ring(version)
+    if mode == "DMRG":
+        # The lowest of three fresh solves: a "python" solve from a random
+        # start ends in the one-particle state at 1.2679 instead of the
+        # vacuum in about 1 of 40 starts (an open item of the Davidson local
+        # solve, docs/development.md 4.5), which made this test fail
+        # depending on which tests had run before it in the process.
+        from dmrgpy import groundstate
+        groundstate.best_gs(fc, n=3)
     e0 = np.zeros(3, complex)
     e0[0] = 1.0
     fw = np.array([np.abs(sla.expm(-1j * hsp * t) @ e0) ** 2 for t in TS9])

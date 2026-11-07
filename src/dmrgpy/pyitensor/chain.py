@@ -46,19 +46,29 @@ _BUILD_CUTOFF = 1e-14  # mo_terms.h's build_mpo() never exposes a cutoff knob at
 _BOUND_NITER = 20
 
 
+# Weight below which a direction of the strip sweep is a zero to roundoff,
+# s below about 1e-14 of the largest. A cutoff of 0 dropped only exact
+# zeros, which an SVD of a padded block no longer returns once svd.py's
+# Gram route refactorizes its kept block (ec2e2eb): the padding came back
+# as singular values of 1e-17, survived the strip, and a padded entangled
+# state evolved with the flag off left the unpadded run by 8.9e-8 (the
+# 7.0e-8 of finding 18 before its fix).
+_STRIP_CUTOFF = 1e-28
+
+
 def _strip_sweep(psi):
     """The lossless strip itself: an SVD sweep to the far end and back with
-    padding suspended, which drops exactly the zero singular values
-    (`position()`'s default cutoff=0) and leaves psi right-canonical with
-    its center at site 1. Mutates psi's own tensor list."""
+    padding suspended, which drops the singular values that are zero to
+    roundoff (weight below _STRIP_CUTOFF) and leaves psi right-canonical
+    with its center at site 1. Mutates psi's own tensor list."""
     n = psi.length()
     with _bk.pad_bonds_suspended():
         if psi.center is None:
             # _shift_left's SVD is exact from any gauge, so the far end is
             # as good a starting point as any
             psi.center = n
-        psi.position(n)
-        psi.position(1)
+        psi.position(n, cutoff=_STRIP_CUTOFF)
+        psi.position(1, cutoff=_STRIP_CUTOFF)
     return psi
 
 

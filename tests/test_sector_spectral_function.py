@@ -33,7 +33,7 @@ import warnings
 import numpy as np
 import pytest
 
-from dmrgpy import fermionchain, sectordc, spinchain
+from dmrgpy import cppext, fermionchain, sectordc, spinchain
 from dmrgpy.multioperator import MO2matrix
 from dmrgpy.multioperatortk import charge as chargetk
 from dmrgpy.operatornames import name2MO
@@ -290,6 +290,7 @@ def test_charges_that_do_not_cancel_are_rejected():
                                     name=(Sp[0], Sp[0]), nex=4)
 
 
+@pytest.mark.skipif(not cppext.available(2), reason="needs the v2 extension")
 def test_unsupported_backends_are_rejected_not_silently_substituted():
     sc, _ = heisenberg_chain(6)
     Sp, Sm = name2MO("Sp", sc), name2MO("Sm", sc)

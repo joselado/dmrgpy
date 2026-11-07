@@ -227,6 +227,7 @@ def test_failed_backend_switch_leaves_the_chain_on_its_old_backend():
 
 
 @needs_v3
+@pytest.mark.skipif(not cppext.available(2), reason="needs the v2 extension")
 def test_failed_backend_switch_under_a_conserved_sector():
     """The mirror image: `sites.py::initialize` assigns `_session` first
     and only then applies the conserved sector, which refuses a backend

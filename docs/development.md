@@ -3439,6 +3439,38 @@ block-sparsity, no JIT) — see §5 for how much slower in practice, and how
 default when no C++ extension is compiled (§4.3), which is every `pip
 install`.
 
+**The Davidson local solve, and where it stopped short.** Since
+2026-10-25 the two-site ground-state and excited-state solves of
+`pyitensor/dmrg.py` are a diagonally preconditioned Davidson
+(`_davidson_ground_state`), not the 200-step Lanczos solve before. Two ways
+it stopped short were found on 2026-11-07, each as an older audit test that
+failed. First, on a nearly diagonal H the correction (D - theta)^-1 r is
+almost the current vector and vanishes after orthogonalization; the solve
+took that as convergence and stopped with a residual of 5e-4 on energies of
+1e-2 (a field-polarized S=1 chain), so the excited states were 1e-5 to
+6e-5 above ED. It now takes the residual itself as the next direction and
+stops only when that lies in the basis too. Second, and left open: a solve
+from a random start can stop at an excited state of a sector H conserves
+when the ground state's component in it is tiny, since the residual stop
+does not see it and no later sweep grows it. A 3-site flux ring of spinless
+fermions at mu=3 ended at the one-particle state 1.2679 instead of the
+vacuum in about 1 of 40 starts, on the code before and after, which seed
+and process history decide; stronger first-sweep noise made it worse (15 of
+120 at 1e-3). Converging the first sweep fully (20 steps per bond) cured it
+there but broke the decoupled surrogate dimer of `tests/test_ysr_parity.py`,
+whose two bath parities are conserved one by one: the first solves then
+collapsed onto the even state with both baths flipped, 0.034 Delta above
+the ground state, and the dI/dV came out at half the ED value. So that
+budget was not kept. `groundstate.best_gs` now clears the session's state
+before each of its n solves, which were all the same solve before, and is
+how the flux-ring test gets its ground state. Pinned by
+`tests/test_python_davidson_robustness.py`. The padding strip of one-site
+TDVP (`chain._strip_sweep`) also changed the same day: it dropped exactly
+zero singular values, which svd.py's Gram route has not returned since its
+kept block is refactorized by a thin SVD (`ec2e2eb`), so a padded state kept
+its padding and left the unpadded run by 8.9e-8. It now drops weights below
+`_STRIP_CUTOFF` = 1e-28 (s below about 1e-14 of the largest).
+
 **MPO construction (`mpobuilder.py::to_mpo`).** Every operator this
 backend touches — the Hamiltonian, but equally every `vev`/correlator/
 time-evolution vertex — is built here, and it is worth knowing what

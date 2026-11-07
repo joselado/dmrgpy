@@ -312,14 +312,16 @@ def test_generalized_ground_state_in_small_units():
     assert np.real(sc.gs_energy_generalized(A))/s == pytest.approx(lref, abs=1e-8)
 
 
-# Where the same property still fails: "python"'s _lanczos_ground_state
-# stops on an absolute value/breakdown test (2.8e-5 off at s=1e-10), which
-# the fix of pyitensor/dmrg.py has to turn into a plain test. Strict.
-@pytest.mark.xfail(strict=True, reason="small-units, python Lanczos, not fixed")
-@pytest.mark.parametrize("version,s", [pytest.param("python", 1e-10, id="python-1e-10")])
-def test_small_units_ground_state_still_open(version, s):
+# This was a strict xfail while "python"'s ground state ran on
+# _lanczos_ground_state, which stopped on an absolute value/breakdown test
+# (2.8e-5 off at s=1e-10). The ground-state solve is Davidson since
+# 2026-10-25, stopping on the residual relative to the operator's scale,
+# and the scaled energy is within 4e-15 of s=1 down to s=1e-12.
+@pytest.mark.parametrize("version,s", [pytest.param("python", 1e-10, id="python-1e-10"),
+                                       pytest.param("python", 1e-12, id="python-1e-12")])
+def test_small_units_ground_state(version, s):
     assert _scaled_energy(version, s) == \
-        pytest.approx(_scaled_energy(version, 1.0), abs=1e-6)
+        pytest.approx(_scaled_energy(version, 1.0), abs=1e-10)
 
 
 @pytest.mark.parametrize("s", [1e-9, 1e-11])

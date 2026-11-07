@@ -2,9 +2,11 @@
 import numpy as np
 import pytest
 
-from dmrgpy import spinchain, fermionchain
+from dmrgpy import spinchain, fermionchain, cppext
 
-BACKENDS = [2, 3, "python"]
+# a backend whose extension is not compiled falls back to ED, which is
+# not what these tests are about
+BACKENDS = [b for b in (2, 3, "python") if b == "python" or cppext.available(b)]
 METTS_BACKENDS = [3, "python"]
 
 

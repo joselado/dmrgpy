@@ -20,7 +20,7 @@ and shows the state leaving the sector entirely.
 import numpy as np
 import pytest
 
-from dmrgpy import bosonchain, fermionchain, spinchain
+from dmrgpy import bosonchain, cppext, fermionchain, spinchain
 from dmrgpy.multioperator import MO2matrix
 
 DMRG_TOL = 1e-6
@@ -351,6 +351,7 @@ def test_invalid_sector_requests_raise():
         fc.set_conserved_sector(Nf=1.5)  # not an integer
 
 
+@pytest.mark.skipif(not cppext.available(2), reason="needs the v2 extension")
 def test_ed_answers_the_sector_and_backends_without_qns_still_refuse():
     """Same contract as on itensor_version=3: ED targets the sector by
     restricting to the basis states that carry the charge (see

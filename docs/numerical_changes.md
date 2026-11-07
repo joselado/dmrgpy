@@ -1384,3 +1384,16 @@ the passes on v3). A solve that was converged moves at the level of its
 convergence. `set_hamiltonian(H, restart=False)` and every explicit start
 (`set_initial_wf_guess`, `wf0=`) are unchanged. The extensions need a
 rebuild (`make pybind`) for this.
+
+The same day, three changes moved `"python"` numbers.
+`_davidson_ground_state` no longer stops when its preconditioned correction
+vanishes; it takes the residual as the next direction. Only solves that used
+to stop there move: on a field-polarized S=1 chain with energies of 1e-2 the
+excited states went from 1e-5 to 6e-5 above ED to 1e-17, and the `n_gs` and
+`submode="EX"` Kondo spectra on it moved with them (one EX point of
+dI/dV/2pi from 5.82 to 0.9287, against 1 on ED). `groundstate.best_gs` (and `get_gs(best=True)`) clears the
+session's state before each of its n solves on v2, v3 and `"python"`, so the
+n solves are independent fresh starts; before, every solve after the first
+was warm-started from the previous answer. The padding strip of one-site TDVP drops weights below 1e-28,
+so a padded entangled state evolved with the flag off follows the unpadded
+run to 3e-15 instead of 8.9e-8.

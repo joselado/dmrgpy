@@ -7,7 +7,7 @@ fallback (finding 6)."""
 import warnings
 import numpy as np
 import pytest
-from dmrgpy import fermionchain, spinchain
+from dmrgpy import fermionchain, spinchain, cppext
 from dmrgpy.kondospectrumtk import potentialdc, conductance
 from dmrgpy.kondospectrumtk.edkondo import KondoSpectrum
 
@@ -130,6 +130,7 @@ def test_order3_with_a_correlator_submode_on_a_short_chain_uses_ed():
     assert np.max(np.abs((d3 - d2) - ref)) < 1e-10
 
 
+@pytest.mark.skipif(not cppext.available(2), reason="needs the v2 extension")
 def test_order3_with_a_correlator_submode_on_v2_raises():
     sc = heisenberg(4, itensor_version=2)
     with pytest.raises(NotImplementedError):

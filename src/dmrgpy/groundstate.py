@@ -27,6 +27,12 @@ def best_gs(sc,n=1,**kwargs):
         # send-cache in gs_energy_single would otherwise return the
         # previous iteration's cached energy instead of re-running DMRG
         sc._session_ham_cache = None
+        # ...and from a fresh random MPS: the session kept its own state, so
+        # every solve after the first was warm-started from the previous
+        # one's answer, and on "python" the n solves were the same solve
+        session = getattr(sc,"_session",None)
+        if session is not None and hasattr(session,"clear_wavefunction"):
+            session.clear_wavefunction()
         e0 = sc.gs_energy(**kwargs) # ground state energy
         if e0<emin: # only keep this one if it actually improves on the best
             wf0 = sc.wf0 # copy wavefunction

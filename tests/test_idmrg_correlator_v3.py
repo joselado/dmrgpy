@@ -239,16 +239,28 @@ def test_odd_parity_operator_pair_rejected():
 
 # == local_excitation_gap ===================================================
 
+def _tfim_gap(itensor_version, g=2.0, maxm=16):
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=itensor_version)
+    ic.gs_method = "idmrg"
+    ic.maxm, ic.maxiter, ic.etol = maxm, 50, 1e-12
+    ic.set_hamiltonian(-4*ic.SzC[0]*ic.SzR[0] - 2*g*ic.SxC[0])
+    ic.gs_energy()
+    return ic.local_excitation_gap()
+
+
 def test_local_excitation_gap_matches_python_backend():
     """The local superblock gap is a property of the growing algorithm's
     own final 2-site effective Hamiltonian, so the two backends only agree
-    to the extent that they converge to the same one -- checked on the
-    gapped, D=1 polarized chain, where that Hamiltonian is essentially
-    exactly reproducible."""
-    ic_v3 = _polarized_xx_chain(3)
-    ic_py = _polarized_xx_chain("python")
-    assert ic_v3.local_excitation_gap() == pytest.approx(
-        ic_py.local_excitation_gap(), rel=1e-3)
+    to the extent that they converge to the same one. Checked on a gapped
+    transverse-field Ising chain (g=2, exact gap 2), where the state has
+    D>1 and the environment is well defined: 2.093377 on v3 and 2.093623 on
+    "python", the same on every run. It used to be the D=1 polarized XX
+    chain, where the answer depends on whether the environment keeps a
+    zero-weight direction, which roundoff and "python"'s unseeded Lanczos
+    start decide: 5.191 (an open 4-site magnon) in most runs and 5.5 (2h -
+    J/2, the bare 2-site one) in up to 3 of 30, on the code before and
+    after 2026-11-07 alike."""
+    assert _tfim_gap(3) == pytest.approx(_tfim_gap("python"), rel=1e-3)
 
 
 def test_local_excitation_gap_is_positive_and_near_exact_xx_gap():
