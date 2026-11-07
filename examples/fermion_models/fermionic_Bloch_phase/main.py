@@ -22,7 +22,7 @@ phis = np.linspace(0.,1.,30) # phases
 es = [get_energy(phi) for phi in phis]
 
 plt.plot(phis,es,marker="o")
-plt.xlabel("$\phi/(2\pi)$")
+plt.xlabel(r"$\phi/(2\pi)$")
 plt.ylabel("Energy")
 plt.show()
 

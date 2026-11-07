@@ -1305,3 +1305,15 @@ spectra agree to better than 1e-3 relative. The iMPS algebra
 (`apply_operator`, `overlap`, `summps` under `gs_method="vumps"`) and
 `spectral_weights` raised on v3 before, so no earlier v3 number exists for
 them.
+
+## The 2026-11-07 warnings in scripts
+
+No number changes. `algebra/kpmextrapolate.py` installed
+`warnings.filterwarnings("ignore")` at import, and every chain imports it,
+so every warning of dmrgpy (and of anything else in the script) was silent
+outside pytest, which resets the filters per test. The filter is now
+limited to the fits of the moment extrapolation, so warnings that were
+always issued, for instance the TASK missing-weight warning, the
+excited-state fluctuation warning and the metastable-sector warning of
+`ysr.subgap_energies`, now appear in plain scripts
+(`tests/test_warnings_reach_scripts.py`).

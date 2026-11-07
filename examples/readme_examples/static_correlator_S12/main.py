@@ -20,7 +20,7 @@ import numpy as np
 matplotlib.rcParams.update({'font.size': 14})
 
 plt.plot(np.array(range(len(cs))),cs,marker="o",c="red")
-plt.ylabel("$\langle S^z_0 S^z_{n} \\rangle$")
+plt.ylabel(r"$\langle S^z_0 S^z_{n} \rangle$")
 plt.xlabel("$n$")
 
 plt.tight_layout()

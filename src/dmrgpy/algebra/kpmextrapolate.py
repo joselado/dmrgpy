@@ -9,7 +9,10 @@ import warnings
 
 #import pmdarima as pm
 
-warnings.filterwarnings("ignore")
+# Only the fits below are silenced (a rank-deficient polyfit, the log of a
+# zero moment, statsmodels' convergence messages). Do not install a global
+# filter here: this module is imported by every chain, so it would silence
+# every warning of every dmrgpy script.
 
 
 def restrict(y):
@@ -42,10 +45,11 @@ def fit_power_transform(mus):
     yi = [np.max(y[i:i+na]) for i in range(n-na)] # averge over several points
     yi = np.array(yi) # convert to array
     x = np.array(range(len(yi)))+1. # indexes
-    yl = np.log(yi) # logarithm 
-    xl = np.log(x) # logarithm
-#    slope, intercept, r_value, p_value, std_err = linregress(xi,y)
-    c,stats = polyfit(xl,yl,1,full=True,w=x) # fit to a power law
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        yl = np.log(yi) # logarithm
+        xl = np.log(x) # logarithm
+        c,stats = polyfit(xl,yl,1,full=True,w=x) # fit to a power law
     def f(x): 
         scale = np.array(range(len(x))) +1.# scale
         scale = np.power(scale,c[1]) # scaling
@@ -89,7 +93,9 @@ def extrapolate_moments(mus0,fac,extrapolation_mode="1/n"):
     from statsmodels.tsa.ar_model import AR
     from statsmodels.tsa.arima_model import ARIMA
     from statsmodels.tsa.ar_model import AutoReg
-    model = AutoReg(train,lags=lags,trend="ct").fit(cov_type="HC1") # get the model
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        model = AutoReg(train,lags=lags,trend="ct").fit(cov_type="HC1") # get the model
 
 #    model = pm.auto_arima(train, start_p=1, start_q=1,
 #                         test='adf',
@@ -102,7 +108,9 @@ def extrapolate_moments(mus0,fac,extrapolation_mode="1/n"):
 
 
 #    pred = model.predict(n_periods=P-L) # prediction
-    pred = model.predict(start=L,end=P-1) # prediction
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pred = model.predict(start=L,end=P-1) # prediction
     mus2 = np.zeros(P,dtype=np.complex128) 
     mus2[0:L] = mus[0:L] # initial data
     mus2[L:P] = pred[:] # predicted data
