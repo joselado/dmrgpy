@@ -73,10 +73,12 @@ Lambda=2, since at Lambda=2 the energy differences of order Delta were not
 converged at maxm=128. Open: the Wilson-ladder half of S5 (two channels
 for a dimer), a long-chain high-spin dI/dV, Delta_c at Lambda=2 on the zp
 mesh (the remaining 3% against 3.7), current-driven spin occupations in
-S0, the degeneracy of a spin-1/2 doublet in the rate model of S6,
-`parity=None` (a sector solve only when the elastic weight trips), an
-adaptive stop of the warm sweeps, and a controlled tangent-space expansion
-for TASK on long chains (an int `pad_bonds` is not one).
+S0, the degeneracy of a spin-1/2 doublet in the rate model of S6, a long-chain
+check of the adaptive warm stop `nsweeps_warm="auto"`, and the Krylov side
+of TASK on long chains. The tangent-space expansion `expand_bonds` is exact
+on short chains but does not help on 21 sites, where the subgap pole needs
+Krylov convergence, so a filtered or shifted Krylov start is the next
+candidate there.
 
 ## 1. The question
 

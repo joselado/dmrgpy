@@ -397,15 +397,18 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0,
     Jc = getattr(fc, "J_chain", None) # a number, or one per spin (surrogate)
     if (submode == "TASK" and mode != "ED" and getattr(fc, "mode", None) != "ED"
             and Jc is not None and np.all(np.asarray(Jc) == 0)
-            and kwargs.get("pad_bonds") != "full"):
+            and kwargs.get("pad_bonds") != "full"
+            and not (kwargs.get("expand_bonds") is not None
+                     and kwargs.get("expand_rounds", 1) >= 2)):
         import warnings
         warnings.warn("get_stm_spectrum: J = 0 on the chain, so the ground "
             "state is a product of the impurity and the bath, and the "
             "one-site tangent space of TASK misses the part of X|GS> that "
             "flips the impurity spin and adds an electron to the bath at "
             "once: the spectrum is incomplete, down to zero. Pass "
-            "pad_bonds=\"full\" or use mode=\"ED\" on a short chain, or the "
-            "BdG density of states of zaverage.bdg_chain_dos, for J = 0",
+            "expand_bonds=4 with expand_rounds=2, or pad_bonds=\"full\" or "
+            "mode=\"ED\" on a short chain, or use the BdG density of states "
+            "of zaverage.bdg_chain_dos, for J = 0",
             RuntimeWarning)
     out = np.zeros(len(es))
     for X in tunneling_operators(fc, imp=imp, site=site, U=U):

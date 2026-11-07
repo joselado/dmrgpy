@@ -174,7 +174,11 @@ def test_an_int_pad_inflates_the_pole_variances():
     On the converged 4-site chain, pad_bonds=4 leaves the spectrum within
     3e-13 of "full", but the largest variance of a pole of weight above
     1e-3 of the largest goes from 8e-21 to 1e-4 (run fixvar on d22); with
-    "full" the two-site discarded space is empty and it is zero."""
+    "full" the two-site discarded space is empty and it is zero. Without
+    a pad the variance is rounding, and its size depends on the random
+    MPS start: 7e-21 to 3.4e-15 over seeds 0 to 7 on d22 (run
+    fix_varseeds), and 1.1e-14 once in a full pytest run. So it is
+    bounded at 1e-12, still six orders below the int pad."""
     fc = ysr.kondo_chain(4, J=0.6, Delta=0.1, itensor_version="python")
     fc.maxm, fc.nsweeps = 60, 15
     X = ysr.tunneling_operators(fc, U=0.3)[0]
@@ -187,7 +191,7 @@ def test_an_int_pad_inflates_the_pole_variances():
         w = np.abs(p["weight"])
         out[pad] = (A, np.max(np.asarray(p["variance"])[w > 1e-3*w.max()]))
     assert np.max(np.abs(out[4][0] - out["full"][0])) < 1e-10
-    assert out[None][1] < 1e-15
+    assert out[None][1] < 1e-12
     assert out[4][1] > 1e-6
     assert out["full"][1] < 1e-25
 

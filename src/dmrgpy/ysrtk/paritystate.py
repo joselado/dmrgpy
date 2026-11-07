@@ -65,6 +65,33 @@ charge penalty, about 2e3 times that of H, so the state kept an
 admixture of about 1e-4 in amplitude (1.4e-8 in weight) of the first
 excited state of its sector (see pyitensor/dmrg.py's dmrg(penalty=)).
 
+parity="auto", the default of stm_poles, zaverage_stm_spectrum and
+surrogate.get_stm_spectrum, pays for the sector solves only when they are
+needed. The
+plain ground state is solved and probed with two vevs per vertex
+(parity_mixture: elastic = sum_X 2|<X>|^2, the elastic weight stm_poles
+adds up, against the sum rule total = sum_X <X X^dag + X^dag X>), and
+the sector route of parity=True is taken only when elastic > 1e-6 total,
+the threshold of stm_poles' warning. Measured on d22 (BLAS on one
+thread, run auto1). On the 8-site chain near the transition (v3, maxm=60,
+nsweeps=15, U=0.3, nkry=100) the probe tripped on four fresh chains of
+four, at 6.3e-6, 3.6e-5, 5.2e-2 and 4.9e-3 of the total, and every one
+gave the single pole at 0.0190312 Delta of parity=True with elastic 0;
+the plain route on four other fresh chains gave elastic weights of 1.3e-3
+to 6.6e-2 of the pole weight and two poles each, between 0.0032 and
+0.0189 Delta. One call took 11.5 to 12.8 s with "auto", 9.2 to 11.0 s with
+True and 10.8 to 13.7 s with False, measured end to end (the stages
+were not timed separately). On the 20-site chain (Lambda=4, rho J=0.15,
+Delta=1e-3, maxm=128, nsweeps=20, v3) the plain state is not mixed, the
+probe gives 7.5e-25 of the total in 0.07 s against 41 s for the solve,
+and "auto" is the plain route. On the coupled surrogate dimer
+(J12 = t_b = 0.01) the probe did not trip on either backend (9.4e-14
+on "python", 3.2e-22 on v3), and "auto" was off ED by 4.9e-7 ("python")
+and 1.1e-8 (v3) of the peak, in 25 s and 10 s, against 2.5e-6 and
+5.0e-9 in 40 s and 24 s for True. On mode="ED" the probe is zero away
+from an exact degeneracy, and a trip there warns and takes the sector
+energies, as True does.
+
 One thing the sector state changes besides the parity: TASK works in the
 one-site tangent space of the state it gets, and that space is set by the
 bond dimensions. A ground state of definite 2Sz has a smaller Schmidt rank
@@ -86,6 +113,82 @@ import copy
 import fractions
 
 import numpy as np
+
+
+# the threshold of parity="auto", that of the elastic-weight warning of
+# zaverage.stm_poles: elastic > MIXTURE_TOL * total
+MIXTURE_TOL = 1e-6
+
+
+def check_parity(parity):
+    """parity as given if it is False, True or "auto", else a ValueError.
+    None is not an alias of either."""
+    if isinstance(parity, (bool, np.bool_)):
+        return bool(parity)
+    if isinstance(parity, str) and parity == "auto":
+        return parity
+    raise ValueError("parity must be False, True or \"auto\", got %r"
+                     % (parity,))
+
+
+def parity_mixture(fc, operators, mode="DMRG"):
+    """(elastic, total) of the tunneling vertices on the ground state of
+    fc, the probe of parity="auto".
+
+    elastic = sum_X 2 |<X>|^2 is the elastic weight that stm_poles adds up
+    over the two orders (X^dag, X) and (X, X^dag), since |<X^dag><X>| =
+    |<X>|^2 on a normalized state. total = sum_X <X X^dag + X^dag X> is the
+    sum rule of the weights of both orders, what taskdmrg.get_poles
+    computes as <A B>, so it holds the pole weights, the elastic weight
+    and the weight the tangent space would drop. Each X changes the fermion
+    parity, so elastic is exactly 0 on a state of definite parity and is
+    the weight of the mixture otherwise (2|ab|^2 times matrix elements for
+    a|even> + b|odd>). Two vevs per vertex on the state fc already holds
+    (fc.vev solves it if there is none); no correlator is run."""
+    elastic, total = 0.0, 0.0
+    for X in operators:
+        Xd = X.get_dagger()
+        elastic += 2.0*abs(complex(fc.vev(X, mode=mode)))**2
+        total += abs(complex(fc.vev(X*Xd + Xd*X, mode=mode)))
+    return float(elastic), float(total)
+
+
+def is_mixture(elastic, total):
+    """True when the probe of parity_mixture trips: elastic above
+    MIXTURE_TOL of total (or any elastic weight with total = 0)."""
+    return elastic > MIXTURE_TOL*max(total, 1e-300)
+
+
+def auto_parity_state(fc, operators, mode="DMRG"):
+    """The route of parity="auto": the plain ground state of fc is solved
+    (fc.gs_energy), probed with parity_mixture, and only on a mixture
+    replaced by parity_ground_state.
+
+    Returns (chain, pinfo, probe): chain is fc itself and pinfo None when
+    the probe does not trip, else the copy and the info of
+    parity_ground_state; probe is a dict with "elastic", "total",
+    "tripped" and "E0_plain" (the energy of the plain solve). On mode="ED"
+    the ground state has a definite parity unless the two parities are
+    exactly degenerate, a fine-tuned point; the probe is the same there,
+    and a trip takes the sector route as parity=True does. At Delta = 0
+    there is no parity sector to solve (parity_ground_state raises), so
+    the probe never trips there and a mixture is left to the elastic-weight
+    warning of stm_poles."""
+    e0 = float(np.real(fc.gs_energy(mode=mode)))
+    elastic, total = parity_mixture(fc, operators, mode=mode)
+    gapped = getattr(fc, "Delta_sc", 0.0) != 0.0
+    probe = dict(elastic=elastic, total=total,
+                 tripped=gapped and is_mixture(elastic, total), E0_plain=e0)
+    if not probe["tripped"]:
+        return fc, None, probe
+    if fc.get_mode(mode=mode) == "ED":
+        import warnings
+        warnings.warn("parity=\"auto\": the ED ground state has an elastic "
+            "weight %.3g of %.3g, so the two parities are degenerate here; "
+            "taking the sector energies of parity_ground_state" % (elastic,
+            total), RuntimeWarning, stacklevel=3)
+    c, pinfo = parity_ground_state(fc, mode=mode)
+    return c, pinfo, probe
 
 
 def _is_surrogate(fc):

@@ -97,6 +97,89 @@ continuum pole at 1.154 Delta against 1.055 Delta unpadded. The
 arbitrary directions slow the Krylov convergence and break the spin
 symmetry of the tangent space, so an int pad_bonds is for short chains.
 
+Expanded bonds
+--------------
+expand_bonds=k is the controlled expansion. The Lanczos from b = P B|GS>
+loses, at its start, the part of B|GS> outside the tangent space, and at
+its first step the part of H b outside it. Both have a two-site part,
+P^{2perp} B|GS> and P^{2perp} H b, which lives in the two-site discarded
+space of a bond: outside the kept columns of A_l on the left and the kept
+rows of B_{l+1} on the right. On every bond the two-site tensors of these
+vectors, each normalized over the chain, are stacked side by side and on
+top of each other and reshaped to (a d) x (d' c); their leading left
+singular vectors become at most k new columns of A_l, their leading right
+singular vectors at most k new rows of B_{l+1}, and B_l and A_{l+1} get
+zero columns and zero rows, C_l and C_{l+1} zeros, so that A_l and B_l
+keep the same shapes. The state, E0 and both gauge relations do not
+change, and the tangent space contains the unexpanded one and every
+product of a new direction with anything on the neighbouring site, so
+the two-site directions that carry the dropped weight are in it. This is
+the two-site expansion of CBE (Gleis, Li and von Delft, arXiv:2207.14712)
+fed by B|GS> and H P B|GS> instead of H|GS>. MPSKit.jl's OptimalExpand
+is the closest reference code: in a left-to-right sweep it projects the
+two-site update on both null spaces, takes a truncated SVD and appends the
+right singular vectors to AR, completing AL by a zero slice and a gauge
+step; here both sides get their own singular vectors, so that A_l and B_l
+keep the same shapes; the shrewd selection of CBE, a cost shortcut, is
+not needed at these bond dimensions, the full two-site tensor costs one
+two-site variance per feed. The bonds are expanded in one left-to-right
+sweep, and the two-site tensor of bond l is taken with the bras already
+expanded on bonds 0..l-1 (the kets are the unexpanded state and b), so a
+direction added on one bond is seen by the two-site tensor of the next.
+Singular values below EXPANSION_FLOOR = 1e-8 of the largest weight of a
+bond (from a first pass in the unexpanded gauge) are not used, a feed
+whose two-site norm is below EXPANSION_FLOOR of the norm of its vector is
+dropped (on v3 the rounding of a saturated bond is about 1e-10 of it,
+and a looser cut added arbitrary directions), and the
+largest possible dimension, from the shapes alone, is checked against
+MAX_PADDED_DIMENSION before any SVD. On a real gauge a complex feed is
+split into its real and imaginary parts, so the recursion stays real. The
+SVDs and the assembly are xp calls on the active backend
+(concatenations, no in-place write); only the singular values come back
+to the host. "hamiltonian" (P^{2perp} H|GS>, the CBE-DMRG direction) is a
+third feed of TangentSpace.expand, off by default. No charge blocks are
+used: the SVD can mix degenerate directions of different Sz.
+
+Checked on d22 against ED CVM (tests/test_task_expansion.py, run
+short_all): the sector state of the degenerate pair S = 1, Dz = -0.05 on
+4 bath sites goes from an error of 1.6e-3 to 1.3e-11 ("python") and
+1.7e-11 (v3) at every k from 1 to 16, two of its four correlators growing
+from a tangent space of 562 to 658 ("python") and 621 (v3) and the other
+two having nothing to add; pad_bonds=16 gives 2.4e-8 at 1791. At J = 0
+the whole weight comes back from k = 1 (a third of it unexpanded), but
+the poles are not those of ED (0.39 off against 0.27 unexpanded): the
+flipped impurity is added on the first bond, and the bath electron that
+the Lanczos then moves along the chain needs it on the next bonds too,
+which b and H b of the unexpanded state do not reach. expand_rounds
+repeats the expansion from the expanded state, where b already holds the
+flipped impurity: with two rounds at k = 8 the J = 0 spectrum is ED to
+3.1e-14 ("python", run diag3) at a tangent space of 515, against 1023
+for pad_bonds="full", and a third round adds nothing. On v3 two rounds
+at k >= 4 give 2.8e-12, and k = 2 needs three rounds on both backends
+(run rounds). Each round costs one first pass and one sweep, and the cap
+is checked per round. On a converged chain both feeds are below the
+rounding cut and nothing moves. The two-site variance stays an error
+bar: on the S = 1
+pair the largest variance of a pole of weight above 1e-3 of the largest
+falls with the error, from 4.2e-2 to 8.7e-5 ("python") and from 4.2e-2
+to 9.7e-5 (v3) at k = 4 (run diag3).
+
+On a long chain the expansion does not help. On kondo_chain(20, J = 0.3
+A_Lambda, Delta = 1e-3, Lambda = 4) on v3 at maxm 128 (run long16 on d22,
+the four runs interleaved in one process, E_ysr = 2.4864516231e-4 from the
+sector solves), expand_bonds=16 adds 192 directions, the tangent space
+grows from 298751 to about 391000, and the subgap pole is 1.81e-5 above
+E_ysr at nkry = 100 against 1.08e-5 unexpanded, at 1.9 times the time
+(244 s against 129 s). At nkry = 300 both reach E_ysr, 9.3e-11 expanded
+and 3.7e-11 unexpanded, at 760 s against 518 s, and the lowest continuum
+pole (weight above 1e-6 of the largest) moves from 1.055 Delta to 1.103
+Delta. There the unexpanded tangent space already holds the subgap state,
+and what nkry = 100 lacks is Krylov convergence, which a larger space
+cannot give. The four spin and particle-hole copies of the subgap pole
+stay within 1.5e-8 of each other (1.7e-14 at nkry = 300), so the SVD does
+not break the spin symmetry here. So expand_bonds is for a state whose
+tangent space is too small, not for a slow Krylov.
+
 Off-diagonal pairs
 ------------------
 The paper treats A = B^dagger. For a general pair the weight of a pole is
@@ -248,6 +331,76 @@ def pad_mps_bonds(Ms, pad_bonds):
     return out
 
 
+# The feeds of expand_bonds: P^{2perp} O|GS> and P^{2perp} H P O|GS>, what
+# the Lanczos from P O|GS> loses at its start and at its first step.
+EXPANSION_FEEDS = ("operator", "krylov")
+
+# Singular values of the stacked feeds below this fraction of the largest
+# one over all bonds are not used: a bond whose discarded weight is
+# rounding gets no direction.
+EXPANSION_FLOOR = 1e-8
+
+
+def check_expand_bonds(expand_bonds):
+    """expand_bonds as given if it is None or a positive int; a ValueError
+    otherwise."""
+    if expand_bonds is None:
+        return None
+    if (isinstance(expand_bonds, bool)
+            or not isinstance(expand_bonds, (int, np.integer))
+            or expand_bonds < 1):
+        raise ValueError("expand_bonds must be None or a positive integer, "
+                         "got %r" % (expand_bonds,))
+    return int(expand_bonds)
+
+
+def check_expansion_keywords(pad_bonds, expand_bonds, expand_rounds=1):
+    """The keywords validated; a ValueError when pad_bonds and expand_bonds
+    are both given, since padding and the expansion together are not
+    tested, and for expand_rounds other than a positive int, or above 1
+    without expand_bonds."""
+    pad_bonds = check_pad_bonds(pad_bonds)
+    expand_bonds = check_expand_bonds(expand_bonds)
+    if (isinstance(expand_rounds, bool)
+            or not isinstance(expand_rounds, (int, np.integer))
+            or expand_rounds < 1):
+        raise ValueError("expand_rounds must be a positive integer, got %r"
+                         % (expand_rounds,))
+    if expand_rounds > 1 and expand_bonds is None:
+        raise ValueError("expand_rounds=%d needs expand_bonds" % expand_rounds)
+    if pad_bonds is not None and expand_bonds is not None:
+        raise ValueError("pad_bonds and expand_bonds cannot be used "
+                         "together; pass one of them")
+    return pad_bonds, expand_bonds
+
+
+def expansion_bounds(shapes, k):
+    """The most directions expand_bonds=k can add to every interior bond of
+    a mixed-gauge MPS whose isometries have the (a, d, b) shapes `shapes`,
+    in the left-to-right sweep of TangentSpace.expand: min(k, (a_l +
+    k_{l-1}) d_l - b_l, d_{l+1} c_{l+1} - b_l), the dimensions of the two
+    discarded spaces of the bond once bond l-1 has grown by k_{l-1}."""
+    out, prev = [], 0
+    for l in range(len(shapes) - 1):
+        a, d, b = shapes[l]
+        _, d2, c = shapes[l + 1]
+        prev = max(0, min(int(k), (a + prev) * d - b, d2 * c - b))
+        out.append(prev)
+    return out
+
+
+def expanded_dimension(shapes, ks):
+    """The tangent dimension sum_l (a'_l d_l - b'_l) b'_l once bond l has
+    grown by ks[l], from the shapes alone (Python ints)."""
+    L = len(shapes)
+    add = [0] + list(ks) + [0]
+    tot = 0
+    for l, (a, d, b) in enumerate(shapes):
+        a2, b2 = int(a) + add[l], int(b) + add[l + 1]
+        tot += (a2 * int(d) - b2) * b2
+    return tot
+
+
 def mixed_gauge(Ms, pad_bonds=None):
     """Left isometries A_l, right isometries B_l and site-centre tensors
     C_l of the normalized MPS given by the arrays `Ms`, with A_l and B_l of
@@ -387,9 +540,15 @@ def _right_envs(Bs, Ws):
 class TangentSpace:
     """The one-site tangent space of a ground-state MPS, orthogonal to it,
     with the Hamiltonian H projected onto it. pad_bonds enlarges it by
-    padding the bonds of the MPS first (mixed_gauge, pad_mps_bonds)."""
+    padding the bonds of the MPS first (mixed_gauge, pad_mps_bonds);
+    expand_bonds by at most that many directions per bond taken from the
+    two-site discarded space of the operators expand_ops (MPO arrays), see
+    expand(). The two cannot be combined."""
 
-    def __init__(self, Ms, Ws, pad_bonds=None):
+    def __init__(self, Ms, Ws, pad_bonds=None, expand_bonds=None,
+                 expand_ops=(), expand_rounds=1):
+        pad_bonds, expand_bonds = check_expansion_keywords(
+            pad_bonds, expand_bonds, expand_rounds)
         self.As, self.Bs, self.Cs = mixed_gauge(Ms, pad_bonds=pad_bonds)
         self.Ws = Ws = real_if_exact(Ws)
         self.L = len(Ms)
@@ -397,6 +556,16 @@ class TangentSpace:
         self.RH = _right_envs(self.Bs, Ws)
         self.e0 = float(backend.xp().vdot(
             self.Cs[0], _open1(self.LH[0], Ws[0], self.Cs[0], self.RH[1])).real)
+        self.added = [0] * (self.L - 1)
+        if expand_bonds is not None:
+            # every round sweeps the chain again from the expanded gauge,
+            # so b and H b see the directions the previous round added; it
+            # stops early once a round adds nothing
+            for _ in range(int(expand_rounds)):
+                add = self.expand(expand_bonds, list(expand_ops))
+                self.added = [x + y for x, y in zip(self.added, add)]
+                if sum(add) == 0:
+                    break
 
     # vector-space operations on lists of T_l
     def dot(self, X, Y):
@@ -489,14 +658,16 @@ class TangentSpace:
         y = self.apply((self.Ws, self.LH, self.RH), T)
         return [a - self.e0 * t for a, t in zip(y, T)]
 
-    def two_site_variance(self, T):
-        """||P^{2perp} H |T>||^2, the part of H|T> in the two-site discarded
-        space, which no one-site tangent vector can represent."""
-        L, As, Bs, Ws = self.L, self.As, self.Bs, self.Ws
-        Lc, Rc = self._mixed_envs(T)
-        tot = 0.0
+    def _two_site_discarded(self, T, op=None):
+        """Bond by bond (l, l+1), the two-site tensor (a, d, d', c) of
+        P^{2perp} O|T>, O the operator `op` from operator() (default H):
+        the part of O|T> in the two-site discarded space of the bond, outside
+        the kept spaces of A_l on the left and of B_{l+1} on the right."""
+        L, As, Bs = self.L, self.As, self.Bs
+        Ws, LE, RE = op if op is not None else (self.Ws, self.LH, self.RH)
+        Lc, Rc = self._mixed_envs(T, op)
         for l in range(L - 1):
-            Le, Re = self.LH[l], self.RH[l + 2]
+            Le, Re = LE[l], RE[l + 2]
             K = _pair(T[l], Bs[l + 1]) + _pair(As[l], T[l + 1])
             y = _open2(Le, Ws[l], Ws[l + 1], K, Re)
             if l > 0:
@@ -505,9 +676,174 @@ class TangentSpace:
             if l < L - 2:
                 KA = _pair(As[l], As[l + 1])
                 y = y + _open2(Le, Ws[l], Ws[l + 1], KA, Rc[l + 2])
-            y = _proj_right(_proj_left(y, As[l]), Bs[l + 1])
+            yield _proj_right(_proj_left(y, As[l]), Bs[l + 1])
+
+    def _state_discarded(self, op):
+        """Bond by bond, the two-site tensor of P^{2perp} O|GS> for an
+        operator from operator(), from the two-site centre C_l B_{l+1}."""
+        Wo, LO, RO = op
+        for l in range(self.L - 1):
+            K = _pair(self.Cs[l], self.Bs[l + 1])
+            y = _open2(LO[l], Wo[l], Wo[l + 1], K, RO[l + 2])
+            yield _proj_right(_proj_left(y, self.As[l]), self.Bs[l + 1])
+
+    def two_site_variance(self, T):
+        """||P^{2perp} H |T>||^2, the part of H|T> in the two-site discarded
+        space, which no one-site tangent vector can represent."""
+        tot = 0.0
+        for y in self._two_site_discarded(T):
             tot += float(backend.xp().vdot(y, y).real)
         return tot
+
+    def expand(self, expand_bonds, Wops, feeds=EXPANSION_FEEDS):
+        """Enlarge the tangent space with directions taken from the two-site
+        discarded space (the module docstring, "Expanded bonds"). Wops are
+        the MPO arrays of the operators whose O|GS> feeds the expansion.
+        feeds is a tuple of "operator" (P^{2perp} O|GS>), "krylov"
+        (P^{2perp} H b, b = P O|GS> normalized) and "hamiltonian"
+        (P^{2perp} H|GS>, the direction of CBE-DMRG). Returns the number of
+        directions added to every bond. The state, E0 and both gauge
+        relations do not change; LH and RH are rebuilt."""
+        expand_bonds = check_expand_bonds(expand_bonds)
+        if expand_bonds is None:
+            return [0] * (self.L - 1)
+        for f in feeds:
+            if f not in EXPANSION_FEEDS + ("hamiltonian",):
+                raise ValueError("expand: unknown feed %r" % (f,))
+        xp = backend.xp()
+        As, Bs, Cs, L = self.As, self.Bs, self.Cs, self.L
+        kmax = expansion_bounds([a.shape for a in As], expand_bonds)
+        dim = expanded_dimension([a.shape for a in As], kmax)
+        if dim > MAX_PADDED_DIMENSION:
+            raise ValueError(
+                "expand_bonds=%r gives a tangent space of dimension up to %d, "
+                "above the cap of %d (the Krylov basis holds nkry vectors of "
+                "that length). Use a smaller expand_bonds."
+                % (expand_bonds, dim, MAX_PADDED_DIMENSION))
+        # A feed is O applied to a ket: |GS> ("operator", "hamiltonian") or
+        # the tangent vector b ("krylov"). First pass, in the unexpanded
+        # gauge: the weight of every feed in the two-site discarded space,
+        # bond by bond, which normalizes the feeds and sets the floor.
+        Ao, Bo, Co = self.As, self.Bs, self.Cs
+        specs = []
+        for Wo in Wops:
+            Wv, LO, RO = self.operator(Wo)
+            b = self.gauge([_open1(LO[l], Wv[l], Co[l], RO[l + 1])
+                            for l in range(L)])
+            nb = self.norm(b)
+            if "operator" in feeds:
+                specs.append(dict(
+                    W=Wv, RE=RO, T=None,
+                    ys=self._state_discarded((Wv, LO, RO)),
+                    ref2=nb**2 + abs(self.expectation((Wv, LO, RO)))**2))
+            if "krylov" in feeds and nb > 0.0:
+                b = [x / nb for x in b]
+                specs.append(dict(
+                    W=self.Ws, RE=self.RH, T=b, Rc=self._mixed_envs(b)[1],
+                    ys=self._two_site_discarded(b),
+                    ref2=self.norm(self.apply_h(b))**2))
+        if "hamiltonian" in feeds:
+            specs.append(dict(
+                W=self.Ws, RE=self.RH, T=None,
+                ys=self._state_discarded((self.Ws, self.LH, self.RH)),
+                ref2=abs(self.e0)**2))
+        # a feed whose two-site norm is below EXPANSION_FLOOR of the norm of
+        # its vector is dropped (on v3 the rounding of a saturated bond is
+        # 1e-11 of it, and kept it would add arbitrary directions), the
+        # others are scaled to unit weight
+        kept, per_bond = [], np.zeros(L - 1)
+        for sp in specs:
+            n2l = np.array([float(np.asarray(backend.to_host(
+                xp.vdot(y, y))).real) for y in sp.pop("ys")])
+            n2 = float(np.sum(n2l))
+            if n2 > 0.0 and n2 > EXPANSION_FLOOR**2 * (sp["ref2"] + n2):
+                sp["scale"] = 1.0 / np.sqrt(n2)
+                kept.append(sp)
+                per_bond = per_bond + n2l / n2
+        ks = [0] * (L - 1)
+        if not kept:
+            return ks
+        floor = EXPANSION_FLOOR * float(np.sqrt(np.max(per_bond)))
+        # Second pass, a left-to-right sweep: the two-site tensor of bond l
+        # is taken with the bras already expanded on bonds 0..l-1 (kets
+        # unexpanded), so a direction added on one bond is carried on to
+        # the next one.
+        from .cbe import _orthonormal_complement_columns
+        A, B, C = list(Ao), list(Bo), list(Co)
+        real = not np.iscomplexobj(np.zeros(0, dtype=Ao[0].dtype))
+        for sp in kept:
+            sp["LE"], sp["Lc"] = xp.ones((1, 1, 1)), None
+        for l in range(L - 1):
+            a2, d, b = A[l].shape
+            _, d2, c = Bo[l + 1].shape
+            bound = max(0, min(expand_bonds, a2 * d - b, d2 * c - b))
+            k = 0
+            if bound > 0:
+                mats = []
+                for sp in kept:
+                    W, RE, T, Le = sp["W"], sp["RE"], sp["T"], sp["LE"]
+                    if T is None:
+                        y = _open2(Le, W[l], W[l + 1], _pair(Co[l], Bo[l + 1]),
+                                   RE[l + 2])
+                    else:
+                        K = _pair(T[l], Bo[l + 1]) + _pair(Ao[l], T[l + 1])
+                        y = _open2(Le, W[l], W[l + 1], K, RE[l + 2])
+                        if l > 0:
+                            y = y + _open2(sp["Lc"], W[l], W[l + 1],
+                                           _pair(Bo[l], Bo[l + 1]), RE[l + 2])
+                        if l < L - 2:
+                            y = y + _open2(Le, W[l], W[l + 1],
+                                           _pair(Ao[l], Ao[l + 1]),
+                                           sp["Rc"][l + 2])
+                    y = _proj_right(_proj_left(y, A[l]), Bo[l + 1])
+                    mats.append(sp["scale"] * y.reshape(a2 * d, d2 * c))
+                if real and any(np.iscomplexobj(np.zeros(0, dtype=m.dtype))
+                                for m in mats):
+                    mats = [p for m in mats for p in (m.real, m.imag)]
+                U, sl, _ = xp.linalg.svd(xp.concatenate(mats, axis=1),
+                                         full_matrices=False)
+                _, sr, Vh = xp.linalg.svd(xp.concatenate(mats, axis=0),
+                                          full_matrices=False)
+                sl = np.asarray(backend.to_host(sl)).real
+                sr = np.asarray(backend.to_host(sr)).real
+                k = min(bound, int(np.count_nonzero(sl > floor)),
+                        int(np.count_nonzero(sr > floor)))
+            if k > 0:
+                dt = Ao[l].dtype
+                Ul = _orthonormal_complement_columns(
+                    U[:, :k].astype(dt), A[l].reshape(a2 * d, b))
+                Vr = _orthonormal_complement_columns(
+                    Vh[:k].astype(dt).conj().T,
+                    Bo[l + 1].reshape(b, d2 * c).conj().T)
+                k = min(int(Ul.shape[1]), int(Vr.shape[1]))
+            if k > 0:
+                A[l] = xp.concatenate([A[l], Ul[:, :k].reshape(a2, d, k)],
+                                      axis=2)
+                B[l] = xp.concatenate([B[l], xp.zeros((a2, d, k), dtype=dt)],
+                                      axis=2)
+                C[l] = xp.pad(C[l], ((0, 0), (0, 0), (0, k)))
+                A[l + 1] = xp.concatenate(
+                    [A[l + 1], xp.zeros((k, d2, c), dtype=dt)], axis=0)
+                B[l + 1] = xp.concatenate(
+                    [B[l + 1], Vr[:, :k].conj().T.reshape(k, d2, c)], axis=0)
+                C[l + 1] = xp.pad(C[l + 1], ((0, k), (0, 0), (0, 0)))
+                ks[l] = k
+            # environments of sites 0..l, bra expanded, ket unexpanded
+            for sp in kept:
+                W, T, Le = sp["W"], sp["T"], sp["LE"]
+                if T is not None:
+                    Lc = _ext_left(Le, A[l], W[l], T[l])
+                    if l > 0:
+                        Lc = Lc + _ext_left(sp["Lc"], A[l], W[l], Bo[l])
+                    sp["Lc"] = Lc
+                sp["LE"] = _ext_left(Le, A[l], W[l], Ao[l])
+        self.As, self.Bs, self.Cs = A, B, C
+        self.LH = _left_envs(self.As, self.Ws)
+        self.RH = _right_envs(self.Bs, self.Ws)
+        self.e0 = float(xp.vdot(
+            self.Cs[0], _open1(self.LH[0], self.Ws[0], self.Cs[0],
+                               self.RH[1])).real)
+        return ks
 
 
 # ---------------------------------------------------------------- Lanczos
@@ -709,15 +1045,20 @@ def ritz_vector(basis, u):
 
 
 def correlator_poles(Ms, Ws, Wb, Wadag=None, nkry=100, variance=False,
-                     pad_bonds=None):
+                     pad_bonds=None, expand_bonds=None, expand_rounds=1):
     """The poles of <GS|A delta(w-H+E0) B|GS> from site arrays alone: Ms
     the ground-state MPS, Ws the Hamiltonian MPO, Wb the MPO of B and Wadag
     that of A^dagger (None when A = B^dagger). Shared by every backend that
     can export its site tensors. Returns (w, weights, variances, dim), the
     variances None unless variance=True. pad_bonds (None, an int or "full")
     pads the bonds of the MPS first, see the module docstring; dim is then
-    the dimension of the padded tangent space."""
-    ts = TangentSpace(Ms, Ws, pad_bonds=pad_bonds)
+    the dimension of the padded tangent space. expand_bonds (None or an
+    int) adds at most that many directions per bond from the two-site
+    discarded space of B|GS> and A^dagger|GS> instead (module docstring,
+    "Expanded bonds"), repeated up to expand_rounds times."""
+    ops = [Wb] + ([] if Wadag is None else [Wadag])
+    ts = TangentSpace(Ms, Ws, pad_bonds=pad_bonds, expand_bonds=expand_bonds,
+                      expand_ops=ops, expand_rounds=expand_rounds)
     b = ts.project_operator(Wb)
     a = None if Wadag is None else ts.project_operator(Wadag)
     ws, weights, U, (store, m) = poles(ts, b, nkry, a=a)
@@ -728,10 +1069,13 @@ def correlator_poles(Ms, Ws, Wb, Wadag=None, nkry=100, variance=False,
     return ws, weights, var, ts.dimension()
 
 
-def spectrum_from_arrays(Ms, Ws, ops, nkry, pad_bonds=None):
+def spectrum_from_arrays(Ms, Ws, ops, nkry, pad_bonds=None,
+                         expand_bonds=None, expand_rounds=1):
     """projected_spectrum from site arrays: ops is a list of (MPO of O,
-    MPO of O^dagger). Returns (e, mats, dim). pad_bonds as in
-    correlator_poles."""
-    ts = TangentSpace(Ms, Ws, pad_bonds=pad_bonds)
+    MPO of O^dagger). Returns (e, mats, dim). pad_bonds and expand_bonds
+    as in correlator_poles; the expansion is fed by every O and O^dagger."""
+    ts = TangentSpace(Ms, Ws, pad_bonds=pad_bonds, expand_bonds=expand_bonds,
+                      expand_ops=[W for pair in ops for W in pair],
+                      expand_rounds=expand_rounds)
     e, mats = projected_spectrum(ts, ops, nkry)
     return e, mats, ts.dimension()

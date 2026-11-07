@@ -156,3 +156,37 @@ def test_quasiparticle_gap_on_the_mesh_of_the_chain(mesh):
         assert qp == pytest.approx(fc.qp_gap, rel=1e-12)
         assert reaches == fc.reaches_gap
     assert sc.gap(1e-4)[1] and not sc.gap(1e-6)[1]
+
+
+def test_auto_warm_sweep_arguments():
+    assert subgapscan.warm_sweeps(15, "auto") == "auto"
+    kw = dict(J=J, Lambda=LAM, mode="ED", itensor_version="python")
+    for bad in ("Auto", "fast", True):
+        with pytest.raises(ValueError, match="nsweeps_warm"):
+            subgapscan.subgap_scan(N, Deltas=[0.1], nsweeps_warm=bad, **kw)
+    for bad in (0.0, -1e-6, np.nan):
+        with pytest.raises(ValueError, match="warm_tol"):
+            subgapscan.subgap_scan(N, Deltas=[0.1], nsweeps_warm="auto",
+                                   warm_tol=bad, **kw)
+
+
+@pytest.mark.parametrize("itensor_version", ["python", 3])
+def test_auto_warm_sweeps_against_ed_and_cold(itensor_version):
+    """nsweeps_warm="auto" on the S=1 Delta scan at Dz=0.05, the one where
+    "python" needs the most warm sweeps. On d22 (run warm1) it used 4
+    sweeps per point on v3 and 4 to 6 on "python", against 8 for the
+    fixed default, and gave ED to 3.2e-13 (v3) and 2.3e-12 ("python") and
+    the cold solve to 7.6e-15 and 2.3e-12."""
+    r = subgapscan.subgap_scan(N, Deltas=[0.05, 0.1, 0.2], J=J, Lambda=LAM,
+                               S="1", Dz=0.05, maxm=64, nsweeps=15,
+                               cold_every=1, nsweeps_warm="auto",
+                               itensor_version=itensor_version)
+    used = r["nsweeps_warm"]
+    assert used[0] is None and all(4 <= s <= 15 for s in used[1:])
+    if itensor_version == 3:
+        assert max(used[1:]) <= 8 # the fixed default at nsweeps=15
+    for p in r["points"][1:]: # every block is a sweep from the one before
+        assert all(len(b) == (s + 1)//2 for b, s in
+                   zip(p["blocks"].values(), p["sweeps"].values()))
+    assert r["warm_cold"] < 1e-9
+    _check_against_ed(r, "1", itensor_version)

@@ -257,6 +257,7 @@ class Chain:
         self.sector = []
         self.sector_penalty = None  # None = derive from the Hamiltonian
         self._penalty = None  # cached penalty MPO, at the chosen strength
+        self._penalty_strength = None  # the strength _penalty was built at
         self._probe = None  # cached penalty MPO at strength 1, for checks
         self._solve_H_cache = None
         self._h_terms = []
@@ -526,7 +527,11 @@ class Chain:
                       maxdim=self.mpomaxm if maxdim is None else maxdim)
 
     def _penalty_mpo(self, lam=None):
-        """lambda*sum_k (Q_k-q_k)^2 for the current sector, cached."""
+        """lambda*sum_k (Q_k-q_k)^2 for the current sector, cached. The
+        default strength, with no set_sector_penalty(), is terms_scale of
+        the Hamiltonian the session holds; set_hamiltonian() drops the
+        cached MPO when that scale changes, so the strength is the one of
+        the Hamiltonian being solved and not of the first one sent."""
         if lam is not None:
             return sectortk.charge_penalty_mpo(self.sites, self.sector, lam)
         if self._penalty is None:
@@ -535,6 +540,7 @@ class Chain:
                 strength = sectortk.terms_scale(self._h_terms)
             self._penalty = sectortk.charge_penalty_mpo(self.sites,
                                                          self.sector, strength)
+            self._penalty_strength = strength
         return self._penalty
 
     def _penalized(self, mpo):
@@ -611,6 +617,13 @@ class Chain:
         self.H = to_mpo(ampo, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         self.have_H = True
         self._solve_H_cache = None  # the penalized operator is stale too
+        if (self.sector_penalty is None and self._penalty is not None
+                and sectortk.terms_scale(h_terms) != self._penalty_strength):
+            # The default penalty strength is the scale of H. Kept from an
+            # earlier H, it was that of the first Hamiltonian solved on the
+            # chain: 61.75 from the hopping stage of
+            # surrogate._warm_sector_solve, where the true H has 59.41.
+            self._penalty = None
         self._wf0_energy = None  # any cached energy is now stale
         self._bandwidth_min = None  # ...and so is any cached bandwidth
         self._bandwidth_max = None
@@ -671,11 +684,14 @@ class Chain:
             with _bk.pad_bonds_suspended():
                 energy = _dmrg_cbe(self.wf0, self._solve_H(), sweeps,
                                    delta=self.cbe_delta,
-                                   quiet=not self.verbose, noisy_start=fresh)
+                                   quiet=not self.verbose, noisy_start=fresh,
+                                   penalty=self._penalty_mpo() if self.sector else None)
         else:
             # in a sector the penalty goes along, so that the local solves
             # stop relative to the scale of H and not of the penalty (see
-            # dmrg.dmrg); outside a sector nothing changes
+            # dmrg.dmrg); outside a sector nothing changes. The same holds
+            # for the CBE route above, gs_energy_generalized and
+            # excited_states.
             energy = dmrg(self.wf0, self._solve_H(), sweeps,
                           quiet=not self.verbose, noisy_start=fresh,
                           penalty=self._penalty_mpo() if self.sector else None)
@@ -721,7 +737,18 @@ class Chain:
             self.wf0 = self._default_mps()
         sweeps = self._make_sweeps()
         lam = dmrg_generalized(self.wf0, self._solve_H(), A, sweeps,
-                                quiet=not self.verbose, lam0=lam0)
+                                quiet=not self.verbose, lam0=lam0,
+                                penalty=self._penalty_mpo() if self.sector else None)
+        if self.sector:
+            # The iteration's lambda is the quotient of the operator it
+            # sweeps, H + the charge penalty as a compressed MPO sum, which
+            # puts it 1e-12 to 5e-12 off the sector's own generalized
+            # eigenvalue although the state is converged. Report the
+            # quotient under the unpenalized H instead, as gs_energy does.
+            self._check_in_sector(self.wf0, "gs_energy_generalized")
+            psi = self.wf0.copy()
+            psi.normalize()
+            lam = inner(psi, self.H, psi).real / inner(psi, A, psi).real
         self._wf0_energy = None  # stale: no longer <wf0|H|wf0>, see docstring
         return lam
 
@@ -738,7 +765,8 @@ class Chain:
         for _ in range(1, n):
             psi1 = self._default_mps()
             dmrg_excited(psi1, self._solve_H(), wfs, weight, sweeps,
-                          quiet=not self.verbose)
+                          quiet=not self.verbose,
+                          penalty=self._penalty_mpo() if self.sector else None)
             psi1.normalize()
             self._check_in_sector(psi1, "excited_states")
             wfs.append(psi1)
@@ -1381,46 +1409,6 @@ class Chain:
         x, W = ddmrg.correction_vector(M, b, maxdim, nsweeps, self.cutoff,
                                         x0=x0)
         return -W / (np.pi * eta), x
-
-    def task_dynamical_correlator(self, terms_i, terms_j, terms_idag, nkry,
-                                  variance=False):
-        """Tangent-space Krylov poles of <GS|A delta(w-H+E0) B|GS>
-        (task.py, arXiv:2510.07279), A = terms_i and B = terms_j.
-
-        terms_idag is A^dagger, or None when A = B^dagger, in which case
-        the weights are |<alpha|P B|GS>|^2. Returns (w, weights, elastic,
-        variances, dim): the poles relative to E0, their complex weights,
-        the n = GS weight <A><B> sitting at w = 0, the two-site variance of
-        each pole (None unless variance=True) and the dimension of the
-        tangent space."""
-        from . import task
-        if self.wf0 is None:
-            raise RuntimeError("Chain.task_dynamical_correlator called before gs_energy")
-        Wadag = None
-        if terms_idag is not None:
-            Wadag = task.mpo_arrays(self._mpo(terms_idag))
-        ws, weights, var, dim = task.correlator_poles(
-            _mps_arrays_lpr(self.wf0), task.mpo_arrays(self.H),
-            task.mpo_arrays(self._mpo(terms_j)), Wadag, nkry, variance)
-        elastic = self.vev(terms_i, self.wf0) * self.vev(terms_j, self.wf0)
-        return ws, weights, complex(elastic), var, dim
-
-    def task_projected_spectrum(self, ops_terms, nkry):
-        """The ground state plus the Ritz states of the tangent-space
-        Hamiltonian on the block Krylov space of the given operators
-        (task.projected_spectrum, arXiv:2510.07279).
-
-        ops_terms is a list of (terms of O, terms of O^dagger). Returns
-        (e, mats, dim): energies relative to E0 (e[0] = 0 is the ground
-        state), the matrix <a|O|b> of each operator in that basis, and the
-        dimension of the tangent space."""
-        from . import task
-        if self.wf0 is None:
-            raise RuntimeError("Chain.task_projected_spectrum called before gs_energy")
-        ops = [(task.mpo_arrays(self._mpo(t)), task.mpo_arrays(self._mpo(td)))
-               for t, td in ops_terms]
-        return task.spectrum_from_arrays(_mps_arrays_lpr(self.wf0),
-                                         task.mpo_arrays(self.H), ops, nkry)
 
     def apply_inverse(self, terms, wf, tol, max_it):
         A = self._mpo(terms)

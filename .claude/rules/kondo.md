@@ -231,23 +231,37 @@ sites, poles split and moved, u2 halved); `parity=True` in
 `surrogate.get_stm_spectrum`, or `paritystate.parity_ground_state(fc)`,
 solves inside the parity sector and promotes the state to dense indices on
 its own clone (Index identity is per session, so never move it to another
-chain). The default stays False, so no pinned number moves. On "python" a
+chain). `parity="auto"` solves plainly and takes the sector route only when
+the elastic weight is above 1e-6 of the sum rule (`paritystate.MIXTURE_TOL`).
+Since 2026-11-07 "auto" is the default, chosen by the user; it never
+trips at Delta=0, where there is no parity sector. On "python" a
 sector solve stops its local Davidson solves on the scale of H without the
 charge penalty (`dmrg(penalty=)`, passed by `Chain.gs_energy` in sector
 mode only); with the penalty in the scale it stalled at 2 matvecs per bond
-and needed twice the sweeps. A promoted sector state of a degenerate pair
+and needed twice the sweeps. `dmrg_excited`, `dmrg_generalized` and
+`cbe.dmrg_cbe` take `penalty=` the same way, and the default penalty
+strength follows each new Hamiltonian. A promoted sector state of a degenerate pair
 has a smaller one-site tangent space than a plain mixture, and TASK at J=0
 keeps 1/3 of the ED weight at U=0 and 0.405 at U=0.3; on short chains
 `pad_bonds="full"` (TASK, `pyitensor/task.py`) makes both exact. Padding is
 opt-in (None default). An int pad is not a long-chain cure (it slowed the
 Krylov and moved poles on 21 sites) and it inflates the pole variances, so
 they stop being an error bar; `task.MAX_PADDED_DIMENSION` = 4e6 caps the
-padded space.
+padded space. `expand_bonds=k` (with `expand_rounds=2` at
+J=0) adds at most k directions per bond from the part of B|GS> and H P B|GS>
+the tangent space drops: exact on the short-chain cases at a fraction of the
+"full" space, and the pole variances stay an error bar. It is not a
+long-chain cure either: on 21 sites it made nkry=100 worse and nkry=300
+1.5x slower, because there the missing piece is Krylov convergence, not the
+space. Opt-in, None default.
 
 `ysrtk/subgapscan.py` (warm-started scans over Delta, Dz and the Delta_c
 bisection) needs `set_initial_wf_guess` on every backend, since "python"
 drops its state when the terms change. The warm-sweep default
 `warm_sweeps` = min(nsweeps, max(8, nsweeps//3)) has its floor 8 from
 "python" (6 sweeps missed ED by 7e-9 on 4 sites); v3 does mix the chain's
-noise into a warm start that is already at maxm. A warm start does not see
+noise into a warm start that is already at maxm. `nsweeps_warm="auto"`
+(blocks of 2 sweeps until the energy moves by less than `warm_tol` |Delta|)
+is opt-in and was not measured on the 26-site chain, so it is not the
+default. A warm start does not see
 a large jump in Delta, so only `cold_every` catches it.

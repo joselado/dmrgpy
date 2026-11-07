@@ -1331,3 +1331,26 @@ energy from 6.6e-11 to 5.8e-12 above the ED sector energy. A sector solve
 costs 35% to 38% more per sweep. Plain solves, every v3 solve and ED do not
 change. `pad_bonds` (TASK) and `nrgthermo` are new and move nothing at their
 defaults.
+
+The same day, the other penalized `"python"` routes in a sector moved in the
+same way. Excited states (`get_excited_states`) moved by up to 3.6e-11 and
+`dmrg_method="CBE"` by up to 1.5e-13, toward sector ED (Heisenberg chains of
+6 and 8 sites at Sz=0 and 2). `gs_energy_generalized` in a sector now reports
+<H>/<A> of its converged state under the plain H, not the quotient of the
+compressed penalized MPO, and moves by 1e-12 to 5e-12 toward the generalized
+eigenvalue of the sector block. With `sector_penalty=None` the penalty
+strength now follows each new Hamiltonian given to `set_hamiltonian`. On the
+coupled YSR surrogate dimer above, the parity-route spectrum moved by at most
+2.9e-6 (its error against ED from 2.46e-6 to 2.00e-6 of the peak). Plain
+solves on every route are bit for bit unchanged. `expand_bonds` (TASK) and
+`nsweeps_warm="auto"` are new and move nothing at their defaults.
+`zaverage.stm_poles`, `zaverage_stm_spectrum` and `surrogate.get_stm_spectrum`
+now default to `parity="auto"` (before: False). A plain ground state whose
+elastic weight is above 1e-6 of the sum rule, a parity mixture, is replaced
+by the ground state of its parity sector, so such a spectrum loses its
+elastic weight and its split subgap pole (on the 8-site chain near the
+transition, poles between 0.0032 and 0.0189 Delta become one pole at
+0.0190312 Delta). A state of definite parity gives the same numbers as before,
+and at Delta=0 nothing changes. `subgapscan.warm_sweeps(nsweeps, True)` raises instead of returning
+1, and `Chain.task_dynamical_correlator` and `Chain.task_projected_spectrum`
+of `pyitensor/chain.py` are removed.

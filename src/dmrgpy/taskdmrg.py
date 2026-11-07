@@ -31,7 +31,7 @@ def _v3_arrays(session,terms):
 
 def _python_state(s):
     """The ground state of a "python" session as site arrays, and the
-    state itself (the arrays of Chain.task_dynamical_correlator)."""
+    state itself (the arrays of the chain's state, chain._mps_arrays_lpr)."""
     from .pyitensor.chain import _mps_arrays_lpr
     if s.wf0 is None:
         raise RuntimeError("submode=\"TASK\" called before gs_energy")
@@ -39,20 +39,22 @@ def _python_state(s):
 
 
 def session_poles(self,terms_i,terms_j,terms_idag,nkry,variance=False,
-        terms_ij=None,pad_bonds=None):
+        terms_ij=None,pad_bonds=None,expand_bonds=None,expand_rounds=1):
     """(w, weights, elastic, variances, dim) on the chain's session, which
     must hold the ground state (groundstate.ground_state_on_session).
     With terms_ij, the terms of the product A*B, a sixth entry is
     <GS|A B|GS> on the same state, the sum rule of the weights.
     pad_bonds (None, an int or "full") pads the bonds of the state before
-    the recursion (pyitensor/task.py's module docstring).
+    the recursion, expand_bonds (None or an int) expands them with
+    directions from the two-site discarded space of B|GS> and of the first
+    Krylov step (pyitensor/task.py's module docstring); not both.
 
     Both backends call task.correlator_poles here with their exported
-    arrays: on "python" the arrays of Chain.task_dynamical_correlator,
-    on 3 those of the session's own export."""
+    arrays: on "python" the arrays of the chain's state
+    (chain._mps_arrays_lpr), on 3 those of the session's own export."""
     s = self._session
     from .pyitensor import task
-    task.check_pad_bonds(pad_bonds)
+    task.check_expansion_keywords(pad_bonds,expand_bonds,expand_rounds)
     if self.itensor_version=="python":
         Ms,wf = _python_state(s)
         Ws = task.mpo_arrays(s.H)
@@ -66,32 +68,37 @@ def session_poles(self,terms_i,terms_j,terms_idag,nkry,variance=False,
         Wb = _v3_arrays(s,terms_j)
         Wadag = None if terms_idag is None else _v3_arrays(s,terms_idag)
     ws,wt,var,dim = task.correlator_poles(Ms,Ws,Wb,Wadag,nkry,variance,
-            pad_bonds=pad_bonds)
+            pad_bonds=pad_bonds,expand_bonds=expand_bonds,
+            expand_rounds=expand_rounds)
     elastic = s.vev(terms_i,wf)*s.vev(terms_j,wf)
     if terms_ij is None: return ws,wt,complex(elastic),var,dim
     return ws,wt,complex(elastic),var,dim,complex(s.vev(terms_ij,wf))
 
 
-def session_spectrum(self,ops_terms,nkry,pad_bonds=None):
+def session_spectrum(self,ops_terms,nkry,pad_bonds=None,expand_bonds=None,
+        expand_rounds=1):
     """(e, mats, dim) of task.projected_spectrum on the chain's session,
-    ops_terms a list of (terms of O, terms of O^dagger). pad_bonds as in
-    session_poles."""
+    ops_terms a list of (terms of O, terms of O^dagger). pad_bonds and
+    expand_bonds as in session_poles."""
     s = self._session
     from .pyitensor import task
-    task.check_pad_bonds(pad_bonds)
+    task.check_expansion_keywords(pad_bonds,expand_bonds,expand_rounds)
     if self.itensor_version=="python":
         Ms,_ = _python_state(s)
         ops = [(task.mpo_arrays(s._mpo(t)),task.mpo_arrays(s._mpo(td)))
                for t,td in ops_terms]
         return task.spectrum_from_arrays(Ms,task.mpo_arrays(s.H),ops,nkry,
-                pad_bonds=pad_bonds)
+                pad_bonds=pad_bonds,expand_bonds=expand_bonds,
+            expand_rounds=expand_rounds)
     ops = [(_v3_arrays(s,t),_v3_arrays(s,td)) for t,td in ops_terms]
     return task.spectrum_from_arrays(s.mps_site_arrays(s.gs_wavefunction()),
             s.mpo_site_arrays(s.hamiltonian_mpo()),ops,nkry,
-            pad_bonds=pad_bonds)
+            pad_bonds=pad_bonds,expand_bonds=expand_bonds,
+            expand_rounds=expand_rounds)
 
 
-def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False,pad_bonds=None):
+def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False,pad_bonds=None,
+        expand_bonds=None,expand_rounds=1):
     """The discrete poles of <GS|A delta(w-H+E0) B|GS> in the tangent space.
 
     Returns a dict with "omega" (poles relative to E0), "weight" (complex,
@@ -122,10 +129,24 @@ def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False,pad_bonds=None):
     directions and are no longer a sharp error bar of the poles. A padded
     tangent space above task.MAX_PADDED_DIMENSION raises a ValueError.
     The keyword is unrelated to pyitensor's backend.set_pad_bonds, which
-    freezes bond shapes for JAX."""
+    freezes bond shapes for JAX.
+
+    expand_bonds (None, the default, or a positive int k) is the
+    controlled version: every bond grows by at most k directions taken
+    from the two-site discarded space of B|GS> and A^dagger|GS> and of
+    the first Lanczos step H P B|GS>, the largest singular directions of
+    what the recursion would otherwise drop. The state does not change.
+    Fewer than k are added where that discarded weight is below 1e-8 of
+    its largest value over the chain. expand_rounds (default 1) repeats
+    the expansion from the expanded state, so that b and H b see the
+    directions of the round before; it stops early when a round adds
+    nothing. It is what a product state needs: at J = 0 the first round
+    brings back the whole weight of the composite vertex, and with k of 4
+    or more the second one the poles of ED. pad_bonds and expand_bonds cannot be combined, and an expanded tangent space above
+    task.MAX_PADDED_DIMENSION raises a ValueError."""
     _check_backend(self)
-    from .pyitensor.task import check_pad_bonds
-    check_pad_bonds(pad_bonds)
+    from .pyitensor.task import check_expansion_keywords
+    check_expansion_keywords(pad_bonds,expand_bonds,expand_rounds)
     from .multioperatortk import canonical
     from .groundstate import ground_state_on_session
     A,B = operatornames.str2MO(self,name,i=i,j=j,
@@ -137,7 +158,8 @@ def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False,pad_bonds=None):
     Adag = None if canonical.is_dagger_pair(A,B) else A.get_dagger().to_terms()
     ws,wt,el,var,dim,ab = session_poles(self,A.to_terms(),B.to_terms(),Adag,
             int(nkry),variance=variance,terms_ij=(A*B).to_terms(),
-            pad_bonds=pad_bonds)
+            pad_bonds=pad_bonds,expand_bonds=expand_bonds,
+            expand_rounds=expand_rounds)
     missing = ab-el-complex(np.sum(wt))
     scale = max(abs(ab),abs(el)+float(np.sum(np.abs(wt))))
     if abs(missing)>1e-6*scale:
@@ -150,7 +172,10 @@ def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False,pad_bonds=None):
             "of mixed parity (a degenerate Majorana pair), or, for A not "
             "B^dagger, a Krylov space too small for A^dagger|GS>, or a "
             "state of small Schmidt rank (a product state). Raise maxm (or "
-            "nkry), project the state onto one parity sector, or pass "
+            "nkry), project the state onto one parity sector, pass "
+            "expand_bonds (with expand_rounds=2 for a product state) to "
+            "get_poles, dynamical_correlator, ysr.get_stm_spectrum or "
+            "zaverage.stm_poles, or "
             "pad_bonds=\"full\" on a short chain, which makes the tangent "
             "space the whole Hilbert space."
             %(abs(missing),ab.real if ab.imag==0 else abs(ab)),
@@ -161,7 +186,7 @@ def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False,pad_bonds=None):
 
 def dynamical_correlator(self,es=np.linspace(-1.,10,100),delta=1e-1,
         name=None,i=0,j=0,nkry=100,return_poles=False,variance=None,
-        pad_bonds=None):
+        pad_bonds=None,expand_bonds=None,expand_rounds=1):
     """Dynamical correlator from the tangent-space Krylov poles, each one
     broadened into a Lorentzian of half width delta.
 
@@ -169,7 +194,8 @@ def dynamical_correlator(self,es=np.linspace(-1.,10,100),delta=1e-1,
     get_poles()'s dict; the two-site variance of every pole is computed
     then unless variance=False, since it is the error bar of the poles
     (not with an int pad_bonds below the bound, where the padded
-    directions inflate it). pad_bonds is get_poles()'s."""
+    directions inflate it). pad_bonds, expand_bonds and expand_rounds are
+    get_poles()'s."""
     if delta<=0.0: raise ValueError("delta must be positive, got %s"%delta)
     if variance is None: variance = return_poles
     if es is None: raise ValueError("es must be an array of frequencies")
@@ -177,7 +203,8 @@ def dynamical_correlator(self,es=np.linspace(-1.,10,100),delta=1e-1,
     if es.ndim!=1: raise ValueError("es must be a one-dimensional array "
             "of frequencies, got shape %s"%(es.shape,))
     p = get_poles(self,name=name,i=i,j=j,nkry=nkry,variance=variance,
-            pad_bonds=pad_bonds)
+            pad_bonds=pad_bonds,expand_bonds=expand_bonds,
+            expand_rounds=expand_rounds)
     ws = np.concatenate([p["omega"],[0.]])
     wt = np.concatenate([p["weight"],[p["elastic"]]])
     lor = delta/(np.pi*((es[:,None]-ws[None,:])**2+delta**2))

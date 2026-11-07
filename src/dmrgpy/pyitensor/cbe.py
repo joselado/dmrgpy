@@ -436,10 +436,15 @@ def _heff_diagonal_one_site(L, Lbra, H, i, R, Rbra, order_in):
     return d.reshape(-1).real
 
 
-def _local_ground_state_one_site(L, Lbra, R, Rbra, H, psi, i, niter, noise):
+def _local_ground_state_one_site(L, Lbra, R, Rbra, H, psi, i, niter, noise,
+                                 penalty=None):
     """Lowest eigenpair of the one-site effective Hamiltonian at site i,
     by the same Davidson solve two-site DMRG uses (dmrg.py), with the same
-    noisy start. Returns (energy, theta)."""
+    noisy start. Returns (energy, theta). penalty, when given, is
+    (P, PL, PLbra, PR, PRbra): the charge penalty MPO of a conserved sector,
+    which H already contains, with its environments bordering site i. Its
+    diagonal is taken out of the Davidson stop scale, as in dmrg.dmrg(),
+    while the preconditioner keeps the full diagonal."""
     matvec, order_in, shape, x0 = one_site_heff(L, Lbra, H, psi, i, R, Rbra)
     x0 = _noisy_start(x0, noise)
     dim = x0.size
@@ -451,18 +456,27 @@ def _local_ground_state_one_site(L, Lbra, R, Rbra, H, psi, i, niter, noise):
         eval0, evec0 = w[0], v[:, 0]
     else:
         diag = _heff_diagonal_one_site(L, Lbra, H, i, R, Rbra, order_in)
+        hdiag = None
+        if penalty is not None:
+            P, PL, PLbra, PR, PRbra = penalty
+            hdiag = diag - _heff_diagonal_one_site(PL, PLbra, P, i, PR, PRbra,
+                                                   order_in)
         eval0, evec0 = _davidson_ground_state(
             matvec, x0, diag, max(niter, _dmrg.DAVIDSON_NITER),
-            _dmrg._DAVIDSON_RTOL, vtol=_dmrg._DAVIDSON_VTOL)
+            _dmrg._DAVIDSON_RTOL, hdiag=hdiag, vtol=_dmrg._DAVIDSON_VTOL)
     theta = ITensor(tuple(order_in), evec0.reshape(shape))
     return float(np.real(bk.to_host(eval0))), theta
 
 
 def _cbe_sweep(psi, H, left_env, right_env, maxdim, cutoff, niter, noise,
-               delta, expand, selection):
+               delta, expand, selection, penalty=None, pleft=None,
+               pright=None):
     """One left-to-right then right-to-left CBE sweep. psi enters with its
     center on site 1 and right_env valid for it; it leaves the same way,
-    with right_env rebuilt. Returns the last local eigenvalue."""
+    with right_env rebuilt. Returns the last local eigenvalue. penalty is
+    the charge penalty MPO H contains (dmrg_cbe), and pleft/pright are its
+    environments, kept and rebuilt exactly where left_env/right_env are.
+    The bond expansion uses the full H."""
     n = psi.length()
     energy = None
     for i in range(1, n):
@@ -472,8 +486,14 @@ def _cbe_sweep(psi, H, left_env, right_env, maxdim, cutoff, niter, noise,
             expand_bond_right(psi, H, i, L, Lbra, R2, R2bra, maxdim, delta,
                               selection=selection)
         R1, R1bra = _extend_right(R2, R2bra, H, psi, i + 1)
+        pen = None
+        if penalty is not None:
+            # built after the expansion, which rewrote psi.A(i+1)
+            PR1 = _extend_right(pright[i + 2][0], pright[i + 2][1], penalty,
+                                psi, i + 1)
+            pen = (penalty,) + pleft[i - 1] + PR1
         energy, theta = _local_ground_state_one_site(L, Lbra, R1, R1bra, H,
-                                                     psi, i, niter, noise)
+                                                     psi, i, niter, noise, pen)
         ll = _link_at(psi, i, i - 1)
         U, S, V, _ = svd(theta, ([ll] if ll is not None else []) + [_site(psi, i)],
                          cutoff=cutoff, maxdim=maxdim)
@@ -481,6 +501,9 @@ def _cbe_sweep(psi, H, left_env, right_env, maxdim, cutoff, niter, noise,
         psi.set_A(i + 1, (S * V) * psi.A(i + 1))
         psi.center = i + 1
         left_env[i] = _extend_left(L, Lbra, H, psi, i)
+        if penalty is not None:
+            pleft[i] = _extend_left(pleft[i - 1][0], pleft[i - 1][1], penalty,
+                                    psi, i)
     for i in range(n, 1, -1):
         L2, L2bra = left_env[i - 2]
         R, Rbra = right_env[i + 1]
@@ -488,19 +511,28 @@ def _cbe_sweep(psi, H, left_env, right_env, maxdim, cutoff, niter, noise,
             expand_bond_left(psi, H, i - 1, L2, L2bra, R, Rbra, maxdim, delta,
                              selection=selection)
         L1, L1bra = _extend_left(L2, L2bra, H, psi, i - 1)
+        pen = None
+        if penalty is not None:
+            # built after the expansion, which rewrote psi.A(i-1)
+            PL1 = _extend_left(pleft[i - 2][0], pleft[i - 2][1], penalty,
+                               psi, i - 1)
+            pen = (penalty,) + PL1 + pright[i + 1]
         energy, theta = _local_ground_state_one_site(L1, L1bra, R, Rbra, H,
-                                                     psi, i, niter, noise)
+                                                     psi, i, niter, noise, pen)
         ll = _link_at(psi, i, i - 1)
         U, S, V, _ = svd(theta, [ll], cutoff=cutoff, maxdim=maxdim)
         psi.set_A(i, V)
         psi.set_A(i - 1, psi.A(i - 1) * (U * S))
         psi.center = i - 1
         right_env[i] = _extend_right(R, Rbra, H, psi, i)
+        if penalty is not None:
+            pright[i] = _extend_right(pright[i + 1][0], pright[i + 1][1],
+                                      penalty, psi, i)
     return energy
 
 
 def dmrg_cbe(psi, H, sweeps, delta=0.1, quiet=True, noisy_start=True,
-             expand=True, selection="shrewd"):
+             expand=True, selection="shrewd", penalty=None):
     """Ground-state DMRG with one-site updates and controlled bond
     expansion. Same call shape and return value as dmrg.dmrg(): mutates psi
     in place and returns the last local eigenvalue. Each sweep schedule
@@ -510,7 +542,12 @@ def dmrg_cbe(psi, H, sweeps, delta=0.1, quiet=True, noisy_start=True,
     bonds are expanded to ceil((1+delta)*maxdim) and trimmed back to
     maxdim. expand=False is plain one-site DMRG, which never grows a bond;
     it exists for tests. selection is "shrewd" (one-site cost, the paper)
-    or "naive" (two-site cost, FiniteMPS.jl's NaiveCBE)."""
+    or "naive" (two-site cost, FiniteMPS.jl's NaiveCBE). penalty is the
+    charge penalty MPO that H already contains in a conserved sector, as in
+    dmrg.dmrg(): its environments are carried along and its diagonal is
+    taken out of the Davidson stop scale of the one-site solves, which
+    otherwise stop on the scale of the penalty. The bond expansion still
+    uses the full H. None, outside a sector, changes nothing."""
     from .tdvp import _gauge_center
     if selection not in SELECTIONS:
         raise ValueError("dmrg_cbe: unknown selection %r, expected one of %r"
@@ -520,12 +557,16 @@ def dmrg_cbe(psi, H, sweeps, delta=0.1, quiet=True, noisy_start=True,
     _gauge_center(psi, 1)
     right_env = _all_right_environments(H, psi)
     left_env = {0: (None, None)}
+    pleft = pright = None
+    if penalty is not None:
+        pright = _all_right_environments(penalty, psi)
+        pleft = {0: (None, None)}
     energy = None
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
         energy = _cbe_sweep(psi, H, left_env, right_env, maxdim, cutoff,
                             niter, noise if noisy_start and sweep_i == 0 else 0.0,
-                            delta, expand, selection)
+                            delta, expand, selection, penalty, pleft, pright)
         if not quiet:
             print("CBE sweep {}: energy = {}".format(sweep_i, energy))
     psi.center = 1

@@ -81,6 +81,28 @@ small nsweeps_warm is not caught by the quasiparticle-gap warning, only
 by cold_every: on 14 sites at nsweeps_warm=2, Delta from 0.1 back to
 0.001 gave E_ysr/Delta = 0.94 to 1.00 instead of 0.86, and even a
 descending scan in steps of sqrt(10) left 1.4e-3 at Delta = 0.0032.
+
+The adaptive stop, nsweeps_warm="auto" (opt-in). gs_energy gives no
+energy per sweep, so each sector is swept in blocks of WARM_BLOCK = 2
+sweeps, one gs_energy call per block from the state of the block before
+(set_initial_wf_guess, which makes the call sweep: counted on "python",
+one session solve per block, and 0.065 s per block on v3 against 0 for
+the stored answer), at least two blocks, at most nsweeps sweeps, and
+stops once the sector energy moves by less than warm_tol |Delta|
+(default 1e-6) between two blocks. Measured on d22 (runs warm1, warm2,
+the three scans of the checked paragraph above, two repeats, cold_every=1).
+v3 used 4 sweeps at every point, the minimum, gave ED to 3.2e-13 and the
+cold solve to 6e-15 as the fixed 8 sweeps did, and took half of the warm
+time (2.4 s against 4.9 s on the Dz scan); the noise of a v3 warm start
+did not show up between blocks at this size (equal to 12 digits).
+"python" used 4 to 8 sweeps per point, the most on 2Sz = 0, whose
+energy still moved by up to 1.4e-4 after the first block, and gave ED
+to 3.3e-12 against 3.2e-13 for the fixed default, in 0.67 to 0.83 of
+the warm time. warm_tol = 1e-8 changed the "python" S=1 Delta scan only
+(8 sweeps, 3.2e-13). Not measured on a long chain, where a slow sweep
+can move the energy by less than the stop per block while still far
+from converged; there cold_every is the check, as for a small fixed
+nsweeps_warm.
 """
 
 import copy
@@ -94,16 +116,32 @@ from .. import ysr
 
 
 WARM_FLOOR = 8 # default floor of the warm sweeps, set by "python"
+WARM_BLOCK = 2 # sweeps per block of nsweeps_warm="auto"
+WARM_TOL = 1e-6 # default warm_tol of nsweeps_warm="auto", relative to |Delta|
 
 
 def warm_sweeps(nsweeps, nsweeps_warm=None):
     """The sweeps of a warm point: nsweeps_warm if given, else the larger
-    of WARM_FLOOR and nsweeps//3, never more than nsweeps."""
+    of WARM_FLOOR and nsweeps//3, never more than nsweeps. "auto" is
+    returned as it is (the adaptive stop of _SectorChains.solve)."""
+    if isinstance(nsweeps_warm, str):
+        if nsweeps_warm != "auto":
+            raise ValueError("nsweeps_warm must be a positive integer or "
+                             "\"auto\", got %r" % (nsweeps_warm,))
+        return "auto"
     if nsweeps_warm is not None:
-        if int(nsweeps_warm) < 1:
+        if isinstance(nsweeps_warm, bool) or int(nsweeps_warm) < 1:
             raise ValueError("nsweeps_warm must be a positive integer")
         return int(nsweeps_warm)
     return min(int(nsweeps), max(WARM_FLOOR, int(nsweeps)//3))
+
+
+def _check_warm_tol(warm_tol):
+    if isinstance(warm_tol, bool) or not np.isfinite(float(warm_tol)) \
+            or float(warm_tol) <= 0.0:
+        raise ValueError("warm_tol must be a positive number, got %r"
+                         % (warm_tol,))
+    return float(warm_tol)
 
 
 def resolve_penalties(J, D=1.0, B=0.0, S="1/2", Dzs=(0.0,), Upen=None,
@@ -166,12 +204,13 @@ class _SectorChains(object):
 
     def __init__(self, n, J, Lambda, D, S, B, z, mesh, Upen, JH, maxm,
                  nsweeps, nsweeps_warm, sectors, mode, chain_kwargs, Delta0,
-                 Dz0):
+                 Dz0, warm_tol=WARM_TOL):
         if n < 1:
             raise ValueError("the Wilson chain needs at least one site")
         self.n, self.ni, self.mode = n, ysr.two_spin(S), mode
         self.nsweeps = int(nsweeps)
         self.nsweeps_warm = warm_sweeps(nsweeps, nsweeps_warm)
+        self.warm_tol = _check_warm_tol(warm_tol)
         self.maxm = int(maxm)
         self.kw = dict(J=J, Lambda=Lambda, D=D, B=B, z=z, mesh=mesh,
                        Upen=Upen, S=S, JH=JH)
@@ -220,18 +259,48 @@ class _SectorChains(object):
             self.t[-1] < 0.1*abs(Delta)
         return qp, bool(reaches)
 
+    def _adaptive_solve(self, c, Delta):
+        """The warm solve of nsweeps_warm="auto" on chain c, whose state to
+        sweep from is already set: blocks of WARM_BLOCK sweeps, one
+        gs_energy call each, every block from the state of the one before
+        (set_initial_wf_guess, so the call sweeps instead of returning the
+        stored answer), at least two blocks and at most nsweeps sweeps in
+        all, stopped once the energy moves by less than warm_tol |Delta|
+        between two blocks (with nsweeps < 2 WARM_BLOCK the cap of
+        nsweeps wins, and one block can be all). c.nsweeps is set before
+        each call and left at the value of the last one, which the stored
+        state answers for.
+        Returns (energy, sweeps used, energy of every block)."""
+        tol = self.warm_tol*abs(float(Delta))
+        used, es = 0, []
+        while True:
+            if es:
+                c.set_initial_wf_guess(c.get_gs())
+            c.nsweeps = min(WARM_BLOCK, self.nsweeps - used)
+            es.append(float(np.real(c.gs_energy(mode=self.mode))))
+            used += c.nsweeps
+            if len(es) >= 2 and abs(es[-1] - es[-2]) < tol:
+                break
+            if used >= self.nsweeps:
+                break
+        return es[-1], used, es
+
     def solve(self, Delta, Dz, start=None, nsweeps=None):
         """Sector energies at (Delta, Dz). start=None is the cold first
         solve of the chains as built; otherwise a dict 2Sz -> state to
-        sweep from, nsweeps times (default nsweeps_warm). Returns
-        (energies, states)."""
+        sweep from, nsweeps times (default nsweeps_warm; with "auto" the
+        adaptive stop of _adaptive_solve). Returns (energies, states,
+        sweeps), sweeps a dict 2Sz -> sweeps of this solve (None on ED)
+        and, with "auto", 2Sz -> list of block energies as well, under
+        the key "blocks"."""
         if Delta == 0.0:
             raise ValueError("subgap_scan needs a gap, Delta != 0 at every "
                              "point (see ysr.subgap_energies)")
         dmrg = self.mode == "DMRG"
-        ens, states = {}, {}
+        ens, states, sweeps, blocks = {}, {}, {}, {}
         for sz in self.sectors:
             c = self.chains[sz]
+            adaptive = False
             if start is None:
                 if (float(Delta), float(Dz)) != self.first:
                     raise RuntimeError("a cold solve needs the chains as "
@@ -243,33 +312,59 @@ class _SectorChains(object):
                 c.set_hamiltonian(self.hamiltonian(Delta, Dz), restart=False)
                 if dmrg:
                     c.set_initial_wf_guess(start[sz])
-                c.nsweeps = self.nsweeps_warm if nsweeps is None \
-                    else int(nsweeps)
+                ns = self.nsweeps_warm if nsweeps is None else nsweeps
+                adaptive = dmrg and ns == "auto"
+                if not adaptive:
+                    c.nsweeps = self.nsweeps if ns == "auto" else int(ns)
             # c.nsweeps stays at the value of this solve: the stored state
             # answers only for the parameters it was solved with, so
             # resetting it here made the vev and get_gs below solve again
-            ens[sz] = c.gs_energy(mode=self.mode)
+            if adaptive:
+                ens[sz], sweeps[sz], blocks[sz] = self._adaptive_solve(c,
+                                                                       Delta)
+            else:
+                ens[sz] = c.gs_energy(mode=self.mode)
+                sweeps[sz] = c.nsweeps if dmrg else None
             if self.ni > 1:
                 ysr._check_impurity_charge(c, self.ni, self.mode)
             if dmrg:
                 states[sz] = c.get_gs()
-        return ens, states
+        if blocks:
+            sweeps["blocks"] = blocks
+        return ens, states, sweeps
 
     def point(self, Delta, Dz, start=None, nsweeps=None):
         t0 = time.time()
-        ens, states = self.solve(Delta, Dz, start=start, nsweeps=nsweeps)
+        ens, states, sweeps = self.solve(Delta, Dz, start=start,
+                                         nsweeps=nsweeps)
         qp, reaches = self.gap(Delta)
         out = summarize(ens, self.ni, qp, reaches,
                         where=" (Delta = %.6g, Dz = %.6g)" % (Delta, Dz))
+        blocks = sweeps.pop("blocks", None)
         out.update(Delta=float(Delta), Dz=float(Dz), qp_gap=qp,
                    reaches_gap=reaches, warm=start is not None,
-                   time=time.time() - t0)
+                   time=time.time() - t0, sweeps=sweeps)
+        if blocks is not None:
+            out["blocks"] = blocks
         return out, states
 
     def cold(self, Delta, Dz):
         """The reference: ysr.subgap_energies on a fresh kondo_chain."""
         return ysr.subgap_energies(self.new_chain(Delta, Dz), mode=self.mode,
                                    sectors=self.sectors)
+
+
+def _sweeps_used(sc, points):
+    """nsweeps_warm of a scan: the fixed value as an int, or with "auto"
+    the sweeps of every point, the largest over its sectors (None for the
+    cold first point and on ED)."""
+    if sc.nsweeps_warm != "auto":
+        return sc.nsweeps_warm
+    out = []
+    for p in points:
+        v = [s for s in p["sweeps"].values() if s is not None]
+        out.append(max(v) if p["warm"] and v else None)
+    return out
 
 
 def _compare(warm, cold, Delta, where):
@@ -300,7 +395,8 @@ def _compare(warm, cold, Delta, where):
 def subgap_scan(n, Deltas=None, Dzs=None, J=0.2, Lambda=4.0, D=1.0,
                 S="1/2", Dz=None, B=0.0, z=0.0, mesh="mean", Delta=None,
                 Upen=None, JH=None, maxm=64, nsweeps=20, nsweeps_warm=None,
-                sectors=None, cold_every=None, mode="DMRG", **chain_kwargs):
+                sectors=None, cold_every=None, mode="DMRG", warm_tol=WARM_TOL,
+                **chain_kwargs):
     """ysr.subgap_energies at every point of a scan over the gap (Deltas,
     at fixed Dz) or over the anisotropy (Dzs, at fixed Delta), the points
     after the first warm-started from the previous one.
@@ -318,7 +414,11 @@ def subgap_scan(n, Deltas=None, Dzs=None, J=0.2, Lambda=4.0, D=1.0,
     of the point before, in the order given, so the points should be
     monotonic and closely spaced. The default nsweeps_warm is the larger
     of 8 and nsweeps//3, at most nsweeps (warm_sweeps). A smaller
-    nsweeps_warm is checked only by cold_every. sectors are the 2Sz
+    nsweeps_warm is checked only by cold_every. nsweeps_warm="auto" sweeps
+    each sector in blocks of 2 sweeps, at least 2 blocks and at most
+    nsweeps sweeps, and stops once the sector energy moves by less than
+    warm_tol |Delta| between two blocks (module docstring, with what it
+    gives on both backends). sectors are the 2Sz
     values solved at every point; the default is subgap_energies's, made
     the same for all points (every 2Sz up to 2S+1 once any Dz of the scan
     is nonzero).
@@ -327,13 +427,15 @@ def subgap_scan(n, Deltas=None, Dzs=None, J=0.2, Lambda=4.0, D=1.0,
     "E_free", "E_screened", "E_ysr", "qp_gap", "time" (seconds per
     point), the lists "sectors" (2Sz -> energy at every point),
     "ground_state", "Sz_ground" and "points" (the per-point dicts, with
-    the keys of subgap_energies), and "Upen", "JH", "nsweeps_warm" (the
-    value used). With cold_every=k every k-th point (k, 2k, ...) is
-    solved once more with ysr.subgap_energies on a fresh chain: "cold"
-    maps the index to that result and "warm_cold" is the largest
-    |E_warm - E_cold| over those points and sectors (None without
-    cold_every). The metastable-sector warning of subgap_energies is
-    raised at every point."""
+    the keys of subgap_energies, and "sweeps", 2Sz -> sweeps of that
+    point), and "Upen", "JH", "nsweeps_warm" (the value used, or with
+    "auto" a list with the sweeps of every point, the largest over its
+    sectors, None for the cold first point). With cold_every=k every
+    k-th point (k, 2k, ...) is solved once more with ysr.subgap_energies
+    on a fresh chain: "cold" maps the index to that result and
+    "warm_cold" is the largest |E_warm - E_cold| over those points and
+    sectors (None without cold_every). The metastable-sector warning of
+    subgap_energies is raised at every point."""
     if (Deltas is None) == (Dzs is None):
         raise ValueError("give exactly one of Deltas and Dzs")
     if Deltas is not None:
@@ -360,7 +462,7 @@ def subgap_scan(n, Deltas=None, Dzs=None, J=0.2, Lambda=4.0, D=1.0,
         sectors = default_sectors(S, Dzs, B)
     sc = _SectorChains(n, J, Lambda, D, S, B, z, mesh, Upen, JH, maxm,
                        nsweeps, nsweeps_warm, sectors, mode, chain_kwargs,
-                       Deltas[0], Dzs[0])
+                       Deltas[0], Dzs[0], warm_tol=warm_tol)
     points, cold, diffs, states = [], {}, [], None
     for i, (x, dz) in enumerate(zip(Deltas, Dzs)):
         p, states = sc.point(x, dz, start=states if i > 0 else None)
@@ -376,7 +478,7 @@ def subgap_scan(n, Deltas=None, Dzs=None, J=0.2, Lambda=4.0, D=1.0,
     for k in ("sectors", "ground_state", "Sz_ground"):
         out[k] = [p[k] for p in points]
     out.update(points=points, cold=cold, Upen=Upen, JH=JH,
-               nsweeps_warm=sc.nsweeps_warm,
+               nsweeps_warm=_sweeps_used(sc, points),
                warm_cold=max(diffs) if diffs else None)
     return out
 
@@ -385,7 +487,7 @@ def find_transition(n, J, Delta_lo, Delta_hi, ratio=1.04, Lambda=4.0,
                     D=1.0, S="1/2", Dz=0.0, B=0.0, z=0.0, mesh="mean",
                     Upen=None, JH=None, maxm=64, nsweeps=20, nsweeps_warm=None,
                     sectors=None, nexpand=8, check_cold=False, mode="DMRG",
-                    **chain_kwargs):
+                    warm_tol=WARM_TOL, **chain_kwargs):
     """Delta_c, the gap where E_ysr = E_free - E_screened changes sign, by
     bisection in ln Delta with warm starts.
 
@@ -397,17 +499,18 @@ def find_transition(n, J, Delta_lo, Delta_hi, ratio=1.04, Lambda=4.0,
     the bracket ends (the protocol of docs/development.md, 4.8f). Delta_lo
     is solved cold, every other point with nsweeps_warm sweeps (default
     warm_sweeps(nsweeps), the larger of 8 and nsweeps//3) from the states
-    of the nearer bracket end. The other keywords are those of
-    subgap_scan. check_cold=True solves the two final bracket ends once
-    more with ysr.subgap_energies and returns the largest |E_warm -
-    E_cold| as "warm_cold", and Delta_c from the cold energies as
-    "Delta_c_cold".
+    of the nearer bracket end (nsweeps_warm="auto" and warm_tol as in
+    subgap_scan). The other keywords are those of subgap_scan.
+    check_cold=True solves the two final bracket ends once more with
+    ysr.subgap_energies and returns the largest |E_warm - E_cold| as
+    "warm_cold", and Delta_c from the cold energies as "Delta_c_cold".
 
     Returns a dict with "Delta_c", the bracket "lo", "hi" and its "x_lo",
     "x_hi", the arrays "Delta" and "x" of every point visited (sorted in
     Delta), "points" (the per-point dicts of subgap_scan, in the same
     order), "monotonic" (x decreasing along the visited points),
-    "nsweeps_warm" (the value used) and "warm_cold"."""
+    "nsweeps_warm" (the value used, or with "auto" the list of the sweeps
+    of every point, in the order of "points") and "warm_cold"."""
     lo, hi = float(Delta_lo), float(Delta_hi)
     if not 0 < lo < hi:
         raise ValueError("find_transition needs 0 < Delta_lo < Delta_hi")
@@ -416,7 +519,7 @@ def find_transition(n, J, Delta_lo, Delta_hi, ratio=1.04, Lambda=4.0,
         sectors = default_sectors(S, [Dz], B)
     sc = _SectorChains(n, J, Lambda, D, S, B, z, mesh, Upen, JH, maxm,
                        nsweeps, nsweeps_warm, sectors, mode, chain_kwargs,
-                       lo, Dz)
+                       lo, Dz, warm_tol=warm_tol)
     pts, states = {}, {}
 
     def x(Delta):
@@ -467,6 +570,7 @@ def find_transition(n, J, Delta_lo, Delta_hi, ratio=1.04, Lambda=4.0,
     out["Delta"] = np.array(ds)
     out["x"] = np.array([pts[d]["E_ysr"]/d for d in ds])
     out["points"] = [pts[d] for d in ds]
+    out["nsweeps_warm"] = _sweeps_used(sc, out["points"])
     out["monotonic"] = bool(np.all(np.diff(out["x"]) < 0))
     if check_cold:
         diffs, xc = [], []

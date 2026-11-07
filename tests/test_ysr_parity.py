@@ -216,3 +216,154 @@ def test_zaverage_spectrum_with_parity_keeps_the_subgap_pole():
     assert np.allclose(np.abs(sub["omega"][big]), abs(info["E_ysr"][0]),
                        atol=1e-8)
     assert info["E0"][0] == pytest.approx(min(info["parity"][0].values()))
+
+
+def _mixed_parity_chain(itensor_version):
+    """The 4-site chain of test_ysr.py handed the state (|even> + |odd>)
+    /sqrt(2), the two sector ground states solved and promoted one after
+    the other on the same chain, so that they share its dense indices."""
+    fc = ysr.kondo_chain(4, J=0.6, Delta=0.1, itensor_version=itensor_version)
+    fc.maxm, fc.nsweeps = 60, 15
+    fc.set_conserved_sector(Sz=0)
+    fc.gs_energy()
+    fc.promote_to_dense()
+    w0 = fc.wf0.copy()
+    fc.set_conserved_sector(Sz=1)
+    fc.gs_energy()
+    fc.promote_to_dense()
+    w1 = fc.wf0.copy()
+    fc.set_gs(w0 + w1)
+    return fc
+
+
+@pytest.mark.parametrize("itensor_version", ["python", 3])
+def test_auto_parity_takes_the_sector_route_on_a_mixture(itensor_version):
+    """A deterministic mixture: the probe trips (an elastic weight of order
+    the total), the poles come from the parity state, and they are those of
+    parity=True on a fresh chain."""
+    fc = _mixed_parity_chain(itensor_version)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        p = zaverage.stm_poles(fc, U=0.3, nkry=100, parity="auto")
+    probe = p["parity_probe"]
+    assert probe["tripped"] and probe["elastic"] > 1e-2*probe["total"]
+    assert p["parity"]["Sz_ground"] == 1 and p["elastic"] < 1e-12
+    # the probe is the elastic weight that stm_poles sums on the mixture
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        plain = zaverage.stm_poles(fc, U=0.3, nkry=100, parity=False)
+    assert probe["elastic"] == pytest.approx(plain["elastic"], rel=1e-8)
+    ref = ysr.kondo_chain(4, J=0.6, Delta=0.1, itensor_version=itensor_version)
+    ref.maxm, ref.nsweeps = 60, 15
+    q = zaverage.stm_poles(ref, U=0.3, nkry=100, parity=True)
+    assert p["parity"]["E0"] == pytest.approx(q["parity"]["E0"], abs=1e-9)
+    es = np.linspace(-1.2, 1.2, 25)
+    def curve(r):
+        return np.real(0.08/np.pi/((es[:, None] - r["omega"][None, :])**2
+                                   + 0.08**2)) @ r["weight"]
+    assert np.max(np.abs(curve(p) - curve(q))) < 1e-8
+
+
+@pytest.mark.parametrize("itensor_version", ["python", 3])
+def test_auto_parity_on_a_gapped_chain_is_the_plain_route(itensor_version):
+    """The 4-site chain of test_ysr.py is gapped and its plain solve has a
+    definite parity: the probe does not trip, and the poles are bit for bit
+    those of parity=False on the same solved state."""
+    fc = ysr.kondo_chain(4, J=0.6, Delta=0.1, itensor_version=itensor_version)
+    fc.maxm, fc.nsweeps = 60, 15
+    p0 = zaverage.stm_poles(fc, U=0.3, nkry=100, parity=False)
+    p1 = zaverage.stm_poles(fc, U=0.3, nkry=100)  # the default, "auto"
+    assert not p1["parity_probe"]["tripped"] and "parity" not in p1
+    assert p1["parity_probe"]["elastic"] < 1e-12*p1["parity_probe"]["total"]
+    assert np.array_equal(p0["omega"], p1["omega"])
+    assert np.array_equal(p0["weight"], p1["weight"])
+    assert p0["elastic"] == p1["elastic"]
+
+
+def test_auto_parity_is_the_default_and_never_trips_without_a_gap(monkeypatch):
+    """parity="auto" is the default of stm_poles, and at Delta = 0, where
+    parity_ground_state raises, even a forced trip keeps the plain state."""
+    import inspect
+    for f in (zaverage.stm_poles, zaverage.zaverage_stm_spectrum,
+              surrogate.get_stm_spectrum):
+        assert inspect.signature(f).parameters["parity"].default == "auto"
+    monkeypatch.setattr(paritystate, "MIXTURE_TOL", -1.0)
+    fc = ysr.kondo_chain(4, J=0.6, Delta=0.0, itensor_version="python")
+    fc.maxm, fc.nsweeps = 60, 15
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        p = zaverage.stm_poles(fc, U=0.3, nkry=60)
+    assert not p["parity_probe"]["tripped"] and "parity" not in p
+
+
+def test_auto_parity_never_trips_on_ed():
+    """ED has a definite parity away from an exact degeneracy."""
+    fc = ysr.kondo_chain(4, J=0.6, Delta=0.1, itensor_version="python")
+    ops = ysr.tunneling_operators(fc, U=0.3)
+    c, pinfo, probe = paritystate.auto_parity_state(fc, ops, mode="ED")
+    assert c is fc and pinfo is None and not probe["tripped"]
+    assert probe["elastic"] < 1e-20 < probe["total"]
+
+
+def test_parity_keyword_is_validated():
+    fc = ysr.kondo_chain(3, J=0.6, Delta=0.1, itensor_version="python")
+    for bad in (None, "Auto", 1, "sector"):
+        with pytest.raises(ValueError, match="parity must be"):
+            zaverage.stm_poles(fc, parity=bad)
+        with pytest.raises(ValueError, match="parity must be"):
+            zaverage.zaverage_stm_spectrum(3, [0.0], Delta=0.1, parity=bad,
+                                           itensor_version="python")
+    sc = surrogate.surrogate_kondo_chain(2, itensor_version="python", **_DIMER)
+    with pytest.raises(ValueError, match="parity must be"):
+        surrogate.get_stm_spectrum(sc, _DIMER_ES, parity=None)
+    assert paritystate.check_parity(np.bool_(True)) is True
+    assert paritystate.check_parity("auto") == "auto"
+
+
+def _auto_spectrum(nz):
+    """zaverage_stm_spectrum on the 5-site chain of the parity=True test
+    above, with parity="auto"."""
+    es = np.linspace(-0.2, 0.2, 101)
+    with pytest.warns(RuntimeWarning, match="does not reach"):
+        _, A, info = zaverage.zaverage_stm_spectrum(5, es, J=0.15,
+                Delta=0.05, Lambda=4.0, nz=nz, b=0.4, U=0.3, delta_sub=1e-3,
+                maxm=64, nsweeps=20, nkry=100, parity="auto", parity_gap=True,
+                itensor_version="python")
+    for k in ("parity", "parity_probe", "E0", "elastic", "E_ysr", "subgap"):
+        assert len(info[k]) == nz
+    sub = info["subgap"][0] # z = 0 is the mesh of the parity=True test
+    big = np.abs(sub["weight"]) > 1e-8
+    assert np.allclose(np.abs(sub["omega"][big]), 0.04189, atol=1e-4)
+    return info
+
+
+def test_zaverage_spectrum_with_auto_parity_keeps_the_lists_aligned():
+    """Two meshes of the 5-site chain, whose plain states have a definite
+    parity (the probe is below 1e-13 of the total on both): one entry per
+    z in every list, None in info["parity"], the plain E0 in info["E0"],
+    and the subgap pole of parity=True."""
+    info = _auto_spectrum(2)
+    for par, probe, e0, el in zip(info["parity"], info["parity_probe"],
+                                  info["E0"], info["elastic"]):
+        assert not probe["tripped"]
+        assert par is None and e0 == probe["E0_plain"]
+        assert el < 1e-6*probe["total"]
+
+
+def test_zaverage_spectrum_with_auto_parity_on_a_trip(monkeypatch):
+    """The same two meshes with the probe forced to trip (a negative
+    MIXTURE_TOL makes every state a mixture): each mesh carries the
+    sector energies in info["parity"], their E0 in info["E0"], the E_ysr
+    of the same sector solves, no elastic weight, and a subgap pole at
+    |E_ysr|."""
+    monkeypatch.setattr(paritystate, "MIXTURE_TOL", -1.0)
+    info = _auto_spectrum(2)
+    for par, probe, e0, ey, el, sub in zip(info["parity"],
+            info["parity_probe"], info["E0"], info["E_ysr"],
+            info["elastic"], info["subgap"]):
+        assert probe["tripped"] and sorted(par) == [0, 1]
+        assert e0 == pytest.approx(min(par.values()), abs=1e-9)
+        assert ey == par[1] - par[0] # S=1/2: E_free odd, E_screened even
+        assert el < 1e-12
+        big = np.abs(sub["weight"]) > 1e-8
+        assert np.allclose(np.abs(sub["omega"][big]), abs(ey), atol=1e-8)

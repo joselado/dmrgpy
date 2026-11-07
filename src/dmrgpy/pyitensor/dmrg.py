@@ -763,7 +763,7 @@ def lam0_is_unset(lam0):
         return False
 
 
-def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None):
+def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None, penalty=None):
     """Generalized-eigenvalue ground-state DMRG: finds the smallest
     lambda solving $H|\\psi\\rangle=\\lambda A|\\psi\\rangle$ for a Hermitian
     positive-definite metric MPO A (A = the identity MPO reduces this
@@ -822,6 +822,11 @@ def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None):
     drives psi toward A's near-null-space) -- dividing through such a
     value would otherwise silently poison every later outer iteration
     with inf/NaN instead of failing loudly.
+
+    penalty is the charge penalty MPO H already contains in a conserved
+    sector, as in dmrg(): every H - lam*A of the iteration contains it too,
+    and passing it takes its diagonal out of the Davidson stop scale of the
+    local solves. None (outside a sector) leaves the sweeps as they were.
     """
     lam = lam0
     if lam0_is_unset(lam):
@@ -832,7 +837,7 @@ def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None):
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
         Heff = mps_sum(H, A * (-lam))
-        _dmrg_one_sweep(psi, Heff, maxdim, cutoff, niter)
+        _dmrg_one_sweep(psi, Heff, maxdim, cutoff, niter, penalty=penalty)
         a_psi = inner(psi, A, psi).real
         # positive, not only nonzero: A=-1 returned the largest
         # eigenvalue and an indefinite A a number that is no eigenvalue
@@ -935,9 +940,13 @@ def _bond_projections(penalty_states, left_ov, right_ov, i):
     return projs
 
 
-def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, weight):
+def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, weight,
+                                  penalty=None):
     """Same as _local_ground_state, but the matvec also adds
-    weight*sum_k|proj_k><proj_k| (see this section's module-level note)."""
+    weight*sum_k|proj_k><proj_k| (see this section's module-level note).
+    penalty, when given, is (P, PL, PLbra, PR, PRbra) as in
+    _local_ground_state: a charge penalty H already contains, whose
+    diagonal is taken out of the Davidson stop scale too."""
     matvec_H, order_in, shape, x0 = two_site_heff(L, Lbra, H, ket, i, R, Rbra)
     proj_flats = [p.transpose_to(order_in).reshape(-1) for p in projs]
 
@@ -978,11 +987,17 @@ def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, wei
         # (The Davidson solve keeps the larger budget this floor stood for:
         # DAVIDSON_NITER_PENALIZED steps with a 1e-8 residual stop. The
         # penalty's diagonal, weight*|proj_k|^2 elementwise, goes into the
-        # preconditioner.)
+        # preconditioner.) The stop scale is that of H alone: without the
+        # overlap penalty and, in a conserved sector, without the charge
+        # penalty, whose diagonal stays in the preconditioner as well.
         hdiag = _heff_diagonal(L, Lbra, H, i, R, Rbra, order_in)
         diag = hdiag
         for pf in proj_flats:
             diag = diag + weight * bk.xp().abs(pf) ** 2
+        if penalty is not None:
+            P, PL, PLbra, PR, PRbra = penalty
+            hdiag = hdiag - _heff_diagonal(PL, PLbra, P, i, PR, PRbra,
+                                           order_in)
         eval0, evec0 = _davidson_ground_state(
             matvec, x0, diag, max(niter, DAVIDSON_NITER_PENALIZED),
             _DAVIDSON_RTOL_PENALIZED, hdiag=hdiag)
@@ -991,7 +1006,8 @@ def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, wei
     return float(eval0.real), theta
 
 
-def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True):
+def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True,
+                 penalty=None):
     """Two-site DMRG penalized against overlap with `penalty_states` (each
     weighted by `weight`) -- mirrors chain_session.h's
     dmrg(psi1,H_,wfs,sweeps,args-with-Weight) overload, used by
@@ -1032,9 +1048,18 @@ def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True):
     weight than the defaults -- and `excited_states()` returns a
     `fluctuations` entry per state precisely so a caller can tell. An entry
     that is not small means that state is not an eigenstate, whatever its
-    energy looks like."""
+    energy looks like.
+
+    penalty is the charge penalty MPO of a conserved sector that H already
+    contains, as in dmrg(), not to be confused with the overlap penalty
+    above. Its environments are carried along and its diagonal is taken
+    out of the Davidson stop scale, as the overlap penalty's already was:
+    with it in the scale the local solves stopped on the scale of the
+    charge penalty rather than of H. None, outside a sector, changes
+    nothing."""
     n = psi.length()
     k_states = len(penalty_states)
+    charge_penalty = penalty
     energy = None
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
@@ -1043,27 +1068,45 @@ def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True):
         right_ov = [_all_overlap_right(wk, psi) for wk in penalty_states]
         left_env = {0: (None, None)}
         left_ov = [{0: None} for _ in range(k_states)]
+        if charge_penalty is not None:
+            pright = _all_right_environments(charge_penalty, psi)
+            pleft = {0: (None, None)}
         for i in range(1, n):
             L, Lbra = left_env[i - 1]
             R, Rbra = right_env[i + 2]
+            pen = None
+            if charge_penalty is not None:
+                pen = (charge_penalty,) + pleft[i - 1] + pright[i + 2]
             projs = _bond_projections(penalty_states, left_ov, right_ov, i)
             energy, theta = _local_ground_state_penalized(
-                L, Lbra, R, Rbra, H, psi, i, niter, projs, weight)
+                L, Lbra, R, Rbra, H, psi, i, niter, projs, weight, pen)
             _apply_local_update(psi, i, theta, cutoff, maxdim, "right")
             left_env[i] = _extend_left(L, Lbra, H, psi, i)
+            if charge_penalty is not None:
+                pleft[i] = _extend_left(pleft[i - 1][0], pleft[i - 1][1],
+                                        charge_penalty, psi, i)
             for k, wk in enumerate(penalty_states):
                 left_ov[k][i] = _extend_overlap_left(left_ov[k][i - 1], wk, psi, i)
 
         right_env = {n + 1: (None, None)}
         right_ov = [{n + 1: None} for _ in range(k_states)]
+        if charge_penalty is not None:
+            pright = {n + 1: (None, None)}
         for i in range(n - 1, 0, -1):
             L, Lbra = left_env[i - 1]
             R, Rbra = right_env[i + 2]
+            pen = None
+            if charge_penalty is not None:
+                pen = (charge_penalty,) + pleft[i - 1] + pright[i + 2]
             projs = _bond_projections(penalty_states, left_ov, right_ov, i)
             energy, theta = _local_ground_state_penalized(
-                L, Lbra, R, Rbra, H, psi, i, niter, projs, weight)
+                L, Lbra, R, Rbra, H, psi, i, niter, projs, weight, pen)
             _apply_local_update(psi, i, theta, cutoff, maxdim, "left")
             right_env[i + 1] = _extend_right(R, Rbra, H, psi, i + 1)
+            if charge_penalty is not None:
+                pright[i + 1] = _extend_right(pright[i + 2][0],
+                                              pright[i + 2][1],
+                                              charge_penalty, psi, i + 1)
             for k, wk in enumerate(penalty_states):
                 right_ov[k][i + 1] = _extend_overlap_right(right_ov[k][i + 2], wk, psi, i + 1)
         left_env = {0: (None, None)}

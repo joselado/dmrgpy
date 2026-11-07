@@ -876,7 +876,8 @@ print(r["E_ysr"]/Deltas, t["Delta_c"])
 This gives the same $E_{\text{odd}} - E_{\text{even}}$ as `ysr.subgap_energies` at every point, for instance $0.54\,\Delta$ at $\Delta = 0.0032$ (singlet) and $-0.085\,\Delta$ at $\Delta = 0.018$ (doublet). The bisection puts the transition at $\Delta_c = 0.0137$ on this 14-site chain. The snippet uses 6 warm sweeps, fewer than the default, and on this chain they give the energies of the cold solves. `r` holds the keys of `subgap_energies` as arrays, one entry per gap. `t` holds every point visited, in `t["Delta"]` and in `t["x"]` $= E_{\text{ysr}}/\Delta$. `examples/kondo/ysr_transition_scan` plots both.
 
 - `Deltas`, `Dzs`: the scanned parameter, exactly one of the two. A scan over `Dzs` needs `Delta`, and a scan over `Deltas` takes `Dz`.
-- `nsweeps_warm`: the sweeps of every point after the first. Each point starts from the one before, in the order given, so the points should be monotonic and closely spaced. The default is the larger of 8 and a third of `nsweeps`, at most `nsweeps`. Only `cold_every` checks a smaller value.
+- `nsweeps_warm`: the sweeps of every point after the first. Each point starts from the one before, in the order given, so the points should be monotonic and closely spaced. The default is the larger of 8 and a third of `nsweeps`, at most `nsweeps`. Only `cold_every` checks a smaller value. With `"auto"` each sector is swept in blocks of two sweeps until its energy moves by less than `warm_tol` between two blocks, and `r["nsweeps_warm"]` lists the sweeps used at every point.
+- `warm_tol`: the stop of `nsweeps_warm="auto"`, relative to $\lvert\Delta\rvert$, $10^{-6}$ by default. The stop is a change between two blocks, not an error bound, so `cold_every` is still the check.
 - `cold_every`: solve every k-th point once more from a fresh start with `subgap_energies`. `r["warm_cold"]` is the largest difference in the sector energies, and a warning names a point where the warm start stayed in a metastable or unconverged state.
 - `mesh`: the Wilson mesh, `"mean"` (default) or `"zp"`, as in `kondo_chain`.
 - `ratio`: `find_transition` halves the bracket in $\ln\Delta$ until $\Delta_{\text{hi}}/\Delta_{\text{lo}}$ is below `ratio` (default 1.04). It then interpolates $E_{\text{ysr}}/\Delta$ linearly in $\ln\Delta$. `check_cold=True` also solves the two final ends cold.
@@ -965,7 +966,7 @@ poles = zaverage.stm_poles(fc, U=0.3, nkry=100, parity=True)
 p = ysrcurrent.rate_parameters(poles, Delta, Lambda=Lambda)
 ```
 
-This chain is close to the transition, with $\epsilon = 0.0190\,\Delta$. In the parity sector the elastic weight is zero, there is one YSR pole on each bias side, and $u^2 = 0.334$, $v^2 = 0.196$. For `ysr.get_stm_spectrum`, take the state from `paritystate.parity_ground_state(fc)`, which returns it on a copy of the chain:
+This chain is close to the transition, with $\epsilon = 0.0190\,\Delta$. In the parity sector the elastic weight is zero, there is one YSR pole on each bias side, and $u^2 = 0.334$, $v^2 = 0.196$. By default, `parity="auto"`, the plain state is solved first and probed with two expectation values per vertex, the elastic weight $w_{\text{el}} = \sum_X 2\lvert\langle X\rangle\rvert^2$ and the sum rule $w_{\text{tot}} = \sum_X \langle X X^\dagger + X^\dagger X\rangle$. The sector solve is done only when $w_{\text{el}} > 10^{-6}\, w_{\text{tot}}$, so a chain far from the transition keeps its plain result. Without a gap there is no parity sector, and the plain result is kept. For `ysr.get_stm_spectrum`, take the state from `paritystate.parity_ground_state(fc)`, which returns it on a copy of the chain:
 
 ```python
 from dmrgpy.ysrtk import paritystate
@@ -986,6 +987,14 @@ es, A = ysr.get_stm_spectrum(gs, es, delta=0.08, U=0.3, pad_bonds="full")
 
 Against exact diagonalization this spectrum is off by $1.1\times10^{-3}$ of the peak without the padding, and by $10^{-8}$ with it. `examples/kondo/ysr_task_tangent_space` plots both.
 
+The padding adds directions that are not chosen from the state, and the whole Hilbert space is reachable only on a short chain. `expand_bonds=k` enlarges the space only where it is needed. On every bond it takes the two-site part of $X|\text{GS}\rangle$ and of $HX|\text{GS}\rangle$ that the tangent space drops, and adds its leading singular vectors, at most $k$ of them, as new kept directions. The state does not change.
+
+```python
+es, A = ysr.get_stm_spectrum(gs, es, delta=0.08, U=0.3, expand_bonds=4)
+```
+
+On the same pair this spectrum is the exact one to $1.5\times10^{-11}$ of the peak, in a tangent space much smaller than the padded one. At $J = 0$ add `expand_rounds=2`: the second round starts from the expanded state and reaches the directions where the flipped impurity spin has moved into the bath. The expansion does not make the Krylov recursion converge faster. On a long chain a pole that is not converged needs a larger `nkry`, not `expand_bonds`. `examples/kondo/ysr_task_expansion` plots the spectrum with and without it.
+
 
 `rate_parameters` warns when the poles show a mixture, and `E_ysr=` compares $\epsilon$ with `ysr.subgap_energies`.
 
@@ -997,8 +1006,10 @@ Against exact diagonalization this spectrum is off by $1.1\times10^{-3}$ of the 
 - `Lambda`: in `rate_parameters`, multiplies the weights by $A_\Lambda$, so that they stand for the continuum.
 - `E_ysr`: in `rate_parameters`, the YSR energy from `ysr.subgap_energies`. It raises when the subgap pole is not at that energy.
 - `peak_heights`: the four peaks, each with its single-particle part `"s"` and its Andreev part `"a"`.
-- `parity`: in `zaverage.stm_poles` and `zaverage_stm_spectrum`, start from the ground state solved inside its fermion-parity sector. Use it near the singlet-doublet transition. `paritystate.parity_ground_state(fc)` gives the same state for `ysr.get_stm_spectrum`.
+- `parity`: in `zaverage.stm_poles` and `zaverage_stm_spectrum`. `"auto"` (default) starts from the ground state solved inside its fermion-parity sector only when the plain state is a parity mixture, `True` always does, and `False` always takes the plain state. `paritystate.parity_ground_state(fc)` gives the same state for `ysr.get_stm_spectrum`.
 - `pad_bonds`: in `zaverage.stm_poles`, `zaverage_stm_spectrum` and `ysr.get_stm_spectrum`, pads every bond of the state before the TASK recursion. `"full"` gives the whole Hilbert space, for a short chain with `parity=True` or at $J = 0$. An integer below the largest bond adds arbitrary directions: on a long chain it does not make the spectrum better, and the pole variances stop being an error bar, so leave it at None (default) there. A padded space above $4\times 10^6$ raises an error.
+- `expand_bonds`: in the same three functions, None (default) or an integer $k$, the largest number of new directions per bond, chosen from the part of $X|\text{GS}\rangle$ and $HX|\text{GS}\rangle$ that the tangent space drops. Use it for a sector state of a degenerate pair, and with `expand_rounds=2` at $J = 0$. It cannot be combined with `pad_bonds`.
+- `expand_rounds`: repeats the expansion from the expanded state, 1 by default. A round that adds nothing ends it.
 
 ## Several magnetic atoms: the surrogate bath
 

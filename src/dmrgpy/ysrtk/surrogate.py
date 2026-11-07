@@ -434,7 +434,7 @@ def sector_energies(fc, mode="DMRG", sectors=None, nstates=1,
     return out
 
 
-def get_stm_spectrum(fc, es, spin=0, parity=False, **kwargs):
+def get_stm_spectrum(fc, es, spin=0, parity="auto", **kwargs):
     """dI/dV(eV) with the tip over spin number spin of a
     surrogate_kondo_chain: ysr.get_stm_spectrum with the composite
     tunneling operator of that spin and the first site of its bath.
@@ -449,7 +449,12 @@ def get_stm_spectrum(fc, es, spin=0, parity=False, **kwargs):
     state has a definite parity. On a dimer with J12 = t_b = 0.01 (L=3,
     J=0.671, Delta=0.1, maxm=64, nsweeps=20) the parity route is off ED by
     2.5e-6 of the peak on itensor_version="python" and 4.5e-9 on v3; the
-    plain route on "python" is 5.8e-7 off there.
+    plain route on "python" is 5.8e-7 off there. With parity="auto", the
+    default, fc is
+    solved plainly and probed (paritystate.auto_parity_state, two vevs per
+    vertex), and the parity state replaces it only when the elastic weight
+    of the vertex of this spin is above 1e-6 of its sum rule. parity takes
+    False, True or "auto".
 
     With the default submode="TASK" the Krylov size nkry (default 100) has
     to grow with the number of spins. At N = 4 (L = 3, maxm 128) nkry=100
@@ -461,8 +466,15 @@ def get_stm_spectrum(fc, es, spin=0, parity=False, **kwargs):
     peak that sits at different |eV| on the two sides is the sign of a
     Krylov space that is too small."""
     from .. import ysr
-    if parity:
-        from .paritystate import parity_ground_state
-        fc = parity_ground_state(fc, mode=kwargs.get("mode", "DMRG"))[0]
+    from . import paritystate
+    parity = paritystate.check_parity(parity)
+    mode = kwargs.get("mode", "DMRG")
+    if parity == "auto": # the plain solve, the sectors only on a mixture
+        ops = ysr.tunneling_operators(fc, imp=fc.impurities[spin],
+                                      site=fc.bath_sites[spin][0],
+                                      U=kwargs.get("U", 0.0))
+        fc = paritystate.auto_parity_state(fc, ops, mode=mode)[0]
+    elif parity:
+        fc = paritystate.parity_ground_state(fc, mode=mode)[0]
     return ysr.get_stm_spectrum(fc, es, imp=fc.impurities[spin],
                                 site=fc.bath_sites[spin][0], **kwargs)

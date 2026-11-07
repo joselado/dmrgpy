@@ -97,10 +97,11 @@ near the singlet-doublet transition a plain DMRG solve can stop at a
 mixture of the two parities, which gives an elastic weight and a split,
 shifted subgap pole. parity=True (stm_poles, zaverage_stm_spectrum) takes
 the poles on the ground state solved inside its parity sector instead
-(ysrtk/paritystate.py, with the measurements). At J = 0 the composite
-vertex leaves the one-site tangent space of the product ground state, so
-TASK finds none of its spin-flip weight; stm_poles warns when more than
-half of the weight is missing.
+(ysrtk/paritystate.py, with the measurements), and parity="auto", the
+default, does so only when two vevs on the plain state show a mixture. At J = 0 the
+composite vertex leaves the one-site tangent space of the product ground
+state, so TASK finds none of its spin-flip weight; stm_poles warns when
+more than half of the weight is missing.
 
 What was checked (tests/test_ysr_zaverage.py): the kernel's weight and
 flatness, the gap map, the BdG poles of the chain against the TASK poles
@@ -253,7 +254,8 @@ def bdg_chain_dos(es, n, Delta, Lambda=4.0, D=1.0, nz=4, b=0.4, omega0=None,
 
 
 def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
-              parity=False, pad_bonds=None):
+              parity="auto", pad_bonds=None, expand_bonds=None,
+              expand_rounds=1):
     """Discrete poles of dI/dV, A(w) of ysr.py's module docstring, from
     taskdmrg.get_poles: the electron part (X, X^dag) at +omega and the
     hole part (X^dag, X) at -omega, summed over the tip spin. imp and
@@ -277,7 +279,15 @@ def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
     inside its parity sector, paritystate.parity_ground_state(fc), so the
     mixture cannot appear; the result then also holds "parity", the info
     of parity_ground_state (sector energies, Sz_ground). fc itself is not
-    solved then. At J = 0 the ground state is a product state, the
+    solved then. With parity="auto", the default, fc is solved as with
+    False and probed
+    first (paritystate.auto_parity_state: two vevs per vertex, no
+    correlator), and only when its elastic weight is above 1e-6 of the sum
+    rule <X X^dag + X^dag X>, the threshold of the warning below, are the
+    poles taken on the parity state as with True; the result then holds
+    "parity_probe" (elastic, total, tripped, E0_plain), and "parity" only
+    on a trip. parity takes False, True or "auto", nothing else. At
+    J = 0 the ground state is a product state, the
     one-site tangent space misses X|GS> of the composite vertex, and TASK
     returns an empty spectrum with all of the weight missing; a
     RuntimeWarning says so when the missing weight is more than half of
@@ -288,26 +298,39 @@ def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
     promoted sector state of a degenerate pair, whose bonds are too small
     at the cutoff of the chain. On a long chain an int below the
     structural bound slowed the Krylov convergence of the subgap pole
-    (pyitensor/task.py), so leave it None there."""
+    (pyitensor/task.py), so leave it None there. expand_bonds and
+    expand_rounds go to taskdmrg.get_poles: they add to every bond at most
+    expand_bonds directions taken from the part of X|GS> and H X|GS> the
+    tangent space drops, which gives the spectrum of exact diagonalization
+    on the promoted sector state, and with expand_rounds=2 on the product
+    state at J = 0. They do not speed up the Krylov convergence of a pole
+    on a long chain."""
     import warnings
     from .. import taskdmrg
     from ..ysr import tunneling_operators
     if operators is not None and U != 0.0:
         raise ValueError("stm_poles: U is used only to build the tunneling "
             "vertices; with operators given, fold U into them")
-    pinfo = None
-    if parity:
-        from .paritystate import parity_ground_state
-        fc, pinfo = parity_ground_state(fc)
+    from . import paritystate
+    parity = paritystate.check_parity(parity)
+    where = {k: v for k, v in (("imp", imp), ("site", site)) if v is not None}
+    pinfo, probe = None, None
+    if parity == "auto": # the plain solve, and the sectors only on a mixture
+        ops = operators if operators is not None else \
+            tunneling_operators(fc, U=U, **where)
+        fc, pinfo, probe = paritystate.auto_parity_state(fc, ops)
+    elif parity:
+        fc, pinfo = paritystate.parity_ground_state(fc)
     if operators is None:
-        where = {k: v for k, v in (("imp", imp), ("site", site)) if v is not None}
         operators = tunneling_operators(fc, U=U, **where)
     om, wt, missing, elastic = [], [], 0.0, 0.0
     for X in operators:
         Xd = X.get_dagger()
         for pair, sign in (((Xd, X), 1.0), ((X, Xd), -1.0)):
             p = taskdmrg.get_poles(fc, name=pair, nkry=nkry,
-                                   pad_bonds=pad_bonds)
+                                   pad_bonds=pad_bonds,
+                                   expand_bonds=expand_bonds,
+                                   expand_rounds=expand_rounds)
             om.append(sign*np.asarray(p["omega"], float))
             wt.append(np.real(p["weight"]))
             missing += abs(p["missing_weight"])
@@ -325,21 +348,25 @@ def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
         warnings.warn("stm_poles: the TASK poles miss %.3g of the weight "
             "(%.3g found). The part of X|GS> outside the one-site tangent "
             "space is dropped, which is all of it for the composite vertex "
-            "on a product ground state (J = 0). Use pad_bonds=\"full\" or "
-            "mode=\"ED\" on a short chain, or zaverage.bdg_chain_dos for "
-            "the local density of states"
+            "on a product ground state (J = 0). Use expand_bonds=4 with "
+            "expand_rounds=2, or pad_bonds=\"full\" or mode=\"ED\" on a "
+            "short chain, or zaverage.bdg_chain_dos for the local density "
+            "of states"
             % (missing, np.sum(np.abs(wt))), RuntimeWarning, stacklevel=2)
     out = dict(omega=om, weight=wt, missing_weight=missing, elastic=elastic)
     if pinfo is not None:
         out["parity"] = pinfo
+    if probe is not None:
+        out["parity_probe"] = probe
     return out
 
 
 def zaverage_stm_spectrum(n, es, J=0.2, Delta=0.0, Lambda=4.0, D=1.0, nz=4,
                           b=0.4, omega0=None, U=0.0, delta_sub=None,
                           maxm=64, nsweeps=20, nkry=300, continuum_norm=True,
-                          operators=None, parity_gap=False, parity=False,
-                          pad_bonds=None, **kwargs):
+                          operators=None, parity_gap=False, parity="auto",
+                          pad_bonds=None, expand_bonds=None,
+                          expand_rounds=1, **kwargs):
     """dI/dV(eV) at the energies es, z-averaged over nz meshes
     (z = k/nz), each a ysr.kondo_chain(n, J=J, Delta=Delta, Lambda=Lambda,
     z=z) solved by DMRG with maxm and nsweeps, its poles from TASK
@@ -367,8 +394,11 @@ def zaverage_stm_spectrum(n, es, J=0.2, Delta=0.0, Lambda=4.0, D=1.0, nz=4,
     ground state solved inside its parity sector
     (paritystate.parity_ground_state), so a parity mixture cannot appear;
     the plain solve is skipped, info["E0"] is the energy of that state,
-    and E_ysr for parity_gap comes from the same sector solves. pad_bonds
-    goes to stm_poles. Extra keywords go to kondo_chain.
+    and E_ysr for parity_gap comes from the same sector solves. With
+    parity="auto", the default, each mesh is solved plainly and probed
+    (paritystate.auto_parity_state), and only a mesh whose plain state is
+    a parity mixture takes the sector route of parity=True. pad_bonds,
+    expand_bonds and expand_rounds go to stm_poles. Extra keywords go to kondo_chain.
 
     Returns (es, A, info): info["z"] the twists, and per z
     info["subgap"] (dict omega, weight of the subgap poles),
@@ -376,24 +406,42 @@ def zaverage_stm_spectrum(n, es, J=0.2, Delta=0.0, Lambda=4.0, D=1.0, nz=4,
     info["omega0"], info["E0"], info["qp_gap"] (from kondo_chain) and
     info["reaches_gap"], info["A_z"] (the spectrum of that one mesh, with
     the same normalization as A), with parity_gap info["E_ysr"], and with
-    parity info["parity"] (the sector energies, 2Sz -> energy)."""
+    parity info["parity"] (the sector energies, 2Sz -> energy). With
+    parity="auto" the lists stay one entry per z: info["parity"] holds the
+    sector energies of a mesh that tripped and None for one that did not,
+    info["E0"] the sector E0 of a mesh that tripped and the plain E0
+    otherwise, and info["parity_probe"] the probe of every mesh (elastic,
+    total, tripped, E0_plain)."""
     import warnings
-    from ..ysr import kondo_chain, subgap_energies
+    from ..ysr import kondo_chain, subgap_energies, tunneling_operators
+    from . import paritystate
     if operators is not None and U != 0.0:
         raise ValueError("zaverage_stm_spectrum: U is used only to build "
             "the tunneling vertices; with operators given, fold U into them")
+    parity = paritystate.check_parity(parity)
     es = np.asarray(es, dtype=float)
     A = np.zeros(len(es))
     info = dict(z=twists(nz), subgap=[], missing_weight=[], elastic=[],
                 omega0=[], E0=[], E_ysr=[], A_z=[], qp_gap=[],
                 reaches_gap=[], parity=[])
+    if parity == "auto":
+        info["parity_probe"] = []
     for z in info["z"]:
         fc = kondo_chain(n, J=J, Delta=Delta, Lambda=Lambda, D=D, z=z, **kwargs)
         fc.maxm, fc.nsweeps = maxm, nsweeps
         pinfo = None
-        if parity: # the state of definite parity, on its own copy of fc
-            from .paritystate import parity_ground_state
-            fc_gs, pinfo = parity_ground_state(fc)
+        if parity == "auto": # the plain solve, the sectors only on a mixture
+            ops = None if operators is None else operators(fc)
+            if ops is None:
+                ops = tunneling_operators(fc, U=U)
+            fc_gs, pinfo, probe = paritystate.auto_parity_state(fc, ops)
+            info["parity_probe"].append(probe)
+            info["E0"].append(probe["E0_plain"] if pinfo is None
+                              else pinfo["E0"])
+            info["parity"].append(None if pinfo is None
+                                  else pinfo["sectors"])
+        elif parity: # the state of definite parity, on its own copy of fc
+            fc_gs, pinfo = paritystate.parity_ground_state(fc)
             info["E0"].append(pinfo["E0"])
             info["parity"].append(pinfo["sectors"])
         else:
@@ -401,7 +449,8 @@ def zaverage_stm_spectrum(n, es, J=0.2, Delta=0.0, Lambda=4.0, D=1.0, nz=4,
             info["E0"].append(fc.gs_energy())
         ops = None if operators is None else operators(fc_gs)
         p = stm_poles(fc_gs, U=U, nkry=nkry, operators=ops,
-                      pad_bonds=pad_bonds)
+                      pad_bonds=pad_bonds, expand_bonds=expand_bonds,
+                      expand_rounds=expand_rounds)
         t_last = fc.t_last # the last hopping, on the mesh of the chain
         norm = fc.dos_factor if continuum_norm else 1.0
         w0 = omega0
