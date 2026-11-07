@@ -662,16 +662,18 @@ print(r["E_ysr"]/0.003, r["ground_state"])
 
 This gives $E_{\text{odd}} - E_{\text{even}} = 0.56\,\Delta$ and a singlet.
 At $\Delta = 0.03$ it is $-0.23\,\Delta$, a doublet, so the transition is
-in between; `examples/kondo/ysr_state_on_superconductor` scans it. With $T_K$ from the local susceptibility of the impurity,
-$T_K = 0.4128/(4\chi)$, and both scales averaged over the twist $z$ of the
-mesh, we find $\Delta_c/T_K = 4.4$ at $\rho J = 0.1$ and 5.0 at
-$\rho J = 0.2$. The numerical renormalization group gives 3.7 at
-$\rho J = 0.1$. At $\Lambda = 4$ the absolute $\Delta_c$ and $T_K$ depend
-on where the mesh puts its levels. On the default mesh they are 30% and 8%
-above the values of the numerical renormalization group, and on the mesh of
-"The mesh of the band" below they are 0.7% and 16.5% below them. So we
-compare only the ratio. The ratio, 4.40, is the same on both meshes, and so
-its difference to 3.7 does not come from the mesh.
+in between; `examples/kondo/ysr_state_on_superconductor` scans it. The
+ratio $\Delta_c/T_K$ depends on how $T_K$ is read, and "Two Kondo
+temperatures" below compares the definitions. With both scales averaged over
+the twist $z$ of the mesh, Wilson's $T_K$ gives $\Delta_c/T_K = 3.94$ for
+every $\rho J$ from 0.09 to 0.2. The numerical renormalization group gives
+3.7, with $T_K$ read from a crossing at $\Lambda = 2$, and read in the same
+way, with $\Delta_c$ from $\Lambda = 4$, we find 3.83. $T_K$ from the local susceptibility of the impurity gives
+4.4 at $\rho J = 0.1$ and 5.0 at $\rho J = 0.2$. At $\Lambda = 4$ the
+absolute $\Delta_c$ depends on where the mesh puts its levels: it is 29%
+above the value of the numerical renormalization group on the default mesh,
+and 0.7% below it on the mesh of "The mesh of the band" below. The ratio is
+the same on both meshes, so we compare ratios.
 
 The STM spectrum comes from the composite tunneling operator of the
 Kondo section, now exact in $J$. The tip electron enters the substrate
@@ -774,10 +776,40 @@ r = ysr.subgap_energies(fc)
 print(r["E_ysr"]/0.003, r["ground_state"])
 ```
 
-This gives $0.51\,\Delta$ and a singlet. At $\Delta = 0.03$ it gives $-0.27\,\Delta$ and a doublet. At $\Lambda = 4$ the absolute scales depend on the mesh: on the zp mesh $\Delta_c = 4.26\times 10^{-5}$ and $T_K = 0.97\times 10^{-5}$ at $\rho J = 0.1$, averaged over four twists, both about 23% below the mean mesh. The ratio $\Delta_c/T_K$ does not depend on the mesh: it is 4.40 on the zp mesh and 4.41 on the mean mesh, the same within the accuracy of $T_K$, about 0.2%. So at $\Lambda = 4$ we compare ratios on either mesh. See `examples/kondo/wilson_mesh_band_edge`.
+This gives $0.51\,\Delta$ and a singlet. At $\Delta = 0.03$ it gives $-0.27\,\Delta$ and a doublet. At $\Lambda = 4$ the absolute scales depend on the mesh: on the zp mesh $\Delta_c = 4.26\times 10^{-5}$ and Wilson's $T_K = 1.08\times 10^{-5}$ at $\rho J = 0.1$, averaged over four twists, both about 23% below the mean mesh. The ratio $\Delta_c/T_K$ does not depend on the mesh: with Wilson's $T_K$ it is 3.94 on the zp mesh and 3.95 on the mean mesh, and with the local one 4.40 and 4.41. So at $\Lambda = 4$ we compare ratios on either mesh. See `examples/kondo/wilson_mesh_band_edge`.
 
 - `mesh`: `"mean"` (default) or `"zp"`, in `kondo_chain` as in `wilsonchain.wilson_chain`. With `"zp"` the continuum $J$ goes on the chain bare, and the density of states is right up to the band edge.
 - `z`: the twist of the mesh. On the zp mesh one twist moves $\Delta_c$ and $T_K$ by up to 13%, so average over several.
+
+### Two Kondo temperatures
+
+Let us now see how $T_K$ is read, since at finite $\rho J$ two susceptibilities give two different numbers. The local susceptibility is the response of the impurity spin to a field on the impurity alone, $\chi_{\text{loc}} = -d\langle S^z_{\text{imp}}\rangle/dB$. Wilson's impurity susceptibility is the response of the total moment to a uniform field, with the impurity minus without it,
+
+$$
+T\chi_{\text{imp}}(T) = \left[\langle (S^z_{\text{tot}})^2\rangle - \langle S^z_{\text{tot}}\rangle^2\right]_T - (\text{the same for the chain without the impurity}) .
+$$
+
+It goes from $1/4$ for a free moment to $wT/(4T_K)$ for a screened one, with $w = 0.4128$, and both definitions use $T_K = w/(4\chi(0))$. Note that $\chi_{\text{imp}}$ cannot be read from a ground state: $S^z_{\text{tot}}$ commutes with $H$, so a uniform field moves every level linearly. It lives in the spectrum at temperatures of order the level spacing. So we compute it with a numerical renormalization group on the same Wilson chain. The chain is diagonalized site by site in blocks of charge and $S^z$, keeping the lowest states, and site $N$ gives the temperature $T_N = \omega_N/\bar\beta$, with $\omega_N$ the last hopping.
+
+```python
+from dmrgpy import nrgthermo, ysr
+A = ysr.lambda_factor(4.0)
+r = nrgthermo.kondo_nrg(40, J=0.2*A, Lambda=4.0, keep=400)
+print(nrgthermo.kondo_temperature(r)["T_K"])
+print(nrgthermo.kondo_temperature(r, definition="crossing")["T_K"])
+rb = nrgthermo.kondo_nrg(40, J=0.2*A, Lambda=4.0, keep=400, B=1.2e-6)
+print(nrgthermo.kondo_temperature(rb, definition="local")["T_K"])
+```
+
+At $\rho J = 0.1$ this gives $T_K = 1.339\times10^{-5}$ from the slope of $T\chi_{\text{imp}}$, $1.494\times10^{-5}$ from the crossing $T\chi_{\text{imp}} = 0.0701$, and $1.199\times10^{-5}$ from the local susceptibility, which is the value the DMRG energy in a field gives. The ratio of Wilson's $T_K$ to the local one is 1.12 at $\rho J = 0.1$ and 1.27 at $\rho J = 0.2$. It goes to 1 linearly as $\rho J \to 0$, and it is the same for every twist and on both meshes. The slope does not depend on $\Lambda$, while the crossing does: it sits at $1.03\,T_K$ at $\Lambda = 2$ and at $1.11\,T_K$ at $\Lambda = 4$. The numerical renormalization group values compared with on this page read $T_K$ from the crossing at $\Lambda = 2$, so compare with them at that $\Lambda$. `examples/kondo/kondo_temperature_wilson` prints the three values for two couplings.
+
+- `n`, `Lambda`, `z`, `mesh`, `D`: the Wilson chain, as in `kondo_chain`. The chain must reach about $10^{-3}T_K$, so that several sites of each parity sit on the linear part. A longer chain does not change $T_K$.
+- `J`: the coupling on the chain, as in `kondo_chain`. Use `J*ysr.lambda_factor(Lambda)` for a continuum $J$ on the default mesh, and $J$ bare with `mesh="zp"`.
+- `B`: a field on the impurity only, needed for `definition="local"`. Take it well below $T_K$: $B = 0.1\,T_K$ moves $\chi_{\text{loc}}$ by $4\times10^{-4}$. Use `B=0` for the other two definitions.
+- `keep`: the number of states kept per site. 400 is enough at $\Lambda = 4$, and 800 at $\Lambda = 2$ with `beta_bar=1.5`. `kondo_temperature` warns when the run is truncated.
+- `beta_bar`: sets $T_N = \omega_N/\bar\beta$. At $\Lambda = 4$, values from 0.5 to 1 give the same $T_K$ to $1.5\times10^{-3}$. At $\Lambda = 2$, take 1.5.
+- `definition`: in `kondo_temperature`. `"wilson"` (default) is the slope of $T\chi_{\text{imp}}$ at low $T$, the same at every $\Lambda$. `"crossing"` is where $T\chi_{\text{imp}} = 0.0701$, which depends on $\Lambda$. `"local"` is $w/(4\chi_{\text{loc}})$.
+- `window`: in `kondo_temperature`, the range of $T_N$ that is fitted. By default it is everything below 0.03 times the crossing.
 
 ### Higher spin and magnetic anisotropy
 
@@ -942,7 +974,18 @@ gs, info = paritystate.parity_ground_state(fc)
 es, dIdV = ysr.get_stm_spectrum(gs, es, delta=1e-4, U=0.3)
 ```
 
-On a chain of a few sites set `fc.cutoff = 0` before the call.
+TASK works in the tangent space of the state, and a state solved inside one sector can have smaller bonds than the mixture a plain solve gives. On a chain of a few sites this space is then too small, and part of the spectrum is missed. The same happens for the product state at $J = 0$. With `pad_bonds="full"` every bond is padded with empty directions to its largest size before the recursion. The state does not change, the tangent space becomes the whole Hilbert space, and the spectrum is the exact one. For a spin 1 with $D_z < 0$, whose free state is a pair $\pm S_z$:
+
+```python
+fs = ysr.kondo_chain(4, J=0.6, Delta=0.1, S="1", Dz=-0.05)
+fs.maxm, fs.nsweeps = 64, 15
+gs, info = paritystate.parity_ground_state(fs)
+es = np.linspace(-1.2, 1.2, 241)
+es, A = ysr.get_stm_spectrum(gs, es, delta=0.08, U=0.3, pad_bonds="full")
+```
+
+Against exact diagonalization this spectrum is off by $1.1\times10^{-3}$ of the peak without the padding, and by $10^{-8}$ with it. `examples/kondo/ysr_task_tangent_space` plots both.
+
 
 `rate_parameters` warns when the poles show a mixture, and `E_ysr=` compares $\epsilon$ with `ysr.subgap_energies`.
 
@@ -955,6 +998,7 @@ On a chain of a few sites set `fc.cutoff = 0` before the call.
 - `E_ysr`: in `rate_parameters`, the YSR energy from `ysr.subgap_energies`. It raises when the subgap pole is not at that energy.
 - `peak_heights`: the four peaks, each with its single-particle part `"s"` and its Andreev part `"a"`.
 - `parity`: in `zaverage.stm_poles` and `zaverage_stm_spectrum`, start from the ground state solved inside its fermion-parity sector. Use it near the singlet-doublet transition. `paritystate.parity_ground_state(fc)` gives the same state for `ysr.get_stm_spectrum`.
+- `pad_bonds`: in `zaverage.stm_poles`, `zaverage_stm_spectrum` and `ysr.get_stm_spectrum`, pads every bond of the state before the TASK recursion. `"full"` gives the whole Hilbert space, for a short chain with `parity=True` or at $J = 0$. An integer below the largest bond adds arbitrary directions: on a long chain it does not make the spectrum better, and the pole variances stop being an error bar, so leave it at None (default) there. A padded space above $4\times 10^6$ raises an error.
 
 ## Several magnetic atoms: the surrogate bath
 
@@ -1041,7 +1085,7 @@ es, dIdV = surrogate.get_stm_spectrum(fc, es, spin=0, delta=0.005, U=0.3,
                                       parity=True)
 ```
 
-Here the lowest odd state is $0.017\,\Delta$ above the ground state, and the spectrum is the exact one. With `itensor_version="python"` and coupled spins (`J12` or `t_b` not zero), give the solve twice the sweeps.
+Here the lowest odd state is $0.017\,\Delta$ above the ground state, and the spectrum is the exact one.
 
 - `N`: the number of spins, each $1/2$.
 - `J`, `V`: the exchange and the potential scattering in the continuum,

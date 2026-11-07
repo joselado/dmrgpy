@@ -446,12 +446,10 @@ def get_stm_spectrum(fc, es, spin=0, parity=False, **kwargs):
     degeneracy of the ground state with the other parity, where the plain
     solve can stop at a mixture of the two and the mixture shows up in
     dI/dV. With mode="ED" the keyword changes nothing, since the ED ground
-    state has a definite parity. On itensor_version="python" the sector
-    solve converges more slowly than the plain one once the spins are
-    coupled: on a dimer with J12 = t_b = 0.01 (L=3, J=0.671, Delta=0.1,
-    maxm=64) the parity route was off ED by 1.1e-4 of the peak at
-    nsweeps=20 and 1.3e-6 at nsweeps=40, so give it about twice the
-    sweeps; on v3 it was 4.5e-9 at nsweeps=20.
+    state has a definite parity. On a dimer with J12 = t_b = 0.01 (L=3,
+    J=0.671, Delta=0.1, maxm=64, nsweeps=20) the parity route is off ED by
+    2.5e-6 of the peak on itensor_version="python" and 4.5e-9 on v3; the
+    plain route on "python" is 5.8e-7 off there.
 
     With the default submode="TASK" the Krylov size nkry (default 100) has
     to grow with the number of spins. At N = 4 (L = 3, maxm 128) nkry=100

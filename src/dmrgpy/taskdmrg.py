@@ -29,42 +29,69 @@ def _v3_arrays(session,terms):
     return session.mpo_site_arrays(session.build_operator(terms))
 
 
+def _python_state(s):
+    """The ground state of a "python" session as site arrays, and the
+    state itself (the arrays of Chain.task_dynamical_correlator)."""
+    from .pyitensor.chain import _mps_arrays_lpr
+    if s.wf0 is None:
+        raise RuntimeError("submode=\"TASK\" called before gs_energy")
+    return _mps_arrays_lpr(s.wf0),s.wf0
+
+
 def session_poles(self,terms_i,terms_j,terms_idag,nkry,variance=False,
-        terms_ij=None):
+        terms_ij=None,pad_bonds=None):
     """(w, weights, elastic, variances, dim) on the chain's session, which
     must hold the ground state (groundstate.ground_state_on_session).
     With terms_ij, the terms of the product A*B, a sixth entry is
-    <GS|A B|GS> on the same state, the sum rule of the weights."""
+    <GS|A B|GS> on the same state, the sum rule of the weights.
+    pad_bonds (None, an int or "full") pads the bonds of the state before
+    the recursion (pyitensor/task.py's module docstring).
+
+    Both backends call task.correlator_poles here with their exported
+    arrays: on "python" the arrays of Chain.task_dynamical_correlator,
+    on 3 those of the session's own export."""
     s = self._session
-    if self.itensor_version=="python":
-        out = s.task_dynamical_correlator(terms_i,terms_j,terms_idag,nkry,
-                variance=variance)
-        if terms_ij is None: return out
-        return out+(complex(s.vev(terms_ij,s.wf0)),)
     from .pyitensor import task
-    wf = s.gs_wavefunction()
-    Wadag = None if terms_idag is None else _v3_arrays(s,terms_idag)
-    ws,wt,var,dim = task.correlator_poles(s.mps_site_arrays(wf),
-            s.mpo_site_arrays(s.hamiltonian_mpo()),_v3_arrays(s,terms_j),
-            Wadag,nkry,variance)
+    task.check_pad_bonds(pad_bonds)
+    if self.itensor_version=="python":
+        Ms,wf = _python_state(s)
+        Ws = task.mpo_arrays(s.H)
+        Wb = task.mpo_arrays(s._mpo(terms_j))
+        Wadag = (None if terms_idag is None
+                 else task.mpo_arrays(s._mpo(terms_idag)))
+    else:
+        wf = s.gs_wavefunction()
+        Ms = s.mps_site_arrays(wf)
+        Ws = s.mpo_site_arrays(s.hamiltonian_mpo())
+        Wb = _v3_arrays(s,terms_j)
+        Wadag = None if terms_idag is None else _v3_arrays(s,terms_idag)
+    ws,wt,var,dim = task.correlator_poles(Ms,Ws,Wb,Wadag,nkry,variance,
+            pad_bonds=pad_bonds)
     elastic = s.vev(terms_i,wf)*s.vev(terms_j,wf)
     if terms_ij is None: return ws,wt,complex(elastic),var,dim
     return ws,wt,complex(elastic),var,dim,complex(s.vev(terms_ij,wf))
 
 
-def session_spectrum(self,ops_terms,nkry):
+def session_spectrum(self,ops_terms,nkry,pad_bonds=None):
     """(e, mats, dim) of task.projected_spectrum on the chain's session,
-    ops_terms a list of (terms of O, terms of O^dagger)."""
+    ops_terms a list of (terms of O, terms of O^dagger). pad_bonds as in
+    session_poles."""
     s = self._session
-    if self.itensor_version=="python":
-        return s.task_projected_spectrum(ops_terms,nkry)
     from .pyitensor import task
+    task.check_pad_bonds(pad_bonds)
+    if self.itensor_version=="python":
+        Ms,_ = _python_state(s)
+        ops = [(task.mpo_arrays(s._mpo(t)),task.mpo_arrays(s._mpo(td)))
+               for t,td in ops_terms]
+        return task.spectrum_from_arrays(Ms,task.mpo_arrays(s.H),ops,nkry,
+                pad_bonds=pad_bonds)
     ops = [(_v3_arrays(s,t),_v3_arrays(s,td)) for t,td in ops_terms]
     return task.spectrum_from_arrays(s.mps_site_arrays(s.gs_wavefunction()),
-            s.mpo_site_arrays(s.hamiltonian_mpo()),ops,nkry)
+            s.mpo_site_arrays(s.hamiltonian_mpo()),ops,nkry,
+            pad_bonds=pad_bonds)
 
 
-def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False):
+def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False,pad_bonds=None):
     """The discrete poles of <GS|A delta(w-H+E0) B|GS> in the tangent space.
 
     Returns a dict with "omega" (poles relative to E0), "weight" (complex,
@@ -80,8 +107,25 @@ def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False):
     a bond operator or for C/Cdag on a parity mixture (a degenerate
     Majorana pair), where a truncated maxm lost up to all of the weight.
     missing_weight measures it, and a RuntimeWarning is raised when it is
-    above 1e-6 of the weight."""
+    above 1e-6 of the weight.
+
+    pad_bonds enlarges the tangent space by padding every bond of the
+    state with zero-weight directions before the recursion, up to
+    min(pad_bonds, structural bound), or to the structural bound for
+    "full" (the exact Lanczos of ED on a short chain); None (the default)
+    leaves the state as it is. It is the cure for a state of small
+    Schmidt rank, a product state or a state solved in one sector of a
+    degenerate pair, whose tangent space misses part of B|GS>; the
+    padded directions below the bound are arbitrary, see
+    pyitensor/task.py's module docstring. With "full" the variances are
+    zero; with an int below the bound they are inflated by the padded
+    directions and are no longer a sharp error bar of the poles. A padded
+    tangent space above task.MAX_PADDED_DIMENSION raises a ValueError.
+    The keyword is unrelated to pyitensor's backend.set_pad_bonds, which
+    freezes bond shapes for JAX."""
     _check_backend(self)
+    from .pyitensor.task import check_pad_bonds
+    check_pad_bonds(pad_bonds)
     from .multioperatortk import canonical
     from .groundstate import ground_state_on_session
     A,B = operatornames.str2MO(self,name,i=i,j=j,
@@ -92,7 +136,8 @@ def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False):
     ground_state_on_session(self)
     Adag = None if canonical.is_dagger_pair(A,B) else A.get_dagger().to_terms()
     ws,wt,el,var,dim,ab = session_poles(self,A.to_terms(),B.to_terms(),Adag,
-            int(nkry),variance=variance,terms_ij=(A*B).to_terms())
+            int(nkry),variance=variance,terms_ij=(A*B).to_terms(),
+            pad_bonds=pad_bonds)
     missing = ab-el-complex(np.sum(wt))
     scale = max(abs(ab),abs(el)+float(np.sum(np.abs(wt))))
     if abs(missing)>1e-6*scale:
@@ -103,8 +148,11 @@ def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False):
             "one-site tangent space is dropped, which the pole variances "
             "do not show: a bond operator, a fermion operator on a state "
             "of mixed parity (a degenerate Majorana pair), or, for A not "
-            "B^dagger, a Krylov space too small for A^dagger|GS>. Raise "
-            "maxm (or nkry), or project the state onto one parity sector."
+            "B^dagger, a Krylov space too small for A^dagger|GS>, or a "
+            "state of small Schmidt rank (a product state). Raise maxm (or "
+            "nkry), project the state onto one parity sector, or pass "
+            "pad_bonds=\"full\" on a short chain, which makes the tangent "
+            "space the whole Hilbert space."
             %(abs(missing),ab.real if ab.imag==0 else abs(ab)),
             RuntimeWarning,stacklevel=3)
     return dict(omega=ws,weight=wt,elastic=el,variance=var,dimension=dim,
@@ -112,20 +160,24 @@ def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False):
 
 
 def dynamical_correlator(self,es=np.linspace(-1.,10,100),delta=1e-1,
-        name=None,i=0,j=0,nkry=100,return_poles=False,variance=None):
+        name=None,i=0,j=0,nkry=100,return_poles=False,variance=None,
+        pad_bonds=None):
     """Dynamical correlator from the tangent-space Krylov poles, each one
     broadened into a Lorentzian of half width delta.
 
     With return_poles=True returns (es, correlator, info), info being
     get_poles()'s dict; the two-site variance of every pole is computed
-    then unless variance=False, since it is the error bar of the poles."""
+    then unless variance=False, since it is the error bar of the poles
+    (not with an int pad_bonds below the bound, where the padded
+    directions inflate it). pad_bonds is get_poles()'s."""
     if delta<=0.0: raise ValueError("delta must be positive, got %s"%delta)
     if variance is None: variance = return_poles
     if es is None: raise ValueError("es must be an array of frequencies")
     es = np.atleast_1d(np.asarray(es,dtype=float))
     if es.ndim!=1: raise ValueError("es must be a one-dimensional array "
             "of frequencies, got shape %s"%(es.shape,))
-    p = get_poles(self,name=name,i=i,j=j,nkry=nkry,variance=variance)
+    p = get_poles(self,name=name,i=i,j=j,nkry=nkry,variance=variance,
+            pad_bonds=pad_bonds)
     ws = np.concatenate([p["omega"],[0.]])
     wt = np.concatenate([p["weight"],[p["elastic"]]])
     lor = delta/(np.pi*((es[:,None]-ws[None,:])**2+delta**2))

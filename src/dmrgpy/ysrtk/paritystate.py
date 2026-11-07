@@ -55,16 +55,15 @@ dimer next to a parity crossing (L=3, J=0.671, Delta=0.1, first odd state
 nsweeps=20 were 9.4e-5 to 5.2e-4 above the ED energy on v3 and their dI/dV
 off by 1.1e-2 to 4.0e-2 of the peak (7e-5 to 8.8e-4 on "python"); the
 parity state is 3.4e-12 (v3) and 2.3e-11 ("python") of the peak from ED.
-That dimer has J12 = t_b = 0, so its two spins do not interact. Once they
-are coupled (J12 = t_b = 0.01) the "python" sector solve converges more
-slowly than the plain one: its energy is within 1e-10 of ED, but the
-spectrum is off by 1.1e-4 of the peak at nsweeps=20 and 1.3e-6 at
-nsweeps=40, against 5.7e-7 and 9e-9 for the plain route (maxm=64). On v3
-the parity route gives 4.5e-9 at nsweeps=20, where one plain run was
-2.9e-5 off. The "python" state stays in its sector (<Sz^2> 6e-15), but
-its sum rule <X^dag X> is 1.3e-5 off at nsweeps=20 and 1.6e-7 at 40, so
-it holds an admixture of another state of the sector. On "python" give
-the parity route about twice the sweeps of the plain one.
+That dimer has J12 = t_b = 0, so its two spins do not interact. With
+J12 = t_b = 0.01 (maxm=64, nsweeps=20) the parity route is off ED by
+2.5e-6 of the peak on "python" and 4.5e-9 on v3, where one plain v3 run
+was 2.9e-5 off; the plain "python" route is 5.8e-7 off. The "python"
+sector solve used to be the slow one here, 1.06e-4 of the peak at
+nsweeps=20: its local solves stopped relative to the scale of H plus the
+charge penalty, about 2e3 times that of H, so the state kept an
+admixture of about 1e-4 in amplitude (1.4e-8 in weight) of the first
+excited state of its sector (see pyitensor/dmrg.py's dmrg(penalty=)).
 
 One thing the sector state changes besides the parity: TASK works in the
 one-site tangent space of the state it gets, and that space is set by the

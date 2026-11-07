@@ -562,7 +562,7 @@ def _noisy_start(x0, noise):
 
 
 def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter, niter_floor=None,
-                        noise=0.0):
+                        noise=0.0, penalty=None):
     """Diagonalize the 2-site effective Hamiltonian at bond (i,i+1) for its
     lowest eigenpair. Returns (energy, theta_ITensor).
 
@@ -572,7 +572,9 @@ def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter, niter_floor=None,
     minimum Krylov dimension instead (see the comment below); only the
     spectral-bound solve passes it, whose answer is a window edge rather
     than a state. noise, when positive, mixes a random vector into the
-    start (_noisy_start)."""
+    start (_noisy_start). penalty, when given, is (P, PL, PLbra, PR, PRbra):
+    an MPO that H already contains and its environments, whose diagonal is
+    taken out of the one that sets the Davidson stop (see dmrg())."""
     matvec, order_in, shape, x0 = two_site_heff(L, Lbra, H, ket, i, R, Rbra)
     x0 = _noisy_start(x0, noise)
 
@@ -612,9 +614,14 @@ def _local_ground_state(L, Lbra, R, Rbra, H, ket, i, niter, niter_floor=None,
                                                  niter=max(niter, niter_floor))
         else:
             diag = _heff_diagonal(L, Lbra, H, i, R, Rbra, order_in)
+            hdiag = None
+            if penalty is not None:
+                P, PL, PLbra, PR, PRbra = penalty
+                hdiag = diag - _heff_diagonal(PL, PLbra, P, i, PR, PRbra,
+                                              order_in)
             eval0, evec0 = _davidson_ground_state(
                 matvec, x0, diag, max(niter, DAVIDSON_NITER), _DAVIDSON_RTOL,
-                vtol=_DAVIDSON_VTOL)
+                hdiag=hdiag, vtol=_DAVIDSON_VTOL)
 
     theta = ITensor(tuple(order_in), evec0.reshape(shape))
     return float(eval0.real), theta
@@ -640,39 +647,59 @@ def _apply_local_update(ket, i, theta, cutoff, maxdim, direction):
 
 
 def _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor=None,
-                    noise=0.0):
+                    noise=0.0, penalty=None):
     """One full right-then-left two-site ground-state sweep against a
     fixed H, mutating psi in place. Returns the last local bond's
     eigenvalue (dmrg()'s own returned-`energy` convention -- see its
     docstring). Factored out of dmrg()'s own per-sweep loop body so
     dmrg_generalized() below can reuse the identical sweep machinery
-    while rebuilding H itself between sweeps."""
+    while rebuilding H itself between sweeps. penalty is an MPO that H
+    contains (see dmrg()); its environments are carried along, at the
+    cost of its own small bond dimension."""
     n = psi.length()
     energy = None
 
     right_env = _all_right_environments(H, psi)
     left_env = {0: (None, None)}
+    if penalty is not None:
+        pright = _all_right_environments(penalty, psi)
+        pleft = {0: (None, None)}
     for i in range(1, n):
         L, Lbra = left_env[i - 1]
         R, Rbra = right_env[i + 2]
+        pen = None
+        if penalty is not None:
+            pen = (penalty,) + pleft[i - 1] + pright[i + 2]
         energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter,
-                                            niter_floor, noise)
+                                            niter_floor, noise, pen)
         _apply_local_update(psi, i, theta, cutoff, maxdim, "right")
         left_env[i] = _extend_left(L, Lbra, H, psi, i)
+        if penalty is not None:
+            pleft[i] = _extend_left(pleft[i - 1][0], pleft[i - 1][1],
+                                    penalty, psi, i)
 
     right_env = {n + 1: (None, None)}
+    if penalty is not None:
+        pright = {n + 1: (None, None)}
     for i in range(n - 1, 0, -1):
         L, Lbra = left_env[i - 1]
         R, Rbra = right_env[i + 2]
+        pen = None
+        if penalty is not None:
+            pen = (penalty,) + pleft[i - 1] + pright[i + 2]
         energy, theta = _local_ground_state(L, Lbra, R, Rbra, H, psi, i, niter,
-                                            niter_floor, noise)
+                                            niter_floor, noise, pen)
         _apply_local_update(psi, i, theta, cutoff, maxdim, "left")
         right_env[i + 1] = _extend_right(R, Rbra, H, psi, i + 1)
+        if penalty is not None:
+            pright[i + 1] = _extend_right(pright[i + 2][0], pright[i + 2][1],
+                                          penalty, psi, i + 1)
 
     return energy
 
 
-def dmrg(psi, H, sweeps, quiet=True, niter_floor=None, noisy_start=True):
+def dmrg(psi, H, sweeps, quiet=True, niter_floor=None, noisy_start=True,
+         penalty=None):
     """Two-site ground-state DMRG. Mutates psi in place and returns the
     final energy -- mirrors ITensor's own dmrg(psi,H,sweeps,args) signature
     (minus the Args bag, which this package uses explicit kwargs for
@@ -681,14 +708,31 @@ def dmrg(psi, H, sweeps, quiet=True, niter_floor=None, noisy_start=True):
     its Lanczos solve with that minimum Krylov dimension; leave it alone
     except for a spectral-bound solve.
     noisy_start=False keeps psi's own sector (_noisy_start), for a warm
-    start the caller chose, such as one member of a degenerate level."""
+    start the caller chose, such as one member of a degenerate level.
+
+    penalty is an MPO that H already contains, the charge penalty of a
+    conserved sector (chain.py's _penalized). The Davidson stop of every
+    local solve is relative to the scale of the operator, max|diag| of
+    H_eff, and the penalty's diagonal is lambda (Q-q)^2 on every
+    configuration of the bond that is off the sector, so with it the scale
+    is that of the penalty: 2.2e3 against 1.1 without it, in the median,
+    on a coupled surrogate dimer (8 sites, maxm=64, lambda=62). The local
+    solves then stopped after 2 matvecs once the energy was converged to
+    1e-10, and the state kept an admixture of about 1e-4 in amplitude
+    (1.4e-8 in weight), almost all of it on the first excited state of the
+    sector, 4.3e-3 higher, which the sweeps removed only slowly. With
+    penalty given, the scale is taken from diag(H_eff) minus
+    the penalty's own diagonal, which is the unpenalized operator's, as in
+    dmrg_excited(); the preconditioner keeps the full diagonal. This costs
+    one more set of environments, of the penalty's bond dimension."""
     global _NOISE_RNG
     _NOISE_RNG = np.random.default_rng(0) # the same solve twice, bit for bit
     energy = None
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
         energy = _dmrg_one_sweep(psi, H, maxdim, cutoff, niter, niter_floor,
-                                 noise if noisy_start and sweep_i == 0 else 0.0)
+                                 noise if noisy_start and sweep_i == 0 else 0.0,
+                                 penalty)
         if not quiet:
             print("sweep {}: energy = {}".format(sweep_i, energy))
 

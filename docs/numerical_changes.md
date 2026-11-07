@@ -1317,3 +1317,17 @@ always issued, for instance the TASK missing-weight warning, the
 excited-state fluctuation warning and the metastable-sector warning of
 `ysr.subgap_energies`, now appear in plain scripts
 (`tests/test_warnings_reach_scripts.py`).
+
+## The 2026-11-07 sector solves on `"python"`
+
+Every `itensor_version="python"` ground state solved inside a conserved
+sector (`set_conserved_sector`) moves, because each local Davidson solve
+now stops on the scale of H without the charge penalty. With the penalty in
+the scale the local solves stalled at 2 matvecs per bond, and the state
+kept an admixture of the next state of the sector. On the coupled surrogate
+dimer (L=3, J=0.671, Delta=0.1, J12 = t_b = 0.01, maxm=64, nsweeps=20) the
+parity-route dI/dV moved from 1.06e-4 to 2.5e-6 of the peak off ED, and its
+energy from 6.6e-11 to 5.8e-12 above the ED sector energy. A sector solve
+costs 35% to 38% more per sweep. Plain solves, every v3 solve and ED do not
+change. `pad_bonds` (TASK) and `nrgthermo` are new and move nothing at their
+defaults.

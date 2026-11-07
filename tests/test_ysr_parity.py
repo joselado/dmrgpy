@@ -180,30 +180,17 @@ _COUPLED_ED = np.array([0.13083578, 6.37471529, 5.97715881, 6.19345192,
                         0.13088216])
 
 
-@pytest.mark.parametrize("itensor_version,nsweeps", [("python", 40), (3, 20)])
-def test_coupled_dimer_parity_state(itensor_version, nsweeps):
-    """J12 = t_b = 0.01. On "python" the sector solve converges more slowly
-    than the plain one here, so it gets twice the sweeps (next test)."""
+@pytest.mark.parametrize("itensor_version", ["python", 3])
+def test_coupled_dimer_parity_state(itensor_version):
+    """J12 = t_b = 0.01, at nsweeps=20 on both backends. On "python" the
+    parity route was off ED by 1.06e-4 of the peak at 20 sweeps while the
+    local Davidson solves stopped relative to the scale of H plus the
+    charge penalty, and 2.5e-6 since they stop on the scale of H alone;
+    test_sector_conservation_python.py's
+    test_the_local_solves_stop_on_the_scale_of_h_not_of_the_penalty pins
+    the mechanism."""
     ed = _COUPLED_ED
     fc = surrogate.surrogate_kondo_chain(2, itensor_version=itensor_version,
-                                         **_COUPLED)
-    fc.maxm, fc.nsweeps = 64, nsweeps
-    _, A = surrogate.get_stm_spectrum(fc, _DIMER_ES, spin=0, delta=0.005,
-                                      U=0.3, parity=True)
-    assert np.max(np.abs(A - ed)) < 1e-5*np.max(ed)
-
-
-@pytest.mark.xfail(strict=True, reason="the \"python\" sector solve of the "
-                   "coupled dimer is not converged at nsweeps=20")
-def test_coupled_dimer_parity_state_python_at_twenty_sweeps():
-    """On d22 the parity route was off ED by 1.1e-4 of the peak here, with
-    its energy within 1e-10 of the ED sector energy, while the plain route
-    at the same settings was 5e-7 off. The state stays in its sector
-    (<Sz^2> 6e-15) but its sum rule <X^dag X> is 1.3e-5 off, so the error
-    is an admixture of another state of the same sector, not a leak out
-    of it."""
-    ed = _COUPLED_ED
-    fc = surrogate.surrogate_kondo_chain(2, itensor_version="python",
                                          **_COUPLED)
     fc.maxm, fc.nsweeps = 64, 20
     _, A = surrogate.get_stm_spectrum(fc, _DIMER_ES, spin=0, delta=0.005,

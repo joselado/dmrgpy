@@ -13,28 +13,32 @@ guide sections of S7 are implemented.** The code is `src/dmrgpy/ysr.py`
 continuum above the gap), `src/dmrgpy/ysrtk/surrogate.py` (several spins),
 `src/dmrgpy/ysrtk/bcsperturbative.py` (S0) and
 `src/dmrgpy/ysrtk/ysrcurrent.py` (the YSR width of S6),
+`src/dmrgpy/nrgthermo.py` (Wilson's T_K by a thermodynamic NRG),
 `src/dmrgpy/ysrtk/paritystate.py` (a ground state of definite parity for
 the STM spectrum), `src/dmrgpy/ysrtk/subgapscan.py` (warm-started scans)
 and the representative-energy mesh `mesh="zp"` of `wilsonchain.py`, with
-`tests/test_ysr*.py`, ten examples under `examples/kondo/` and the guide
+`tests/test_ysr*.py`, twelve examples under `examples/kondo/` and the guide
 sections from "Spin excitations on a superconductor" on. The details and the measurements
 are in `docs/development.md` 4.8f and 4.8g. In short:
 
 - One spin 1/2: the pairing Wilson chain is exact against the BCS star,
   the classical YSR energy agrees to 5e-4 of Delta with a field v on the
   chain read as v/A_Lambda, the STM spectrum agrees with ED to 1e-11
-  (TASK). Averaged over four twists z, Delta_c/T_K = 4.41 at rho J = 0.1
-  against the NRG value 3.7, and 4.33 to 5.02 at rho J = 0.08 to 0.2. At
-  rho J = 0.1 the absolute scales depend on the mesh: Delta_c and T_K are
-  29% and 8% above the paper on the mean-energy mesh, 0.7% and 16.5% below
-  it on the Zitko-Pruschke mesh, while the ratio is 4.40 on both. So the
-  offset of the ratio is not the mesh; the first suspect is T_K from the
-  local susceptibility instead of Wilson's chi_imp. The rho J -> 0 limit
-  is 3.8 to 4.1 depending on the fit, so these data do not fix it.
+  (TASK). Averaged over four twists z, Delta_c/T_K = 3.94 with Wilson's
+  T_K (`nrgthermo.py`, a thermodynamic NRG on the same chain) at every
+  rho J from 0.09 to 0.2, on both meshes, and 3.83 with T_K read from the
+  crossing T chi_imp = 0.07 at Lambda=2, the convention of the NRG value
+  3.7. With T_K from the local susceptibility the same data give 4.41 at
+  rho J = 0.1 and 4.33 to 5.02 at rho J = 0.08 to 0.2. So the old offset
+  was the definition of T_K, and about 3% remains. The absolute Delta_c
+  depends on the mesh (29% above the paper on the mean-energy mesh, 0.7%
+  below it on the Zitko-Pruschke mesh), while the ratio does not.
 - Parity: near the singlet-doublet transition a plain solve can stop at a
   mixture of the two parities. `parity=True` solves inside the parity
   sector, and the spectrum is then exact against ED (8 sites: one pole at
-  0.0190312 Delta, elastic weight 0).
+  0.0190312 Delta, elastic weight 0). On a short chain `pad_bonds="full"`
+  pads the bonds of the state before TASK, so that the sector state of a
+  degenerate pair and the J = 0 product state give the ED spectrum too.
 - Scans: a scan over Delta or Dz, or a bisection of Delta_c, starts each
   point from the states of the one before, about 2x faster per point on
   26 sites at the same energies to 1e-12.
@@ -67,12 +71,12 @@ because only the native class has Sz quantum numbers; the parity sectors
 are then values of 2Sz, with no parity operator. And Lambda=4 replaces
 Lambda=2, since at Lambda=2 the energy differences of order Delta were not
 converged at maxm=128. Open: the Wilson-ladder half of S5 (two channels
-for a dimer), a long-chain high-spin dI/dV, the rho J -> 0 limit of
-Delta_c/T_K (needs Wilson's chi_imp and more twists), a Lambda=2 run on
-the zp mesh, current-driven spin occupations in S0, the degeneracy of a
-spin-1/2 doublet in the rate model of S6, the slower "python" sector solve
-of coupled surrogate spins, `parity=None` (a sector solve only when the
-elastic weight trips), and an adaptive stop of the warm sweeps.
+for a dimer), a long-chain high-spin dI/dV, Delta_c at Lambda=2 on the zp
+mesh (the remaining 3% against 3.7), current-driven spin occupations in
+S0, the degeneracy of a spin-1/2 doublet in the rate model of S6,
+`parity=None` (a sector solve only when the elastic weight trips), an
+adaptive stop of the warm sweeps, and a controlled tangent-space expansion
+for TASK on long chains (an int `pad_bonds` is not one).
 
 ## 1. The question
 

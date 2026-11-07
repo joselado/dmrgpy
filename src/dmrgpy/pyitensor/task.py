@@ -34,6 +34,69 @@ H|alpha> that falls into the two-site discarded space.
 The elastic term n = GS is not in the tangent space (which is orthogonal
 to |GS>) and is returned separately as <GS|A|GS><GS|B|GS> at w = 0.
 
+Padded bonds
+------------
+The size of the tangent space, sum_l (a_l d_l - b_l) b_l, is set by the
+bond dimensions of the ground-state MPS, so a state of small Schmidt rank
+has a small one, whatever its accuracy. Two cases where this is the whole
+error: a product state (bond dimension 1, the J = 0 Kondo chain), where
+the composite STM vertex, which flips the impurity spin and adds an
+electron to the bath at once, is not a one-site change of |GS> and TASK
+keeps a third of the weight; and a state solved in one quantum-number
+sector and promoted to dense indices, whose bonds are those of one member
+of a degenerate pair, smaller than those of the mixture a plain solve
+returns. The paper notes the same limit for a state with an exact finite
+bond dimension (AKLT) and leaves a tangent-space expansion as future work.
+
+pad_bonds is the simplest such expansion. Every interior bond is padded
+with zero slices on both neighbouring tensors, from chi_l to
+max(chi_l, min(D, b_l)), b_l = min(d_1...d_l, d_{l+1}...d_L) being its
+structural bound, or to b_l itself for pad_bonds="full". The state is
+unchanged; the QR and LQ sweeps of mixed_gauge complete the rank-deficient
+bonds with orthonormal directions, so A_l and B_l stay isometries, both
+gauge relations hold, and every kept space still contains the support of
+the state on its side of the bond (it contains the unpadded kept space
+whenever that bond had full rank). The tangent space then contains
+the unpadded one and the Lanczos is variational in a larger space. The
+two-site variance is another matter: with "full" it is zero, since the
+two-site discarded space is empty, but with an int below the bound the
+Ritz vectors mix in the arbitrary padded directions and the variance is
+inflated by them, so it is no longer a sharp error bar of the poles (on
+d22, the S = 1 pair below at pad_bonds=16: a correlator exact to 1e-15
+before and after padding goes from a largest pole variance of 2.6e-7 to
+6.6e-4, and the one whose error falls from 8.7e-4 to 2.5e-10 keeps a
+weight-averaged variance of 4.1e-6). With "full" every kept space is the
+whole space of its side of the bond, the tangent space is the whole
+Hilbert space orthogonal to |GS> (4^6 - 1 = 4095 on a six-site chain of
+d = 4) and TASK is the Lanczos of exact diagonalization, which only fits
+on short chains. With an int D below the bound the added directions are
+the arbitrary completion of the QR (deterministic, but not chosen from
+H|GS> or B|GS>), so their value on a long chain is not controlled; a
+controlled expansion in the spirit of CBE would pick them from the
+two-site discarded space.
+
+Checked on d22 against ED CVM (tests/test_task_bond_padding.py): the
+sector state of the degenerate pair S = 1, Dz = -0.05 on 4 bath sites
+goes from a tangent space of 562 and an error of 8.7e-4 to 4095 and
+4.9e-8 ("python"), 2.6e-8 (v3), and S = 3/2, Dz = -0.04 on 3 sites from
+205 and 4.8e-2 to 4095 and 1.6e-9, 8.9e-12; padding to 16 already gives
+4.9e-8 and 1.6e-9 there at a tangent space of 1791. At J = 0 TASK goes
+from 1/3 of the weight (U = 0) and 0.405 (U = 0.3) to ED within 1.4e-14
+("python") and 3.2e-12 (v3). A chain whose spectrum is already converged
+moves by at most 4e-12, and one whose bonds are at their bound does not
+move at all.
+
+On a 21-site Wilson chain of a BCS band (v3, maxm 128, Delta = 1e-3,
+Lambda = 4) padding to 128 and 256 does not help: at nkry = 100 the
+subgap pole is 1.1e-5 above the sector energy difference unpadded and
+4.2e-5 and 4.3e-5 above it padded, the four spin and particle-hole
+copies of it split by 1e-6, at 2.4 and 15.6 times the cost; at nkry =
+300 unpadded and 128 both agree with it to the rounding of the
+reference (5e-9), padded at 2.6 times the cost, with the lowest
+continuum pole at 1.154 Delta against 1.055 Delta unpadded. The
+arbitrary directions slow the Krylov convergence and break the spin
+symmetry of the tangent space, so an int pad_bonds is for short chains.
+
 Off-diagonal pairs
 ------------------
 The paper treats A = B^dagger. For a general pair the weight of a pole is
@@ -101,7 +164,91 @@ def real_if_exact(arrays):
     return [xp.asarray(np.asarray(a, dtype=complex)) for a in arrays]
 
 
-def mixed_gauge(Ms):
+# The largest tangent space pad_bonds may ask for. Measured on d22 (v3,
+# 21-site BCS Wilson chain, nkry = 100): pad_bonds=256 gives 2621439 and a
+# peak of about 1.9 GB in 2114 s; "full" there would be 4^21.
+MAX_PADDED_DIMENSION = 4_000_000
+
+
+def check_pad_bonds(pad_bonds):
+    """pad_bonds as given if it is None, "full" or a positive int; a
+    ValueError otherwise."""
+    if pad_bonds is None or (isinstance(pad_bonds, str) and pad_bonds == "full"):
+        return pad_bonds
+    if (isinstance(pad_bonds, bool) or not isinstance(pad_bonds, (int, np.integer))
+            or pad_bonds < 1):
+        raise ValueError("pad_bonds must be None, \"full\" or a positive "
+                         "integer, got %r" % (pad_bonds,))
+    return int(pad_bonds)
+
+
+def structural_bounds(dims):
+    """The largest useful dimension of every interior bond of an MPS with
+    the physical dimensions `dims`: bond l (between sites l and l+1,
+    counted from 0) has min(d_0...d_l, d_{l+1}...d_{L-1}). Python ints, so
+    a long chain does not overflow."""
+    out = []
+    for l in range(len(dims) - 1):
+        left, right = 1, 1
+        for d in dims[:l + 1]:
+            left *= int(d)
+        for d in dims[l + 1:]:
+            right *= int(d)
+        out.append(min(left, right))
+    return out
+
+
+def pad_mps_bonds(Ms, pad_bonds):
+    """The site arrays `Ms` (chi_left, d, chi_right) with every interior
+    bond padded by zero slices on both of its tensors to
+    max(chi_l, min(pad_bonds, b_l)), b_l the structural bound of the bond,
+    or to max(chi_l, b_l) for pad_bonds="full". The state is unchanged. A
+    bond already above b_l is left as it is (mixed_gauge's first two
+    sweeps bring it down to b_l), and no bond is ever shrunk. pad_bonds
+    None returns Ms itself.
+
+    The padded tangent dimension, sum_l (chi'_{l-1} d_l - chi'_l) chi'_l
+    with every bond clipped to its bound, is computed from the shapes
+    first, and a ValueError is raised above MAX_PADDED_DIMENSION, since the
+    Krylov basis holds nkry vectors of that length ("full" on a 21-site
+    chain of d = 4 asks for 4^21).
+
+    The padding is xp.pad on the arrays of the active backend, a new array
+    per site and no in-place write; only the shapes are read on the host.
+    This is unrelated to backend.set_pad_bonds, which freezes the bond
+    shapes of a whole DMRG run for JAX."""
+    pad_bonds = check_pad_bonds(pad_bonds)
+    if pad_bonds is None:
+        return Ms
+    xp = backend.xp()
+    L = len(Ms)
+    dims = [int(M.shape[1]) for M in Ms]
+    bounds = structural_bounds(dims)
+    new = [1] + [max(int(Ms[l].shape[2]), b if pad_bonds == "full"
+                     else min(pad_bonds, b))
+                 for l, b in enumerate(bounds)] + [1]
+    eff = [1] + [min(c, b) for c, b in zip(new[1:-1], bounds)] + [1]
+    dim = sum((eff[l] * dims[l] - eff[l + 1]) * eff[l + 1] for l in range(L))
+    if dim > MAX_PADDED_DIMENSION:
+        raise ValueError(
+            "pad_bonds=%r gives a tangent space of dimension %d, above the "
+            "cap of %d (the Krylov basis holds nkry vectors of that length). "
+            "Use a smaller integer pad_bonds, or a shorter chain."
+            % (pad_bonds, dim, MAX_PADDED_DIMENSION))
+    out = []
+    for l, M in enumerate(Ms):
+        pl, pr = new[l] - M.shape[0], new[l + 1] - M.shape[2]
+        if l == 0:
+            pl = 0
+        if l == L - 1:
+            pr = 0
+        if pl > 0 or pr > 0:
+            M = xp.pad(M, ((0, max(pl, 0)), (0, 0), (0, max(pr, 0))))
+        out.append(M)
+    return out
+
+
+def mixed_gauge(Ms, pad_bonds=None):
     """Left isometries A_l, right isometries B_l and site-centre tensors
     C_l of the normalized MPS given by the arrays `Ms`, with A_l and B_l of
     the same shape, so that
@@ -112,9 +259,15 @@ def mixed_gauge(Ms):
     times its neighbours, after which a second left QR sweep from the
     right-canonical form gives A_l of exactly the B_l bond dimensions (a
     rank-deficient bond keeps its dimension; the A_l there is completed
-    arbitrarily by the QR, which leaves both gauge relations intact)."""
+    arbitrarily by the QR, which leaves both gauge relations intact).
+
+    pad_bonds (None, an int or "full", see pad_mps_bonds and the module
+    docstring) pads the bonds with zero slices first; the completion above
+    then fills them, and the tangent space grows without |GS> changing."""
     xp = backend.xp()
     Ms = list(real_if_exact(Ms))
+    if pad_bonds is not None:
+        Ms = pad_mps_bonds(Ms, pad_bonds)
     L = len(Ms)
     # left QR sweep (only to shrink structurally oversized bonds)
     for l in range(L - 1):
@@ -233,10 +386,11 @@ def _right_envs(Bs, Ws):
 
 class TangentSpace:
     """The one-site tangent space of a ground-state MPS, orthogonal to it,
-    with the Hamiltonian H projected onto it."""
+    with the Hamiltonian H projected onto it. pad_bonds enlarges it by
+    padding the bonds of the MPS first (mixed_gauge, pad_mps_bonds)."""
 
-    def __init__(self, Ms, Ws):
-        self.As, self.Bs, self.Cs = mixed_gauge(Ms)
+    def __init__(self, Ms, Ws, pad_bonds=None):
+        self.As, self.Bs, self.Cs = mixed_gauge(Ms, pad_bonds=pad_bonds)
         self.Ws = Ws = real_if_exact(Ws)
         self.L = len(Ms)
         self.LH = _left_envs(self.As, Ws)
@@ -554,13 +708,16 @@ def ritz_vector(basis, u):
     return ts.unflat(xp.asarray(c) @ store)
 
 
-def correlator_poles(Ms, Ws, Wb, Wadag=None, nkry=100, variance=False):
+def correlator_poles(Ms, Ws, Wb, Wadag=None, nkry=100, variance=False,
+                     pad_bonds=None):
     """The poles of <GS|A delta(w-H+E0) B|GS> from site arrays alone: Ms
     the ground-state MPS, Ws the Hamiltonian MPO, Wb the MPO of B and Wadag
     that of A^dagger (None when A = B^dagger). Shared by every backend that
     can export its site tensors. Returns (w, weights, variances, dim), the
-    variances None unless variance=True."""
-    ts = TangentSpace(Ms, Ws)
+    variances None unless variance=True. pad_bonds (None, an int or "full")
+    pads the bonds of the MPS first, see the module docstring; dim is then
+    the dimension of the padded tangent space."""
+    ts = TangentSpace(Ms, Ws, pad_bonds=pad_bonds)
     b = ts.project_operator(Wb)
     a = None if Wadag is None else ts.project_operator(Wadag)
     ws, weights, U, (store, m) = poles(ts, b, nkry, a=a)
@@ -571,9 +728,10 @@ def correlator_poles(Ms, Ws, Wb, Wadag=None, nkry=100, variance=False):
     return ws, weights, var, ts.dimension()
 
 
-def spectrum_from_arrays(Ms, Ws, ops, nkry):
+def spectrum_from_arrays(Ms, Ws, ops, nkry, pad_bonds=None):
     """projected_spectrum from site arrays: ops is a list of (MPO of O,
-    MPO of O^dagger). Returns (e, mats, dim)."""
-    ts = TangentSpace(Ms, Ws)
+    MPO of O^dagger). Returns (e, mats, dim). pad_bonds as in
+    correlator_poles."""
+    ts = TangentSpace(Ms, Ws, pad_bonds=pad_bonds)
     e, mats = projected_spectrum(ts, ops, nkry)
     return e, mats, ts.dimension()

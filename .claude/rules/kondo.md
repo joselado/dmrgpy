@@ -189,13 +189,20 @@ the classical YSR energy to 5e-4 of Delta, and on the two-loop slope of
 the measured T_K); the first version divided, and was 25 times off.
 And use Lambda=4: at Lambda=2 on 38 sites maxm=128 was not converged at the
 scale of Delta. Averaged over four twists z, Delta_c/T_K = 4.41 at the
-paper's J=0.2 (rho J=0.1, NRG 3.7), and 4.40 on the zp mesh; the rho J -> 0
-limit is not fixed by the data (3.8 to 4.1). The absolute scales at
-Lambda=4 depend on the mesh (Delta_c and T_K 29% and 8% above the paper on
-mean, 0.7% and 16.5% below on zp) while the ratio does not, so the 4.4
-against 3.7 is not the mesh; the first suspect is the local susceptibility
-used for T_K, which is not Wilson's chi_imp. Compare ratios at Lambda=4,
-not absolute values.
+paper's J=0.2 (rho J=0.1, NRG 3.7) with T_K from the local susceptibility,
+and 3.94 at every rho J from 0.09 to 0.2 with Wilson's T_K
+(`nrgthermo.kondo_temperature`, the slope of T chi_imp, which DMRG at T=0
+cannot give since S^z_tot commutes with H). The paper reads T_K from the
+crossing T chi_imp = 0.07 at Lambda=2 (that crossing is 1.03 T_K(W) at
+Lambda=2 and 1.11 T_K(W) at Lambda=4), and read that way we find 3.83. So
+the 4.4 against 3.7 is the definition of T_K, not the mesh. Always say which
+T_K a ratio uses. The absolute Delta_c at Lambda=4 depends on the mesh (29%
+above the paper on mean, 0.7% below on zp) while the ratio does not, so
+compare ratios at Lambda=4, not absolute values. In `nrgthermo.py` the free
+chain is grown site by site with relative precision and the (Q, 2Sz) and
+(Q, -2Sz) spectra are symmetrized at B=0; without either, chains past about
+n=46 at Lambda=4 gave a wrong, even negative, T_K. At Lambda=2 use
+beta_bar=1.5 and keep >= 800.
 
 On v3 a sector solve keeps the impurity charges of its start, since no term
 of H moves charge on or off an impurity site: S > 1/2 (`ysr.py`,
@@ -225,11 +232,17 @@ sites, poles split and moved, u2 halved); `parity=True` in
 solves inside the parity sector and promotes the state to dense indices on
 its own clone (Index identity is per session, so never move it to another
 chain). The default stays False, so no pinned number moves. On "python" a
-sector solve of coupled surrogate spins needs about twice the sweeps (a
-strict xfail pins it). A promoted sector state of a degenerate pair has a
-smaller one-site tangent space than a plain mixture, so short chains need
-`fc.cutoff = 0`. TASK at J=0 keeps 1/3 of the ED weight at U=0 and 0.405 at
-U=0.3, not zero, and `ysr.get_stm_spectrum` warns there.
+sector solve stops its local Davidson solves on the scale of H without the
+charge penalty (`dmrg(penalty=)`, passed by `Chain.gs_energy` in sector
+mode only); with the penalty in the scale it stalled at 2 matvecs per bond
+and needed twice the sweeps. A promoted sector state of a degenerate pair
+has a smaller one-site tangent space than a plain mixture, and TASK at J=0
+keeps 1/3 of the ED weight at U=0 and 0.405 at U=0.3; on short chains
+`pad_bonds="full"` (TASK, `pyitensor/task.py`) makes both exact. Padding is
+opt-in (None default). An int pad is not a long-chain cure (it slowed the
+Krylov and moved poles on 21 sites) and it inflates the pole variances, so
+they stop being an error bar; `task.MAX_PADDED_DIMENSION` = 4e6 caps the
+padded space.
 
 `ysrtk/subgapscan.py` (warm-started scans over Delta, Dz and the Delta_c
 bisection) needs `set_initial_wf_guess` on every backend, since "python"

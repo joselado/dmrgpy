@@ -673,8 +673,12 @@ class Chain:
                                    delta=self.cbe_delta,
                                    quiet=not self.verbose, noisy_start=fresh)
         else:
+            # in a sector the penalty goes along, so that the local solves
+            # stop relative to the scale of H and not of the penalty (see
+            # dmrg.dmrg); outside a sector nothing changes
             energy = dmrg(self.wf0, self._solve_H(), sweeps,
-                          quiet=not self.verbose, noisy_start=fresh)
+                          quiet=not self.verbose, noisy_start=fresh,
+                          penalty=self._penalty_mpo() if self.sector else None)
         if self.sector:
             # The solve minimized H + the charge penalty; report <H>, which
             # is the sector's own energy (the penalty is identically zero

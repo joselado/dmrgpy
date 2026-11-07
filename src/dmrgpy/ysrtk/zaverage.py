@@ -253,7 +253,7 @@ def bdg_chain_dos(es, n, Delta, Lambda=4.0, D=1.0, nz=4, b=0.4, omega0=None,
 
 
 def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
-              parity=False):
+              parity=False, pad_bonds=None):
     """Discrete poles of dI/dV, A(w) of ysr.py's module docstring, from
     taskdmrg.get_poles: the electron part (X, X^dag) at +omega and the
     hole part (X^dag, X) at -omega, summed over the tip spin. imp and
@@ -281,7 +281,14 @@ def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
     one-site tangent space misses X|GS> of the composite vertex, and TASK
     returns an empty spectrum with all of the weight missing; a
     RuntimeWarning says so when the missing weight is more than half of
-    the total."""
+    the total. pad_bonds (None, an int or "full") pads the bonds of the
+    state before the TASK recursion, which enlarges the tangent space
+    (taskdmrg.get_poles): "full" recovers the whole weight on a short
+    chain at J = 0, and the spectrum of exact diagonalization on a
+    promoted sector state of a degenerate pair, whose bonds are too small
+    at the cutoff of the chain. On a long chain an int below the
+    structural bound slowed the Krylov convergence of the subgap pole
+    (pyitensor/task.py), so leave it None there."""
     import warnings
     from .. import taskdmrg
     from ..ysr import tunneling_operators
@@ -299,7 +306,8 @@ def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
     for X in operators:
         Xd = X.get_dagger()
         for pair, sign in (((Xd, X), 1.0), ((X, Xd), -1.0)):
-            p = taskdmrg.get_poles(fc, name=pair, nkry=nkry)
+            p = taskdmrg.get_poles(fc, name=pair, nkry=nkry,
+                                   pad_bonds=pad_bonds)
             om.append(sign*np.asarray(p["omega"], float))
             wt.append(np.real(p["weight"]))
             missing += abs(p["missing_weight"])
@@ -317,8 +325,9 @@ def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
         warnings.warn("stm_poles: the TASK poles miss %.3g of the weight "
             "(%.3g found). The part of X|GS> outside the one-site tangent "
             "space is dropped, which is all of it for the composite vertex "
-            "on a product ground state (J = 0). Use mode=\"ED\", or "
-            "zaverage.bdg_chain_dos for the local density of states"
+            "on a product ground state (J = 0). Use pad_bonds=\"full\" or "
+            "mode=\"ED\" on a short chain, or zaverage.bdg_chain_dos for "
+            "the local density of states"
             % (missing, np.sum(np.abs(wt))), RuntimeWarning, stacklevel=2)
     out = dict(omega=om, weight=wt, missing_weight=missing, elastic=elastic)
     if pinfo is not None:
@@ -330,7 +339,7 @@ def zaverage_stm_spectrum(n, es, J=0.2, Delta=0.0, Lambda=4.0, D=1.0, nz=4,
                           b=0.4, omega0=None, U=0.0, delta_sub=None,
                           maxm=64, nsweeps=20, nkry=300, continuum_norm=True,
                           operators=None, parity_gap=False, parity=False,
-                          **kwargs):
+                          pad_bonds=None, **kwargs):
     """dI/dV(eV) at the energies es, z-averaged over nz meshes
     (z = k/nz), each a ysr.kondo_chain(n, J=J, Delta=Delta, Lambda=Lambda,
     z=z) solved by DMRG with maxm and nsweeps, its poles from TASK
@@ -358,8 +367,8 @@ def zaverage_stm_spectrum(n, es, J=0.2, Delta=0.0, Lambda=4.0, D=1.0, nz=4,
     ground state solved inside its parity sector
     (paritystate.parity_ground_state), so a parity mixture cannot appear;
     the plain solve is skipped, info["E0"] is the energy of that state,
-    and E_ysr for parity_gap comes from the same sector solves. Extra
-    keywords go to kondo_chain.
+    and E_ysr for parity_gap comes from the same sector solves. pad_bonds
+    goes to stm_poles. Extra keywords go to kondo_chain.
 
     Returns (es, A, info): info["z"] the twists, and per z
     info["subgap"] (dict omega, weight of the subgap poles),
@@ -391,7 +400,8 @@ def zaverage_stm_spectrum(n, es, J=0.2, Delta=0.0, Lambda=4.0, D=1.0, nz=4,
             fc_gs = fc
             info["E0"].append(fc.gs_energy())
         ops = None if operators is None else operators(fc_gs)
-        p = stm_poles(fc_gs, U=U, nkry=nkry, operators=ops)
+        p = stm_poles(fc_gs, U=U, nkry=nkry, operators=ops,
+                      pad_bonds=pad_bonds)
         t_last = fc.t_last # the last hopping, on the mesh of the chain
         norm = fc.dos_factor if continuum_norm else 1.0
         w0 = omega0

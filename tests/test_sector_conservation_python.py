@@ -377,3 +377,36 @@ def test_metts_refuses_instead_of_averaging_over_every_sector():
     sc.set_conserved_sector(Sz=0)
     with pytest.raises(ValueError, match="conserved-sector mode"):
         sc.metts_vev(sc.Sz[0], T=1.0, nsamples=1, nwarmup=1)
+
+
+def test_the_local_solves_stop_on_the_scale_of_h_not_of_the_penalty(monkeypatch):
+    """The Davidson solve of each bond stops at a residual relative to the
+    scale of the operator, max|diag(H_eff)|. In a sector H_eff holds the
+    charge penalty lambda (Q-q)^2, whose diagonal is large on every
+    configuration of the bond that is off the sector, so the scale has to
+    be taken without it (dmrg.dmrg's penalty=). With the penalty in it the
+    median scale was 2.2e3 against 1.1 on a coupled surrogate dimer, the
+    solves stopped after 2 matvecs, and the state kept an admixture of
+    weight 1.4e-8 (amplitude 1.2e-4) of the first excited state of the
+    sector that 20 sweeps did not remove (tests/test_ysr_parity.py). Here a
+    Heisenberg chain at Sz=0, whose sector holds the global ground state,
+    so the sector and the plain solve see the same H."""
+    from dmrgpy.pyitensor import dmrg as dm
+    scales = []
+    davidson = dm._davidson_ground_state
+    def spy(matvec, x0, diag, niter, rtol, hdiag=None, vtol=None):
+        d = diag if hdiag is None else hdiag
+        scales.append(float(np.max(np.abs(np.asarray(d)))))
+        return davidson(matvec, x0, diag, niter, rtol, hdiag=hdiag, vtol=vtol)
+    monkeypatch.setattr(dm, "_davidson_ground_state", spy)
+    out = {}
+    for sector in (False, True):
+        sc, h, sz = heisenberg_chain(10)
+        sc.set_hamiltonian(h)
+        if sector:
+            sc.set_conserved_sector(Sz=0)
+        scales.clear()
+        e = sc.gs_energy()
+        out[sector] = (e, np.median(scales))
+    assert out[True][0] == pytest.approx(out[False][0], abs=DMRG_TOL)
+    assert out[True][1] == pytest.approx(out[False][1], rel=0.5)
