@@ -56,6 +56,17 @@ starts from a short solve with a weak impurity-bath hopping
 (_seed_impurity_charge); every solved state is checked to hold one
 electron per impurity site.
 
+A spin chain on a superconducting island (island_chain) is the same
+encoding with a different bath: ns spins 1/2 on singly occupied native
+sites, coupled by Js S_i.S_{i+1}, the last one Kondo coupled by JK to the
+first of ni island sites with the pairing Delta put by hand, and the last
+island site hopping by t_c onto a normal Wilson chain. The metal is
+gapless, so the two parities are split by a finite-size level of the
+Wilson chain, not by a subgap state, and island_energies reports that
+splitting, E_parity = E_odd - E_even, against its value at JK=0; the
+sector solves, the charge seeding and the parity state are the ones
+above, with ns penalized sites.
+
 The STM spectrum is the composite-operator form of
 docs/kondo_higher_order_plan.md: at lowest order in the tip coupling the
 tip electron enters through
@@ -108,7 +119,11 @@ def two_spin(S):
 
 def impurity_spin(fc, imp=None):
     """(S^x, S^y, S^z) of the impurity, the sum of the spins of the sites
-    imp (an int or a list, default fc.impurity, else site 0)."""
+    imp (an int or a list). The default is fc.tip_spin when the chain has
+    one (island_chain: the end spin, the one in contact with the island),
+    else fc.impurity, else site 0."""
+    if imp is None:
+        imp = getattr(fc, "tip_spin", None)
     if imp is None:
         imp = getattr(fc, "impurity", 0)
     imps = list(np.atleast_1d(imp))
@@ -204,10 +219,13 @@ def bath_quasiparticle_gap(eps, t, Delta):
     """Lowest Bogoliubov energy of the Wilson chain alone. It is Delta
     once the chain reaches below Delta, and larger on a short chain, whose
     lowest level sits at about D Lambda^-n/2: then the continuum of dI/dV
-    starts above Delta and the chain is too short for the gap."""
+    starts above Delta and the chain is too short for the gap. Delta is a
+    number (uniform pairing) or one value per site (island_chain, whose
+    pairing sits on the island only)."""
     n = len(eps)
     h = np.diag(eps) + np.diag(t, 1) + np.diag(t, -1)
-    H = np.block([[h, Delta*np.eye(n)], [Delta*np.eye(n), -h]])
+    P = np.diag(np.broadcast_to(np.asarray(Delta, dtype=float), (n,)))
+    H = np.block([[h, P], [P, -h]])
     return float(np.min(np.abs(np.linalg.eigvalsh(H))))
 
 
@@ -253,6 +271,12 @@ def subgap_energies(fc, mode="DMRG", nrestart=1, sectors=None,
     |E_ysr| can exceed Delta in the exact answer. Sectors of one parity are
     split by Dz and B, so their differences are not bounded by Delta."""
     import warnings
+    if hasattr(fc, "island"):
+        raise ValueError("subgap_energies is for a gapped bath "
+            "(kondo_chain): on an island_chain the bath is a metal, the two "
+            "parities are split by a finite-size level of the Wilson chain "
+            "and E_free - E_screened is not a subgap energy; use "
+            "island_energies")
     if getattr(fc, "Delta_sc", 0.0) == 0.0:
         raise ValueError("subgap_energies needs a gap, Delta > 0: at "
             "Delta = 0 the particle number is conserved too, so an Sz "
@@ -270,24 +294,9 @@ def subgap_energies(fc, mode="DMRG", nrestart=1, sectors=None,
     if not any((s - ni) % 2 == 0 for s in sectors) or \
        not any((s - ni) % 2 == 1 for s in sectors):
         raise ValueError("sectors must contain both parities of 2Sz")
-    out, spread, ens, vevs = {}, 0.0, {}, {}
-    for sz in sectors:
-        es, cs = [], []
-        for _ in range(nrestart if mode == "DMRG" else 1):
-            c = copy.deepcopy(fc)
-            c.set_conserved_sector(Sz=sz)
-            if ni > 1 and mode == "DMRG" and c.itensor_version == 3:
-                _seed_impurity_charge(c, ni)
-            es.append(c.gs_energy(mode=mode))
-            if ni > 1:
-                _check_impurity_charge(c, ni, mode)
-            cs.append(c)
-        ens[sz] = min(es)
-        spread = max(spread, max(es) - min(es))
-        if observables:
-            c = cs[int(np.argmin(es))]
-            for name, op in observables.items():
-                vevs.setdefault(name, {})[sz] = c.vev(op, mode=mode)
+    out = {}
+    ens, spread, vevs = _sector_ground_energies(fc, sectors, mode, nrestart,
+                                                observables, ni, ni > 1)
     def lowest(par):
         return min(e for s, e in ens.items() if s % 2 == par)
     out["E_even"], out["E_odd"] = lowest(0), lowest(1)
@@ -314,6 +323,290 @@ def subgap_energies(fc, mode="DMRG", nrestart=1, sectors=None,
     return out
 
 
+def _sector_ground_energies(fc, sectors, mode, nrestart, observables, ni,
+                            check_charge, seed_always=False):
+    """Lowest energy of every 2Sz sector in sectors, each from nrestart
+    solves (one on ED) on copies of fc, the loop of subgap_energies and
+    island_energies. ni is the number of singly occupied penalized sites
+    (sites 0..ni-1): on itensor_version=3 a DMRG sector solve with ni > 1
+    first takes the warm start of _seed_impurity_charge, and with
+    check_charge every solved state is checked to hold one electron per
+    penalized site. With seed_always (island_chain) every DMRG sector
+    solve, on every backend and for any ni, takes the warm start: on
+    "python" a 16-site island chain (ns=4) stopped with a spin site empty or
+    doubly occupied without it. Returns (energies, spread, vevs)."""
+    spread, ens, vevs = 0.0, {}, {}
+    for sz in sectors:
+        es, cs = [], []
+        for _ in range(nrestart if mode == "DMRG" else 1):
+            c = copy.deepcopy(fc)
+            c.set_conserved_sector(Sz=sz)
+            if mode == "DMRG" and (seed_always or
+                    (ni > 1 and c.itensor_version == 3)):
+                _seed_impurity_charge(c, ni)
+            es.append(c.gs_energy(mode=mode))
+            if check_charge:
+                _check_impurity_charge(c, ni, mode)
+            cs.append(c)
+        ens[sz] = min(es)
+        spread = max(spread, max(es) - min(es))
+        if observables:
+            c = cs[int(np.argmin(es))]
+            for name, op in observables.items():
+                vevs.setdefault(name, {})[sz] = c.vev(op, mode=mode)
+    return ens, spread, vevs
+
+
+def _hop(fc, a, b):
+    """The four-term spinful hopping between sites a and b."""
+    return (fc.Cdagup[a]*fc.Cup[b] + fc.Cdagdn[a]*fc.Cdn[b]
+            + fc.Cdagup[b]*fc.Cup[a] + fc.Cdagdn[b]*fc.Cdn[a])
+
+
+def island_chain(ns, ni, n, Js=0.5, JK=0.5, Delta=0.1, t_island=0.5,
+                 eps_island=0.0, t_c=0.5, Lambda=2.0, D=1.0, B=0.0, z=0.0,
+                 Upen=None, mesh="mean", wilson=None, **kwargs):
+    """A Heisenberg chain of ns spins 1/2 whose last spin is Kondo coupled
+    to a superconducting island of ni sites, which leaks into a normal
+    metal, the Wilson chain of n sites. One linear chain of ns+ni+n native
+    spinful sites (Spinful_Fermionic_Chain_Native): spins 0..ns-1, island
+    ns..ns+ni-1, Wilson chain ns+ni..ns+ni+n-1. With a0 = ns, a1 = ns+ni-1
+    and w0 = ns+ni,
+
+        H = Js sum_i S_i.S_{i+1} + JK S_{ns-1}.s_{a0} + B sum_i S^z_i
+            + Upen sum_i (N_i - 1)^2                      (spin sites)
+            + eps_island sum_k N_k + t_island sum_k (f^dag_k f_{k+1} + h.c.)
+            + Delta sum_k (f^dag_{k up} f^dag_{k dn} + h.c.)   (island)
+            + t_c (f^dag_{a1} f_{w0} + h.c.)
+            + sum_m eps_m N_m + sum_m t_m (f^dag_m f_{m+1} + h.c.)  (metal)
+
+    with s_a0 = f^dag_a0 (sigma/2) f_a0 and every spin a native site with
+    one electron, as in kondo_chain. The pairing is put by hand on the
+    island only, so the island gap is imposed, not self-consistent, and
+    the metal softens it: there is no true subgap state on this chain,
+    every "subgap" feature is a resonance whose width is the leak into the
+    metal, and on a finite Wilson chain it is a few discrete poles.
+
+    Js > 0 and JK > 0 are antiferromagnetic. B is a field on the spins
+    only. The Wilson chain is wilsonchain.wilson_chain(n, Lambda, (-D, D),
+    z, mesh), or wilson=(eps, t) by hand (n values and n-1). Couplings are
+    taken as given. JK couples to the island, not to the Wilson chain, so
+    no lambda_factor applies to it. t_c is a hopping into the metal, with
+    hybridization Gamma = pi rho t_c^2 (rho = 1/(2D) on the flat band):
+    on mesh="mean" the chain has the low-energy density of states
+    rho/A_Lambda, so t_c*sqrt(lambda_factor(Lambda)) on the chain stands
+    for t_c in the continuum (one square root); on mesh="zp" t_c goes bare.
+    Checked on the occupation of a level at e_d << Gamma hopping onto a
+    60-site chain, averaged over 8 twists: t_c sqrt(A_Lambda) gives 0.99
+    of the continuum Gamma at Lambda = 2 and 4, bare t_c gives 1/A_Lambda
+    of it (0.95 and 0.86).
+    Upen (default 2(max(D, |t_island|, |eps_island|, |Delta|, |t_c|) + |JK|
+    + |Js| + |B|)) only has to exceed the magnetic binding of a spin site,
+    since no term moves charge on or off it; energy differences inside the
+    one-electron block do not depend on it.
+
+    Checked (tests/test_ysr_island.py, on d22): ns=1, ni=1 with the island
+    taken as the first Wilson site gives kondo_chain at Delta=0 to
+    roundoff; at JK=0 the energy is the Heisenberg chain plus the
+    Bogoliubov-de Gennes ground state of island plus metal, and the island
+    density of states is bdg_poles(*fc.bdg_params); sector energies and
+    the STM spectrum agree between ED, "python" and 3. On 16 sites (ns=4,
+    ni=2, n=10, maxm=64) "python" and 3 agree to 2e-7 in the sector
+    energies; this is agreement between the backends, not accuracy: at
+    JK=0 both are about 2e-6 above the exact energy at maxm=64
+    (truncation). The STM spectrum at delta=0.03 to 1.5e-3 of its peak
+    at nkry=300; the default nkry=100 of TASK was 1.5e-2 of the peak away
+    from nkry=300 there, on both backends, so pass a larger nkry for
+    sharp lines on a long chain.
+
+    Stored on the chain: fc.impurity = [0..ns-1] (the penalized sites),
+    fc.spin = ns/2, which is the kondo_chain convention "2*fc.spin
+    penalized sites" read by the sector solvers, NOT the total spin of the
+    chain; fc.tip_spin = ns-1, the default spin of the tunneling vertex;
+    fc.island, fc.wilson and fc.channels = [island, wilson] (the vertex
+    takes its electron at channels[0][0] = a0); fc.Delta_sc, fc.Dz = 0,
+    fc.B_imp, fc.J_chain = JK, fc.Js, fc.t_island, fc.eps_island, fc.t_c,
+    fc.Upen, fc.mesh, fc.dos_factor, fc.t_last; fc.bdg_params = (eps,
+    t, Delta) of island plus metal, the single-particle problem at JK=0;
+    fc.qp_gap, its lowest Bogoliubov level (the cost of one quasiparticle,
+    not Delta; at eps=0 it alternates with the parity of ni+n, and is
+    much smaller when ni+n is odd, since then a zero mode is gapped only
+    by its weight on the island); fc.island_gap, the same for
+    the isolated island (at least |Delta|); fc.reaches_gap = False."""
+    ns, ni, n = int(ns), int(ni), int(n)
+    if ns < 1 or ni < 1 or n < 1:
+        raise ValueError("island_chain needs ns >= 1 spins, ni >= 1 island "
+                         "sites and n >= 1 Wilson sites")
+    if wilson is None:
+        eps, t = wilsonchain.wilson_chain(n, Lambda=Lambda, band=(-D, D),
+                                          z=z, mesh=mesh)
+    else:
+        eps, t = (np.asarray(x, dtype=float) for x in wilson)
+        if len(eps) != n or len(t) != n - 1:
+            raise ValueError("wilson=(eps, t) needs %d energies and %d "
+                             "hoppings" % (n, n - 1))
+    if Upen is None:
+        scale = max(D, abs(t_island), abs(eps_island), abs(Delta), abs(t_c))
+        Upen = 2.0*(scale + abs(JK) + abs(Js) + abs(B))
+    a0, a1, w0 = ns, ns + ni - 1, ns + ni
+    fc = fermionchain.Spinful_Fermionic_Chain_Native(ns + ni + n, **kwargs)
+    h = 0
+    for i in range(ns - 1): # Heisenberg chain
+        h = h + Js*(fc.Sx[i]*fc.Sx[i+1] + fc.Sy[i]*fc.Sy[i+1]
+                    + fc.Sz[i]*fc.Sz[i+1])
+    e = ns - 1 # the end spin, Kondo coupled to the first island site
+    h = h + JK*(fc.Sx[e]*fc.Sx[a0] + fc.Sy[e]*fc.Sy[a0] + fc.Sz[e]*fc.Sz[a0])
+    for i in range(ns):
+        if B != 0.0:
+            h = h + B*fc.Sz[i]
+        ni_ = fc.Nup[i] + fc.Ndn[i] - 1 # one electron on every spin site
+        h = h + Upen*ni_*ni_
+    for k in range(a0, a1 + 1): # the island
+        if eps_island != 0.0:
+            h = h + eps_island*(fc.Nup[k] + fc.Ndn[k])
+        if Delta != 0.0:
+            h = h + Delta*(fc.Cdagup[k]*fc.Cdagdn[k] + fc.Cdn[k]*fc.Cup[k])
+        if k < a1:
+            h = h + t_island*_hop(fc, k, k + 1)
+    h = h + t_c*_hop(fc, a1, w0) # island to metal
+    for m in range(n): # the Wilson chain, no pairing
+        h = h + eps[m]*(fc.Nup[w0+m] + fc.Ndn[w0+m])
+        if m < n - 1:
+            h = h + t[m]*_hop(fc, w0 + m, w0 + m + 1)
+    fc.set_hamiltonian(h)
+    fc.impurity = list(range(ns))
+    fc.spin = fractions.Fraction(ns, 2)
+    fc.tip_spin = ns - 1
+    fc.island = list(range(a0, a1 + 1))
+    fc.wilson = list(range(w0, w0 + n))
+    fc.channels = [fc.island, fc.wilson]
+    fc.Delta_sc = Delta
+    fc.Dz = 0.0
+    fc.B_imp = B
+    fc.J_chain = JK
+    fc.Js, fc.t_island, fc.eps_island, fc.t_c = Js, t_island, eps_island, t_c
+    fc.Upen = Upen
+    fc.mesh = mesh
+    fc.dos_factor = lambda_factor(Lambda) if mesh == "mean" else 1.0
+    fc.t_last = abs(t[-1]) if n > 1 else abs(t_c)
+    eps_f = np.concatenate([np.full(ni, float(eps_island)), eps])
+    t_f = np.concatenate([np.full(ni - 1, float(t_island)), [float(t_c)], t])
+    Delta_f = np.concatenate([np.full(ni, float(Delta)), np.zeros(n)])
+    fc.bdg_params = (eps_f, t_f, Delta_f)
+    fc.qp_gap = bath_quasiparticle_gap(eps_f, t_f, Delta_f)
+    fc.island_gap = bath_quasiparticle_gap(np.full(ni, float(eps_island)),
+                                           np.full(ni - 1, float(t_island)),
+                                           Delta)
+    fc.reaches_gap = False
+    return fc
+
+
+def island_energies(fc, mode="DMRG", nrestart=1, sectors=None,
+                    observables=None):
+    """Lowest energies of the 2Sz sectors of an island_chain, from sector
+    solves on copies of fc (the chain itself is left untouched), and the
+    parity splitting E_parity = E_odd - E_even.
+
+    Every spin site holds one electron, so 2Sz fixes the total fermion
+    parity (2Sz mod 2, "even" or "odd") and the parity of island plus
+    metal, (2Sz - ns) mod 2. The metal is gapless, so the two parities
+    differ by the cost of one quasiparticle, the lowest Bogoliubov level of
+    island plus metal, not Delta. At eps=0 it alternates with the parity
+    of ni+n, and is much smaller when ni+n is odd (for ns=4, ni=2 at
+    Lambda=2: 1.0e-1 at n=6, 7.5e-3 at n=7, 5.3e-2 at n=8). E_parity is a
+    finite-size number that goes to zero with n, and fc.qp_gap is its value
+    at JK=0 (+qp_gap for ns even, -qp_gap for ns odd). The ratio
+    E_parity/qp_gap is the finite-size spectrum where the fixed point is
+    read (end spin screened or free); "Sz_ground" and "parity_ground" are
+    the robust statements. This is not a YSR energy.
+
+    sectors (default [0, 1] at B=0, where the chain is isotropic and every
+    multiplet has a member at the lowest |2Sz| of its parity; every 2Sz
+    with |2Sz| <= ns+1, both signs, at B != 0) are the 2Sz solved. Every
+    DMRG sector solve, on "python" and on 3, starts from the warm stage of
+    _seed_impurity_charge (a weak hopping of every spin onto the first
+    island site), and every solved state is checked to hold one electron
+    per spin site. nrestart,
+    "spread" and observables ("vevs"[name][2Sz]) are those of
+    subgap_energies. Returns "sectors" (2Sz -> energy), "E_even", "E_odd",
+    "E_parity", "Sz_ground" (the smallest |2Sz| within 1e-10 of the
+    lowest), "parity_ground", "spread", "qp_gap" and "vevs". On "python"
+    the restarts are identical (a seeded start and a seeded generator), so
+    "spread" is 0 by construction there; it measures the start dependence
+    on itensor_version=3 only. A warning
+    says when the ground state is even and E_parity > 1.05 qp_gap: adding
+    the lowest quasiparticle to the even state costs about qp_gap, so a
+    larger splitting usually means the odd sector solve is not its ground
+    state. The bound is heuristic once JK > 0: it holds only up to JK
+    times the weight of that mode on a0, small for a mode at the far end
+    of the Wilson chain and not small for n <= 2. An odd ground state can
+    sit below the even one by more than qp_gap (the Kondo binding of the
+    end spin, ratio -1.06 on ED at ns=2, ni=1, n=2, JK=1), so no warning
+    is given on that side. At small Delta the island pairing is the only
+    term that changes the particle number, and a sector solve can stall at
+    the particle number it started from, which can get the ground-state
+    parity wrong: compare with ED on a short chain. On "python" the
+    restarts are identical, so raise nsweeps (at Delta=0.02 on 7 sites
+    20 sweeps gave the wrong parity and 40 the right one); on 3,
+    nrestart > 1 measures the start dependence."""
+    import warnings
+    if not hasattr(fc, "island"):
+        raise ValueError("island_energies needs an island_chain; for a "
+                         "kondo_chain use subgap_energies")
+    if fc.Delta_sc == 0.0:
+        raise ValueError("island_energies needs Delta != 0: at Delta = 0 "
+            "the particle number is conserved too, and an Sz sector alone "
+            "does not fix the state")
+    ns = len(fc.impurity)
+    if sectors is None:
+        if fc.B_imp == 0.0:
+            sectors = [0, 1]
+        else:
+            sectors = list(range(-(ns + 1), ns + 2))
+    sectors = sorted(set(int(s) for s in sectors))
+    if not any(s % 2 == 0 for s in sectors) or \
+       not any(s % 2 == 1 for s in sectors):
+        raise ValueError("sectors must contain both parities of 2Sz")
+    ens, spread, vevs = _sector_ground_energies(fc, sectors, mode, nrestart,
+                                                observables, ns, True, True)
+    out = dict(sectors=ens, spread=spread, qp_gap=fc.qp_gap)
+    out["E_even"] = min(e for s, e in ens.items() if s % 2 == 0)
+    out["E_odd"] = min(e for s, e in ens.items() if s % 2 == 1)
+    out["E_parity"] = out["E_odd"] - out["E_even"]
+    e0 = min(ens.values())
+    tie = 1e-10*max(1.0, abs(e0))
+    out["Sz_ground"] = min((s for s, e in ens.items() if e <= e0 + tie),
+                           key=lambda s: (abs(s), s))
+    out["parity_ground"] = "even" if out["Sz_ground"] % 2 == 0 else "odd"
+    if observables:
+        out["vevs"] = vevs
+    if out["E_parity"] > 1.05*fc.qp_gap:
+        warnings.warn("island_energies: E_odd - E_even = %.3e is larger "
+            "than the cost of one quasiparticle, %.3e, so the odd sector "
+            "solve is likely not its ground state; raise maxm, nsweeps or "
+            "nrestart" % (out["E_parity"], fc.qp_gap), RuntimeWarning)
+    return out
+
+
+def island_spin_correlations(fc, mode="DMRG"):
+    """The (ns+1) x (ns+1) matrix <S_a.S_b> over the ns spins and the
+    first island site a0 (last row and column), in the ground state of fc.
+    <S_i.S_{i+1}> is -3/4 for an isolated singlet pair, and the last
+    column measures how much the island electrons screen each spin; the
+    diagonal is 3/4 on a spin site and 3/4 of the single occupancy on a0.
+    Every entry is a scalar under spin rotation, so any member of a
+    degenerate multiplet gives the same matrix."""
+    sites = list(fc.impurity) + [fc.island[0]]
+    m = len(sites)
+    C = np.zeros((m, m))
+    for a in range(m):
+        for b in range(a, m):
+            i, j = sites[a], sites[b]
+            op = fc.Sx[i]*fc.Sx[j] + fc.Sy[i]*fc.Sy[j] + fc.Sz[i]*fc.Sz[j]
+            C[a, b] = C[b, a] = np.real(fc.vev(op, mode=mode))
+    return C
+
+
 def _default_site(fc, site):
     if site is not None:
         return site
@@ -333,10 +626,12 @@ def _impurity_hopping(fc, ni):
 
 def _seed_impurity_charge(c, ni, t=0.1):
     """Starting state for a v3 sector solve of an impurity of 2S = ni
-    sites. No term of H changes the charge of an impurity site, not even
-    a factor of one across a bond, so a two-site solve keeps the impurity
-    charges of its start, and the in-sector start of itensor_version=3 is
-    a product state that can leave an impurity site empty (a spin 3/2 then
+    sites (and for every DMRG sector solve of an island_chain, ni = ns,
+    where site ni is the first island site). No term of H changes the
+    charge of an impurity site, not even a factor of one across a bond, so
+    a two-site solve keeps the impurity charges of its start, and the
+    in-sector start of itensor_version=3 is a product state that can
+    leave an impurity site empty (a spin 3/2 then
     lands at S(S+1) = 2 and an energy Upen too high). We solve first with a
     weak hopping t between the impurity and the bath, which connects the
     charges, at a small bond dimension, and start the real solve there."""
@@ -352,20 +647,26 @@ def _seed_impurity_charge(c, ni, t=0.1):
 
 
 def _check_impurity_charge(c, ni, mode):
-    """Every impurity site must hold one electron in a solved state."""
+    """Every penalized site 0..ni-1 (the impurity sites of kondo_chain,
+    the spins of island_chain) must hold one electron in a solved state."""
     w = sum(np.real(c.vev((c.Nup[a] + c.Ndn[a] - 1)*(c.Nup[a] + c.Ndn[a] - 1),
                           mode=mode)) for a in range(ni))
     if w > 1e-6:
-        raise RuntimeError("subgap_energies: the solved state has weight "
-            "%.3e outside one electron per impurity site, so it is not in "
-            "the spin-S multiplet; raise nsweeps or Upen" % w)
+        raise RuntimeError("the solved state has weight %.3e outside one "
+            "electron per penalized spin site (an impurity site of "
+            "kondo_chain or a spin of island_chain), so a spin site is "
+            "empty or doubly occupied; raise nsweeps or Upen" % w)
 
 
 def tunneling_operators(fc, imp=None, site=None, U=0.0):
     """The two tunneling vertices X_up^dag and X_dn^dag of the module
     docstring, for the impurity spin on imp (a site or a list of sites
-    whose spins add up, default fc.impurity, else site 0) and the substrate
-    site site (default the first site of the Wilson chain, else site 1)."""
+    whose spins add up, default fc.tip_spin, else fc.impurity, else site
+    0, see impurity_spin) and the substrate site site (default
+    fc.channels[0][0], the first site of the Wilson chain of kondo_chain
+    or the first island site of island_chain, else site 1). On an
+    island_chain the electron is taken at that island site for every
+    spin, since it is the only fermionic site a spin touches."""
     S = impurity_spin(fc, imp)
     site = _default_site(fc, site)
     Sp, Sm = S[0] + 1j*S[1], S[0] - 1j*S[1]

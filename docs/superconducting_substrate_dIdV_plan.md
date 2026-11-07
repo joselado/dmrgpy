@@ -213,7 +213,7 @@ parameter, and the plan says so wherever a chain result is shown.
   penalty), with each one's parity read off <(-1)^N>, since either can be
   the lower one. The parity operator is a product over all sites, so it
   should be built as a product MPO and not summed.
-- `Mixed_Spin_Fermion_Chain` has no ED backend. The ED reference is the
+- `Mixed_Spin_Fermion_Chain` had no ED backend when this plan was written (it has one since 2026-11-07). The ED reference was the
   explicit Fock-times-spin construction of
   `docs/kondo_higher_order/composite_check.py` with Delta added to its
   discrete bath, which is exactly a surrogate model. It must be checked

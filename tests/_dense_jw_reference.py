@@ -1,11 +1,12 @@
-"""Small, from-scratch, dense NumPy Jordan-Wigner reference (local
-dimension 2 everywhere), independent of multioperatortk/jordanwigner.py.
+"""Small, from-scratch, dense NumPy Jordan-Wigner reference, independent
+of multioperatortk/jordanwigner.py and of the mixed-chain ED backend
+(edtk/mixededchain.py).
 
 Used as an ED ground-truth oracle for mixedchain.Mixed_Spin_Fermion_Chain
-(no dedicated ED backend exists for a mixed spin/spinful-fermion Hilbert
-space yet, see mixedchain.py's docstring), shared between
-test_mixed_chain.py and examples/mixed_spin_fermion_chain/main.py so the
-Jordan-Wigner-string construction is only maintained in one place."""
+in test_mixed_chain.py and test_mixed_chain_ed.py, so the
+Jordan-Wigner-string construction of the oracle is only maintained in one
+place. Every site has local dimension 2 unless `dims` gives the local
+dimension of each physical site (3 for a spin 1)."""
 import numpy as np
 
 I2 = np.eye(2, dtype=complex)
@@ -17,30 +18,45 @@ _ADAG = _A.T.conj()
 _Z = I2 - 2*(_ADAG @ _A)                          # fermion parity
 
 
+def spin_one():
+    """Dense Sx, Sy, Sz of a spin 1, basis m = 1, 0, -1"""
+    r = 1/np.sqrt(2)
+    sx = r*np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=complex)
+    sy = r*np.array([[0, -1j, 0], [1j, 0, -1j], [0, 1j, 0]], dtype=complex)
+    sz = np.diag([1., 0., -1.]).astype(complex)
+    return sx, sy, sz
+
+
 def kron_all(mats):
     out = np.array([[1.0]], dtype=complex)
     for m in mats: out = np.kron(out, m)
     return out
 
 
-def embed(mat, pos, nsites):
-    """Embed a 2x2 operator at physical site `pos` (0-based) of an
+def _identities(nsites, dims):
+    if dims is None: dims = [2]*nsites
+    return [np.eye(d, dtype=complex) for d in dims]
+
+
+def embed(mat, pos, nsites, dims=None):
+    """Embed a local operator at physical site `pos` (0-based) of an
     nsites chain, identity elsewhere."""
-    mats = [I2]*nsites
+    mats = _identities(nsites, dims)
     mats[pos] = mat
     return kron_all(mats)
 
 
-def fermion_ops(fermionic_mask):
-    """Dense C/Cdag/N with an explicit Jordan-Wigner string, for a chain
-    of local dimension 2 where fermionic_mask[i] is True at a
-    fermionic-mode physical site and False at a bosonic/spin site (whose
-    parity contribution is the identity -- the same physics
-    itensor_version=3's "F"-at-non-fermionic-site fallback implements)."""
+def fermion_ops(fermionic_mask, dims=None):
+    """Dense C/Cdag/N with an explicit Jordan-Wigner string, where
+    fermionic_mask[i] is True at a fermionic-mode physical site and False
+    at a spin site (whose parity contribution is the identity -- the same
+    physics itensor_version=3's "F"-at-non-fermionic-site fallback
+    implements). Entries at spin sites are None."""
     nsites = len(fermionic_mask)
     C, Cdag, N = [None]*nsites, [None]*nsites, [None]*nsites
     for p in range(nsites):
-        mats_c, mats_cdag = [I2]*nsites, [I2]*nsites
+        if not fermionic_mask[p]: continue
+        mats_c, mats_cdag = _identities(nsites, dims), _identities(nsites, dims)
         for k in range(p):
             if fermionic_mask[k]:
                 mats_c[k] = _Z

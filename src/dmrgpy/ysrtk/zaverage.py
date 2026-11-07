@@ -217,14 +217,16 @@ def broaden_poles(es, omega, weight, b=0.4, omega0=None, gap=0.0,
 
 def bdg_poles(eps, t, Delta, site=0):
     """Poles and weights of the spin-up local density of states of site
-    site of a chain with onsite energies eps, hoppings t and uniform
-    onsite pairing Delta, from its Bogoliubov-de Gennes matrix in the
-    Nambu basis (f_up, f_dn^dag): one pole at every eigenvalue E, with
-    weight |u_site(E)|^2, electron-like for E > 0 and hole-like for E < 0.
+    site of a chain with onsite energies eps, hoppings t and onsite
+    pairing Delta (a number, or one value per site), from its
+    Bogoliubov-de Gennes matrix in the Nambu basis (f_up, f_dn^dag): one
+    pole at every eigenvalue E, with weight |u_site(E)|^2, electron-like
+    for E > 0 and hole-like for E < 0.
     The weights add up to 1."""
     n = len(eps)
     h = np.diag(eps) + np.diag(t, 1) + np.diag(t, -1)
-    H = np.block([[h, Delta*np.eye(n)], [Delta*np.eye(n), -h]])
+    P = np.diag(np.broadcast_to(np.asarray(Delta, dtype=float), (n,)))
+    H = np.block([[h, P], [P, -h]])
     E, V = np.linalg.eigh(H)
     return E, np.abs(V[site, :])**2
 

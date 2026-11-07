@@ -5,11 +5,11 @@ fermionchain.Spinful_Fermionic_Chain) in the same chain.
 
 Degenerate cases (all-spin / all-fermion sitesin) are cross-checked
 against the existing, dedicated ED backends of spinchain.Spin_Chain /
-fermionchain.Spinful_Fermionic_Chain. The genuinely mixed case has no
-existing ED backend (see CLAUDE.md's mixed-chain notes), so it is
+fermionchain.Spinful_Fermionic_Chain. The genuinely mixed case is
 cross-checked against a small, from-scratch, dense NumPy Jordan-Wigner
-reference built directly in this file (independent of
-multioperatortk/jordanwigner.py) -- this is also what exercises the
+reference (_dense_jw_reference.py, independent of
+multioperatortk/jordanwigner.py and of the chain's own ED backend,
+edtk/mixededchain.py, which test_mixed_chain_ed.py covers) -- this is also what exercises the
 case a Jordan-Wigner string has to cross a non-fermionic (spin) site,
 which itensor_version=3 handles via ITensor's own SiteSet::op()
 "F"-at-non-fermionic-site -> identity fallback (see mixedchain.py's
@@ -202,7 +202,7 @@ def test_mixed_chain_kondo_v3_vs_python_backend():
 
 
 # ---------------------------------------------------------------------
-# Robustness: itensor_version=2 guard, ED-not-implemented, masked-zero
+# Robustness: itensor_version=2 guard, short-chain ED fallback, masked-zero
 # operators, and the shared generate_bilinear() indexing fix
 # ---------------------------------------------------------------------
 
@@ -220,20 +220,19 @@ def test_itensor_version_2_rejected_by_setup_cpp():
         mc.setup_cpp(2)
 
 
-def test_get_ED_obj_raises_clear_error():
-    """No ED backend exists yet for a mixed Hilbert space; gs_energy/vev
-    with mode="ED" (or the automatic itensor_version==3, ns<3 fallback in
-    mode.py) must fail with a clear NotImplementedError, not an
-    AttributeError several call frames away."""
+def test_short_chain_fallback_returns_the_ed_number():
+    """get_ED_obj() used to raise NotImplementedError, so the automatic
+    itensor_version==3, ns<3 fallback in mode.py raised on this chain;
+    it now answers with the ED backend's number."""
     mc = mixedchain.Mixed_Spin_Fermion_Chain(["F", "1/2", "F"], itensor_version=3)
-    with pytest.raises(NotImplementedError):
-        mc.get_ED_obj()
+    assert mc.get_ED_obj() is mc.get_ED_obj() # cached
 
     small = mixedchain.Mixed_Spin_Fermion_Chain(["F"], itensor_version=3)
     assert small.ns < 3 # triggers mode.py's automatic DMRG->ED fallback
     small.set_hamiltonian(0.3*small.Ntot[0])
-    with pytest.raises(NotImplementedError):
-        small.gs_energy(mode="DMRG")
+    assert small.gs_energy(mode="DMRG") == pytest.approx(0.0, abs=1e-12) # empty
+    small.set_hamiltonian(-0.3*small.Ntot[0])
+    assert small.gs_energy(mode="DMRG") == pytest.approx(-0.6, abs=1e-12) # full
 
 
 def test_masked_operators_are_multioperators_not_plain_zero():
@@ -244,7 +243,7 @@ def test_masked_operators_are_multioperators_not_plain_zero():
     MultiOperator-only method call."""
     # 3 spin locations (ns=3) so the chain is large enough to avoid
     # mode.py's separate itensor_version==3/ns<3 automatic ED fallback
-    # (see test_get_ED_obj_raises_clear_error) and isolate this bug.
+    # (see test_short_chain_fallback_returns_the_ed_number) and isolate this bug.
     mc = mixedchain.Mixed_Spin_Fermion_Chain(["1/2", "1/2", "1/2"], itensor_version=3)
     term = mc.Cdagup[0]*mc.Cup[1] # both operands are masked (spin locations)
     dagger = term.get_dagger() # must not raise AttributeError

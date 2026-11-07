@@ -195,6 +195,10 @@ def _is_surrogate(fc):
     return hasattr(fc, "impurities")
 
 
+def _is_island(fc):
+    return hasattr(fc, "island")
+
+
 def default_sectors(fc):
     """The 2Sz sectors parity_ground_state solves by default, the ones of
     ysr.subgap_energies for a kondo_chain and of surrogate.sector_energies
@@ -232,10 +236,10 @@ def _solve_sector(fc, sz, mode):
         return c, float(np.real(e0)), dmrg
     from .. import ysr
     ni = int(2*getattr(fc, "spin", fractions.Fraction(1, 2)))
-    if ni > 1 and dmrg and c.itensor_version == 3:
-        ysr._seed_impurity_charge(c, ni)
+    if dmrg and (_is_island(fc) or (ni > 1 and c.itensor_version == 3)):
+        ysr._seed_impurity_charge(c, ni) # island_chain: every backend
     e0 = c.gs_energy(mode=mode)
-    if ni > 1:
+    if ni > 1 or _is_island(fc): # island_chain: every spin, ns = 1 too
         ysr._check_impurity_charge(c, ni, mode)
     return c, float(np.real(e0)), dmrg
 
@@ -259,9 +263,12 @@ def parity_ground_state(fc, sectors=None, mode="DMRG"):
     parity), "parity" ("even" or "odd", of the returned state), and for a
     kondo_chain "E_free", "E_screened" and "E_ysr" = E_free - E_screened as
     ysr.subgap_energies defines them; for a surrogate chain "E_bath_even"
-    and "E_bath_odd". With mode="ED" (or a chain that the dispatch sends
-    to ED) the energies are the ED sector energies and the chain is a
-    plain copy of fc, whose ED ground state already has a definite parity
+    and "E_bath_odd"; for a ysr.island_chain "E_parity" = E_odd - E_even,
+    the finite-size parity splitting of ysr.island_energies (its bath is a
+    metal, so there is no E_ysr), with the charge check on every spin.
+    With mode="ED" (or a chain that the dispatch sends to ED) the
+    energies are the ED sector energies and the chain is a plain copy of
+    fc, whose ED ground state already has a definite parity
     (module docstring). Raises at Delta = 0, where an Sz sector does not
     fix the particle number, and on a backend with no sectors
     (itensor_version 2, "julia_live")."""
@@ -295,6 +302,8 @@ def parity_ground_state(fc, sectors=None, mode="DMRG"):
         N = len(fc.impurities)
         info["E_bath_even"] = lowest(lambda s: (s - N) % 2 == 0)
         info["E_bath_odd"] = lowest(lambda s: (s - N) % 2 == 1)
+    elif _is_island(fc): # a metal bath: a finite-size split, not E_ysr
+        info["E_parity"] = info["E_odd"] - info["E_even"]
     else:
         ni = int(2*getattr(fc, "spin", fractions.Fraction(1, 2)))
         info["E_free"] = lowest(lambda s: s % 2 == ni % 2)

@@ -59,20 +59,33 @@ class Mixed_Spin_Fermion_Chain(Many_Body_Chain):
     so it is rejected up front in __init__; this class only supports
     itensor_version in (3,"python").
 
-    There is no ED backend for this chain type yet (get_ED_obj() raises
-    NotImplementedError): building one needs to combine genuine
-    fermionic Fock-space statistics with tensor-product spin operators,
-    which no existing EDchain subclass does today (see
-    pyboson.boson.SpinBosonChain, the closest analogue for spin+boson,
-    which is itself an unfinished stub). Because of this,
-    itensor_version=3's automatic ns<3 -> ED fallback (mode.py, worked
-    around for every other chain type) will raise that same
-    NotImplementedError for a mixed chain with fewer than 3 physical
-    sites -- use a larger chain or itensor_version="python" instead.
+    mode="ED" is exact diagonalization on the tensor product of the
+    physical sites (edtk/mixededchain.py): a fermion mode is a two-state
+    site, a spin S site has 2S+1 states, and C/Cdag carry the
+    Jordan-Wigner string over the fermion modes to their left only, the
+    same convention as the DMRG backends (F is the identity on a spin
+    site). It is what itensor_version=3's automatic ns<3 fallback and
+    "python"'s ns<2 fallback (mode.py) answer with. Checked in
+    tests/test_mixed_chain_ed.py against Spin_Chain's and
+    Spinful_Fermionic_Chain's own ED backends (all-spin and all-fermion
+    sitesin, identical spectra), against the dense oracle
+    tests/_dense_jw_reference.py, and against DMRG on both backends.
+
+    Conserved sectors (set_conserved_sector): the total Sz (2*Sz units,
+    spins and electrons together) and, when there is a fermion location,
+    Nf. The DMRG site sets cannot carry them on a genuinely mixed chain:
+    a spinless fermion mode carries Nf and no Sz, a spin site Sz and no
+    Nf, so Nf or Sz alone is rejected by both backends and Nf+Sz together
+    would grade only the spin sites' Sz, a different quantum number. A
+    sector on a chain with both kinds is therefore ED only: it is refused
+    unless the chain is pinned to mode="ED" (as the interleaved
+    Spinful_Fermionic_Chain does for Sz). An all-spin sitesin conserves
+    Sz on DMRG and an all-fermion one Nf, exactly as the pure chains.
 
     The Hamiltonian is built directly from
     Cup/Cdagup/Cdn/Cdagdn/Nup/Ndn/Ntot/Delta and Sx/Sy/Sz, as
-    tests/test_mixed_chain.py and examples/mixed_spin_fermion_chain do.
+    tests/test_mixed_chain.py, examples/fermion_models/mixed_spin_fermion_chain
+    and examples/fermion_models/mixed_spin_fermion_chain_VS_ED do.
     """
     def __init__(self, sitesin, **kwargs):
         itensor_version = kwargs.get("itensor_version", None)
@@ -160,18 +173,59 @@ class Mixed_Spin_Fermion_Chain(Many_Body_Chain):
                     "itensor_version=3, got "+str(version))
         Many_Body_Chain.setup_cpp(self,version)
     def get_ED_obj(self):
-        """
-        There is no ED backend for a mixed spin/spinful-fermion Hilbert
-        space yet (see this class's docstring): unlike the pure-spin or
-        pure-fermion chains, that needs a chain-of-tensor-product spin
-        operators combined with genuine Fock-space fermion statistics,
-        which no existing EDchain subclass implements. Raising here
-        (instead of leaving get_ED_obj undefined) turns mode.py's
-        automatic DMRG->ED fallback for itensor_version==3 chains with
-        self.ns<3 into a clear error instead of an unrelated
-        AttributeError.
-        """
-        raise NotImplementedError("Mixed_Spin_Fermion_Chain has no ED "
-                "backend yet; use itensor_version=3 or \"python\" DMRG "
-                "on a chain with self.ns>=3 physical sites instead of "
-                "mode=\"ED\"")
+        """The ED object (edtk/mixededchain.py) on this chain's physical
+        sites, built once and cached until the next restart()"""
+        if self.has_ED_obj: return self.ED_obj
+        from .edtk.mixededchain import MixedSpinFermionED
+        ed = MixedSpinFermionED(self.sites)
+        ed.hamiltonian = self.hamiltonian
+        self._apply_sector_to_ed(ed) # conserved sector, if any
+        self.ED_obj = ed
+        self.has_ED_obj = True
+        return self.ED_obj
+    def get_sector_charge_operators(self):
+        """Total Sz in 2*Sz units (2 Sz on a spin site, Nup-Ndn on a fermion
+        location) and, when the chain has a fermion location, the electron
+        number Nf. Both are diagonal in the ED product basis."""
+        sz = 0*self.Id
+        for loc in range(len(self.kind)):
+            if self.kind[loc]=="spin": sz = sz + 2*self.Sz[loc]
+            else: sz = sz + self.Nup[loc] + (-1)*self.Ndn[loc]
+        out = {"Sz":sz}
+        if "fermion" in self.kind: out["Nf"] = sum(self.Ntot)
+        return out
+    def _dmrg_quantum_numbers(self):
+        """The quantum numbers the DMRG site set carries with the meaning
+        of get_sector_charge_operators(): Sz on an all-spin chain, Nf on
+        an all-fermion chain, none on a chain with both kinds (see the
+        class docstring)"""
+        if "fermion" not in self.kind: return {"Sz"}
+        if "spin" not in self.kind: return {"Nf"}
+        return set()
+    def _ed_only_quantum_numbers(self):
+        return set(self.get_sector_charge_operators()) - self._dmrg_quantum_numbers()
+    def _apply_conserved_sector(self):
+        """A sector naming a quantum number the DMRG sites cannot carry
+        never reaches the session: on a chain pinned to mode="ED" the ED
+        object targets it alone, otherwise it is refused here. Without
+        this, Nf+Sz on a chain with both kinds would be accepted by the
+        session with Sz graded on the spin sites only."""
+        sector = self.conserved_sector or {}
+        if not sector or not hasattr(self,"kind"): # nothing to decide yet
+            return Many_Body_Chain._apply_conserved_sector(self)
+        ed_only = set(sector) & self._ed_only_quantum_numbers()
+        if len(ed_only)==0:
+            return Many_Body_Chain._apply_conserved_sector(self)
+        if self.mode!="ED":
+            raise NotImplementedError(
+                "conserved sector %s: the DMRG sites of this chain cannot "
+                "carry %s (a fermion mode carries Nf and no Sz, a spin site "
+                "Sz and no Nf), only its ED backend can. Pin the chain to "
+                "ED with mode=\"ED\" before setting the sector. For the "
+                "same reason the sector-resolved dynamical correlator "
+                "(submode=\"SECTOR\", which sets this sector on an "
+                "internal copy) is not available on a chain with both "
+                "spin and fermion sites; submode=\"KPM\", \"TD\" or "
+                "\"CVM\" work on it, with mode=\"DMRG\" or mode=\"ED\"."
+                %(dict(sector),sorted(ed_only)))
+        self._sector_on_session = False

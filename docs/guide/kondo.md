@@ -1129,3 +1129,77 @@ energy rather than derived from the band. Excited states inside a sector
 need `itensor_version=3` or `mode="ED"`.
 
 The example is `examples/kondo/ysr_dimer_surrogate`.
+
+## A spin chain on a superconducting island
+
+We now take a chain of spins 1/2 whose last spin sits on a small
+superconducting island, and the island leaks into a normal metal.
+Everything is one linear chain: first the spins, then the island, then the
+Wilson chain of the metal. The Hamiltonian is
+
+$$
+\begin{aligned}
+H ={}& J_s \sum_{i} \mathbf{S}_i\cdot\mathbf{S}_{i+1} + J_K\, \mathbf{S}_{N_s-1}\cdot\mathbf{s}_{a_0} + B \sum_i S^z_i \\
+&+ \sum_{k\in I} \left[\epsilon_I n_k + \Delta\left(c^\dagger_{k\uparrow}c^\dagger_{k\downarrow} + \mathrm{h.c.}\right)\right] + t_I \sum_{k\in I} \left(c^\dagger_{k} c_{k+1} + \mathrm{h.c.}\right) \\
+&+ t_c \left(c^\dagger_{a_1} f_0 + \mathrm{h.c.}\right) + \sum_m \epsilon_m f^\dagger_m f_m + \sum_m t_m \left(f^\dagger_m f_{m+1} + \mathrm{h.c.}\right),
+\end{aligned}
+$$
+
+with $\mathbf{s}_{a_0}$ the spin of the electrons on the first island site
+$a_0$, $a_1$ the last island site, and $f_m$ the Wilson chain of a flat
+band of half-width $D$. The pairing $\Delta$ is put by hand on the island
+and is not self-consistent. The metal has no gap, so there is no true
+subgap state: a peak inside the island gap is a resonance, and its width
+is the leak into the metal.
+
+Each spin is one electron on its own site, so the total $S^z$ fixes the
+fermion parity. The two parities differ by the energy of one
+quasiparticle, the lowest Bogoliubov level of island plus metal, and not by
+$\Delta$. This level goes to zero with the length of the Wilson chain. At
+$\epsilon=0$ it alternates with the parity of the number of island and
+Wilson sites, and it is much smaller when that number is odd.
+`ysr.island_energies(fc)` gives the sector energies, the splitting `E_parity`, and
+its value at $J_K=0$ (`qp_gap`) as a reference. The STM spectrum on a spin
+uses the composite tunneling vertex of
+[A magnetic atom on a superconductor](#a-magnetic-atom-on-a-superconductor),
+and the electron enters at the first island site.
+
+```python
+import numpy as np
+from dmrgpy import ysr
+from dmrgpy.ysrtk import paritystate
+fc = ysr.island_chain(4, 2, 8, Js=0.3, JK=0.6, Delta=0.25, t_island=0.5,
+                      t_c=0.1, itensor_version=3) # 4 spins, 2 island sites, 8 Wilson sites
+fc.maxm, fc.nsweeps = 60, 12
+gs, info = paritystate.parity_ground_state(fc) # ground state of definite parity
+es = np.linspace(-1.0, 1.0, 201)
+(e, didv) = ysr.get_stm_spectrum(gs, es, delta=0.03) # tip on the end spin
+print(fc.island_gap, info["E_parity"]) # 0.559 and about 0.06
+```
+
+The spectrum has peaks from the island levels above `fc.island_gap`, and
+resonances of the end spin inside it. The resonances move to lower bias as
+$t_c$ grows: from $\pm 0.38$ at $t_c=0.1$ to $\pm 0.25$ at $t_c=0.4$.
+`ysr.island_spin_correlations(fc)` gives
+$\langle \mathbf{S}_a\cdot\mathbf{S}_b\rangle$ over the spins and the first
+island site, which says how much of the end spin the island screens.
+
+At small $\Delta$ the pairing is the only term that changes the number of
+electrons, and a sector solve can stop at the wrong parity. Compare with
+`mode="ED"` on a short chain, and raise `nsweeps`.
+
+- `ns`, `ni`, `n`: the number of spins, island sites and Wilson sites.
+- `Js`, `JK`: the Heisenberg and the Kondo exchange, antiferromagnetic when
+  positive.
+- `Delta`, `t_island`, `eps_island`: the pairing, hopping and onsite energy
+  of the island.
+- `t_c`: the hopping from the island into the metal. On the default mesh,
+  `t_c*np.sqrt(ysr.lambda_factor(Lambda))` stands for the continuum $t_c$,
+  with $\Gamma = \pi\rho t_c^2$.
+- `B`: a field on the spins only.
+- `Lambda`, `D`, `mesh`, `z`: the Wilson chain, as in `kondo_chain`.
+- `nkry` (in `get_stm_spectrum`): raise it for sharp lines on a long chain.
+  On 16 sites the default 100 leaves the lines about 1.5% of the peak away
+  from 300.
+
+The example is `examples/kondo/spin_chain_on_superconducting_island`.

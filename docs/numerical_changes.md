@@ -1354,3 +1354,20 @@ transition, poles between 0.0032 and 0.0189 Delta become one pole at
 and at Delta=0 nothing changes. `subgapscan.warm_sweeps(nsweeps, True)` raises instead of returning
 1, and `Chain.task_dynamical_correlator` and `Chain.task_projected_spectrum`
 of `pyitensor/chain.py` are removed.
+
+## The 2026-11-07 spin chain on an island and the ED of the mixed chain
+
+`set_conserved_sector(Nf=..., Sz=...)` on a `Mixed_Spin_Fermion_Chain` with
+both spin and fermion sites was accepted on v3 and `"python"`, with Sz graded
+on the spin sites only, so such a sector counted the Sz of the spins and
+ignored the Sz of the electrons. It now raises NotImplementedError unless the chain is
+pinned to `mode="ED"`, where Sz is the total of spins and electrons. Results
+of sector solves on such chains from before are not comparable.
+`submode="SECTOR"` on such a chain is refused with a message naming KPM, TD
+and CVM. `mode="ED"` on a `Mixed_Spin_Fermion_Chain` is new, and the v3 ns<3
+and `"python"` ns<2 fallbacks now give the ED answer there instead of
+raising. `ysr.island_chain`, `island_energies` and `island_spin_correlations`
+are new. `ysr.bath_quasiparticle_gap` and `zaverage.bdg_poles` take an array
+of pairings, and `impurity_spin` reads `fc.tip_spin` when a chain has one;
+both are byte-identical on every existing chain, and no `kondo_chain` number
+moved (all `tests/test_ysr*.py` pins pass unchanged).

@@ -32,15 +32,44 @@ so `Spinful_Fermionic_Chain` is the default choice.
 conduction electrons, such as the Kondo lattice
 (`examples/fermion_models/mixed_spin_fermion_chain`).
 
+`Mixed_Spin_Fermion_Chain` also runs with `mode="ED"`. The Hilbert space is
+the product of the sites: a spin $S$ has $2S+1$ states, and a fermion site
+has the four states $0,\uparrow,\downarrow,\uparrow\downarrow$. The fermion
+operators carry the Jordan-Wigner string over the fermion sites only,
+
+$$c_{j\sigma}=\Big(\prod_{\text{fermion modes } k<j\sigma}(1-2n_k)\Big)\,a_{j\sigma},$$
+
+meaning that a spin site between two fermion sites gives no sign, and the
+spins commute with the electrons. DMRG uses the same convention, so the two
+solvers can be compared directly:
+
+```python
+from dmrgpy import mixedchain
+mc = mixedchain.Mixed_Spin_Fermion_Chain(["F", "1/2", "F"])
+h = 0.5*mc.SS(0, 1) + 0.35*mc.SS(1, 2) + 0.15*mc.Ntot[0] - 0.2*mc.Ntot[2]
+hop = 0.4*(mc.Cdagup[0]*mc.Cup[2] + mc.Cdagdn[0]*mc.Cdn[2])
+h = h + hop + hop.get_dagger() + 0.13*sum(mc.Sz)
+mc.set_hamiltonian(h)
+print(mc.gs_energy(mode="ED"), mc.gs_energy(mode="DMRG"))
+```
+
+Both numbers are $-0.992144$. The conserved sectors are the total $2S^z$,
+of spins and electrons together, and the electron number. On a chain with
+both spin and fermion sites they work only with `mode="ED"`: set
+`mc.mode = "ED"` before `set_conserved_sector`. For the same reason
+`submode="SECTOR"` is not available there; use `"KPM"`, `"TD"` or `"CVM"`.
+The example `examples/fermion_models/mixed_spin_fermion_chain_VS_ED`
+compares the magnetization profile of DMRG and ED on a Kondo chain.
+
 !!! note "Backends"
     Some classes do not run on every backend:
 
     - `Mixed_Spin_Fermion_Chain`: `itensor_version=3` and `"python"` only.
     - `Spinful_Fermionic_Chain_Native`: not on `"julia_live"`.
-    - `SpinBoson_Chain` and `Mixed_Spin_Fermion_Chain`: no `mode="ED"`.
-      Use `Bosonic_Chain` for a purely bosonic model, and
-      `Spinful_Fermionic_Chain` with its `Sx`, `Sy`, `Sz` for a spin
-      model on fermions.
+    - `SpinBoson_Chain`: no `mode="ED"`. Use `Bosonic_Chain` for a purely
+      bosonic model.
+    - `Mixed_Spin_Fermion_Chain` with both spin and fermion sites: a
+      conserved sector only with `mode="ED"`, and no `submode="SECTOR"`.
     - `Bosonic_Chain` and `SpinBoson_Chain` with a boson site that does not
       have 4 levels: not on `itensor_version=2`, it raises an error.
 

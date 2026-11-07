@@ -221,6 +221,45 @@ resolves to identity" fallback, present in ITensor v3
 (`mpscpp2/ITensor/itensor/mps/siteset.h`), which would hard-abort
 instead.
 
+`Mixed_Spin_Fermion_Chain` has an ED backend,
+`edtk/mixededchain.py::MixedSpinFermionED`, an `EDchain` subclass built from
+the chain's flat physical type list (`self.sites`): type 0 is a two-state
+fermion mode, 2S+1 a spin. Single-site names are built lazily as sparse
+Kronecker products and cached in `self.operators`. `C` and `Cdag` at mode p
+carry Z=1-2n on the fermion modes k<p only, and `F` is the identity on a
+spin site, which is the convention of `jordanwigner.py`, of ITensor v3's
+`SiteSet::op()` fallback and of pyitensor, so no third convention exists.
+The names are `C`, `Cdag`, `N`, `A`, `Adag`, `F`, `Id` on fermion modes and
+`Sx`, `Sy`, `Sz`, `Sp`/`S+`, `Sm`/`S-`, `S2`, `Sx2`, `Sy2`, `Sz2`, `F`, `Id` on
+spins; `ISy` is not built, as in `pychain/build.py`'s Spin_Chain ED, and an
+unknown name raises ValueError. The Hilbert space is 4^{n_F} prod(2S+1),
+capped at 2^20 states. Everything else (vev, excited states,
+`edtk/dynamics`, `timedependent`, finite temperature, `sector_restrict`) is
+the generic `EDchain` path, and `mode.py`'s v3 ns<3 and `"python"` ns<2
+fallbacks now answer on this chain instead of raising.
+
+Sectors on the mixed chain. `get_sector_charge_operators` gives total Sz in
+2*Sz units (2 Sz on spin sites, Nup-Ndn on fermion locations) and Nf when a
+fermion location exists. The DMRG site sets cannot represent these on a
+chain with both kinds, since type-0 sites carry only Nf and spin sites only
+Sz: both backends reject Nf alone and Sz alone, and accept Nf+Sz but grade
+only the spin sites' Sz. So `Mixed_Spin_Fermion_Chain` overrides
+`_ed_only_quantum_numbers` (everything on a chain with both kinds, Sz on an
+all-F chain, nothing on an all-spin chain) and `_apply_conserved_sector`.
+This is the shape of the base class's ED-only early return for the
+interleaved chain's Sz: `_sector_on_session` is False, the ED object targets
+the sector in `_apply_sector_to_ed`, and `mode.py`'s existing
+"not _sector_on_session" guard refuses a later `mode="DMRG"` at call time. A
+request with an ED-only quantum number is refused with NotImplementedError
+unless the chain is pinned to `mode="ED"`, and `set_conserved_sector`'s
+handler rolls the failed request back. `submode="SECTOR"` is refused through
+the same hook, since it sets Nf on an internal clone, and the message names
+KPM, TD and CVM. Pinned by `tests/test_mixed_chain_ed.py`;
+`tests/_dense_jw_reference.py` is the independent dense oracle, with a
+`dims` argument for spin-1 sites. DMRG sectors on such a chain would need a
+native 4-state fermion location (like `Spinful_Fermionic_Chain_Native`) or
+QN changes in C++.
+
 `fermionchain.Spinful_Fermionic_Chain_Native` uses site-type code `1`
 instead (`HubbardSite`/`ElectronSite`, ITensor v3's own stock 4-state
 site, `mpscpp3/ITensor/itensor/mps/sites/electron.h`) -- one
@@ -6209,7 +6248,7 @@ Andreev processes are out. Tests are in `tests/test_ysr.py`.
 
 #### Higher spin and anisotropy
 
-A spin S > 1/2 is held as 2S native spinful sites, sites 0 to 2S-1, with the bath starting at site 2S. Each site holds one electron through Upen (N_a-1)^2. The sites are bound by a ferromagnetic Hund coupling -JH sum_{a<b} s_a.s_b = -(JH/2)(S_imp^2 - 3S/2). Upen and JH default to 2(D+|J|+|B|+2S|Dz|). The Dz term is skipped at Dz=0, so S=1/2 keeps its old value exactly. The reason for this layout is that Mixed_Spin_Fermion_Chain has no Sz sectors. J S_imp.s_0, Dz (S_imp^z)^2 and B S_imp^z are functions of the vector S_imp and commute with S_imp^2. So the spin-S multiplet is an exactly decoupled block, and JH only has to put it lowest (JH S is the gap to S-1). In every solved state, on ED, python and v3, on short chains and on 26-site chains at z=0 and z=0.5, <S_imp^2> = S(S+1) to 1e-14. The S=1/2 path is bit-identical: the Hamiltonian and the tunneling operators match the old module term by term, and tests/test_ysr.py passes unchanged. `fc.impurity` is now a list (`[0]` for S=1/2), the convention of anderson_chain and kondocloud, and kondoscreening already reads it. `tunneling_operators` and `get_stm_spectrum` default to the total spin of `fc.impurity` and to `fc.channels[0][0]`.
+A spin S > 1/2 is held as 2S native spinful sites, sites 0 to 2S-1, with the bath starting at site 2S. Each site holds one electron through Upen (N_a-1)^2. The sites are bound by a ferromagnetic Hund coupling -JH sum_{a<b} s_a.s_b = -(JH/2)(S_imp^2 - 3S/2). Upen and JH default to 2(D+|J|+|B|+2S|Dz|). The Dz term is skipped at Dz=0, so S=1/2 keeps its old value exactly. The reason for this layout is that Mixed_Spin_Fermion_Chain has no Sz sectors on DMRG. J S_imp.s_0, Dz (S_imp^z)^2 and B S_imp^z are functions of the vector S_imp and commute with S_imp^2. So the spin-S multiplet is an exactly decoupled block, and JH only has to put it lowest (JH S is the gap to S-1). In every solved state, on ED, python and v3, on short chains and on 26-site chains at z=0 and z=0.5, <S_imp^2> = S(S+1) to 1e-14. The S=1/2 path is bit-identical: the Hamiltonian and the tunneling operators match the old module term by term, and tests/test_ysr.py passes unchanged. `fc.impurity` is now a list (`[0]` for S=1/2), the convention of anderson_chain and kondocloud, and kondoscreening already reads it. `tunneling_operators` and `get_stm_spectrum` default to the total spin of `fc.impurity` and to `fc.channels[0][0]`.
 
 The parity bookkeeping changes with S. The impurity carries 2S electrons, so the bath parity is (2Sz - 2S) mod 2. For S=1/2 this means that Sz=0 holds the even states of total parity (an odd bath, which holds the bound quasiparticle, the screened singlet) and Sz=1 the odd ones (an even bath, the free doublet). For integer S the free spin (bath even) sits at even 2Sz and the underscreened S-1/2 state at odd 2Sz, the opposite of S=1/2. `subgap_energies` therefore returns E_free and E_screened (bath even and bath odd), with E_ysr = E_free - E_screened (> 0 screened), which is the old E_odd - E_even for S=1/2. E_even and E_odd stay the literal total-parity minima. With Dz or B nonzero, every 2Sz up to 2S+1 is solved (both signs with B), since the lowest state of a parity can sit at any |Sz| up to S+1/2. The quasiparticle-gap warning compares only the two parity minima, since Dz splits the sectors of one parity by more than Delta.
 
@@ -6615,6 +6654,89 @@ Chains, v3 on d22: L = 3, J = 1.5, V = 1.0, Delta = 0.1, t_b = 0.05, J12 = 0, ns
     8  0.16951          208 s    173-182 s 300   1712 s     1682 s
 
 (* with nstates = 4 in the odd sector; 102 s for one state per sector.) The even sector agrees with the plain solve to 1e-12 at N = 4 (run 'chain') and 1.3e-12 at N = 8 (runs 'chain_fine' and 'chain_nkry'). The N YSR states form a band, 0.186 to 0.393 Delta at N = 4 and 0.170 to 0.410 Delta at N = 8. At N = 8 the band has the positions of a cosine band of 8 open sites to the grid step. Every state shows at every spin. At N = 4 the end/middle weight ratio is 0.39, 2.6, 2.6, 0.39 (both bias signs, 0.382 to 0.390 and 2.56 to 2.61), against sin^2(k pi/5)/sin^2(2k pi/5) = 0.382, 2.618, 2.618, 0.382 of the open-chain modes. So the lowest state is 2.6 times weaker at the end, not absent there. At N = 8 (end against spin 3) the ratio is 0.14, 2.7, 1.00, 2.3, 2.3, 1.00, 2.6, 0.14, against 0.121, 3.53, 1, 2.35, 2.35, 1, 3.53, 0.121. It agrees to a few percent except for k = 2 and 7 (2.7 against 3.5) and k = 1 and 8 (0.14 against 0.12). The tests are in `tests/test_ysr_surrogate.py`, and the example is `examples/kondo/ysr_dimer_surrogate`.
+
+### 4.8h A spin chain on a superconducting island (`ysr.island_chain`)
+
+`ysr.island_chain(ns, ni, n, ...)` puts a chain of ns spins 1/2 on an island
+of ni sites with pairing put by hand, which hops (t_c) onto a normal Wilson
+chain of n sites. It uses the encoding of `kondo_chain` with another bath:
+one `Spinful_Fermionic_Chain_Native` of ns+ni+n sites. Sites 0..ns-1 hold the
+spins as singly occupied penalized sites (Upen (N_i-1)^2, default
+2(max(D, |t_island|, |eps_island|, |Delta|, |t_c|) + |JK| + |Js| + |B|)),
+then come the island sites, which alone carry the pairing, and then the
+Wilson chain. It lives on the native class and not on
+`Mixed_Spin_Fermion_Chain` because only the native class has Sz sectors on
+v3, `"python"` and ED (see the sectors paragraph of 4.1).
+
+The chain stores the attributes the Kondo tools read:
+- `fc.impurity`, the penalized sites.
+- `fc.spin = ns/2`. The sector solvers read it as "2*fc.spin penalized
+  sites"; it is not the total spin of the chain.
+- `fc.tip_spin = ns-1`, the default spin of the tunneling vertex, which
+  `impurity_spin` reads first.
+- `fc.channels = [island, wilson]`; the vertex takes its electron at
+  `channels[0][0]`.
+- `fc.bdg_params`, the single-particle problem at JK=0. `fc.qp_gap` and
+  `zaverage.bdg_poles` are computed from it, and both BdG helpers take one
+  pairing per site, byte-identical for a scalar. `fc.island_gap` is the same
+  for the isolated island.
+
+The chain never sets `fc.impurities`, which would route it through the
+surrogate code. `subgap_energies` refuses it and `island_energies` takes its
+place; the two share the sector loop `_sector_ground_energies`.
+`parity_ground_state` gives `E_parity` in place of `E_ysr`. The metal is
+gapless, so E_parity is a finite-size level of the Wilson chain and not a
+YSR energy, and `fc.reaches_gap` is always False. At eps=0, `fc.qp_gap`
+alternates with the parity of ni+n, and it is much smaller when ni+n is odd
+(7.5e-3 at ns=4, ni=2, n=7, against 1.0e-1 at n=6), since then a zero mode is
+gapped only by its weight on the island. The warning of `island_energies` is
+one-sided: it fires only for an even ground state with E_parity > 1.05
+qp_gap. An odd ground state bound by the Kondo exchange is about 1.06
+qp_gap below the even one on a 5-site chain (ns=2, ni=1, n=2, JK=1), and that
+is physics, not a failed solve.
+
+`broaden_poles` takes `gap=0.0` only on island poles, since its xi mapping
+assumes a uniformly paired chain; this is documented, not enforced.
+`zaverage_stm_spectrum`, `bdg_chain_dos`, `subgapscan` and `surrogate` build
+their own chains and never see an island chain.
+
+Every DMRG sector solve of an island chain, on `"python"` as on 3, starts from
+the warm stage of `_seed_impurity_charge`, followed by the charge check.
+Without the seed, a `"python"` sector solve on 16 sites (ns=4, ni=2, n=10)
+stopped with a spin site empty or doubly occupied: the in-sector start of
+`pyitensor/sector.py` can drop the configuration with one electron on every
+spin site, and no term of H brings it back. `kondo_chain` with S=1/2 on
+`"python"` has no seed and could stall the same way on a long chain; not
+tested. On `"python"` the restarts of `nrestart` are identical, so `spread`
+is 0 there by construction. At Delta=0.02 on 7 sites, `"python"` with 20
+sweeps got the ground-state parity wrong with spread 0, and 40 sweeps got it
+right (pinned against ED in `tests/test_ysr_island.py`).
+
+On the mean mesh, t_c*sqrt(A_Lambda) stands for the continuum t_c: one
+square root, because Gamma = pi rho t_c^2, checked on the width of a
+resonant level to 1%. At L=16 (ns=4, ni=2, n=10, maxm 64, nsweeps 16)
+`"python"` and v3 agree to 2e-7 in the sector energies; that is agreement
+between backends, and both are about 2e-6 above the exact energy at JK=0. TASK
+on 16 sites needs nkry of about 300 for lines of width 0.03: the default 100
+was 1.5e-2 of the peak away on both backends.
+
+The cross-check builds the same Hamiltonian on `Mixed_Spin_Fermion_Chain`
+(spins as spin sites, no penalty): on two 8-site geometries the ED ground
+energies agree to 3e-15, the sector energies of `island_energies` agree with
+the mixed chain's ED restricted to total 2Sz to 2e-14, and every DMRG sector
+energy (B=0.05, both backends) agrees with ED to 4e-12. The mixed encoding
+needs more bond dimension: at ns=2, ni=2, n=4 it stays 4.3e-9 above ED at
+maxm 64 from 30 to 60 sweeps and reaches 3.4e-12 at maxm 128, while the
+native encoding is at 1e-14, since a fermion location there is two DMRG
+sites and the bond between its up and dn modes carries up to twice the
+Schmidt rank. STM spectra were not compared across
+the encodings: a single-C vertex differs by a Jordan-Wigner string of
+(-1)^ns between the two layouts. One thing that differs between the two
+sector loops: `_sector_ground_energies` tests `mode == "DMRG"`, while
+`paritystate._solve_sector` tests `c.get_mode(mode=mode) == "DMRG"`; they
+differ only for a chain routed to ED.
+
+`tests/test_ysr_island.py`, `examples/kondo/spin_chain_on_superconducting_island`.
 
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
