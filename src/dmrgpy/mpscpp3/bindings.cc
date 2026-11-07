@@ -242,6 +242,7 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("gs_wavefunction",&Chain::gs_wavefunction,
              py::return_value_policy::copy)
         .def("set_wavefunction",&Chain::set_wavefunction,py::arg("wf"))
+        .def("clear_wavefunction",&Chain::clear_wavefunction)
         .def("gs_energy_generalized",[](Chain& self, std::vector<PyTerm> const& terms_a,
                                          double lam0) {
                 return self.gs_energy_generalized(terms_from_python(terms_a),lam0);

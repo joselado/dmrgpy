@@ -203,6 +203,15 @@ class Chain
         have_wf0_energy_ = false; // energy no longer matches wf0_
         }
 
+    // Drop the warm start, so that the next gs_energy() solves from a fresh
+    // start (Many_Body_Chain.restart(); see mpscpp3's copy).
+    void
+    clear_wavefunction()
+        {
+        have_wf0_ = false;
+        have_wf0_energy_ = false;
+        }
+
     // Excited states via the state-targeting/Lagrange-multiplier technique,
     // mirroring get_excited.h's get_excited() exactly, with one deliberate
     // difference: the original computes a *second*, independent, unused

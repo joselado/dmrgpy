@@ -400,6 +400,12 @@ changing the kind of code they cover:
 The durable rules the hunts left, each with the test or file that pins it.
 Do not undo one without reading its finding first.
 
+- **`restart()` is a cold start on every backend.** It calls the session's
+  `clear_wavefunction()` (v2, v3, `"python"`), so `set_hamiltonian(H)`
+  solves from a fresh random MPS, and only `restart=False` or an explicit
+  start keeps a warm one. A v3 warm start cannot leave the total-Sz sector
+  of its state when H conserves Sz, and a field sweep on one chain stayed
+  in an old sector (`test_restart_drops_session_state.py`).
 - **A state becomes the chain's normalized.** `groundstate.unit_copy` is
   applied in `mark_injected`, in the `wf0=` copies and in `set_gs`'s ED
   branch, and a zero state raises; an explicit `wf=` to

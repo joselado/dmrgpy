@@ -867,6 +867,15 @@ class Many_Body_Chain():
           # Hamiltonian (clearing the session's energy/band-edge caches)
           # even when the terms are unchanged -- restart() promises a
           # genuinely cold recalculation
+      # ...and that includes the start of the next solve: the v2/v3 session
+      # kept its own MPS and swept from it, so a chain reused across
+      # set_hamiltonian() stayed in the total-Sz sector of the previous
+      # Hamiltonian's state whenever every term conserves Sz (a field sweep
+      # on a Kondo chain, 5 of 12 runs on v3). "python" already dropped its
+      # state when the terms changed; julia_live has no session.
+      session = getattr(self,"_session",None)
+      if session is not None and hasattr(session,"clear_wavefunction"):
+          session.clear_wavefunction()
   def is_hermitian(self,H):
       """Check if an operator is Hermitian.
 

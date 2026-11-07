@@ -717,6 +717,13 @@ class Chain:
         self.wf0 = wf
         self._wf0_energy = None  # energy no longer matches wf0
 
+    def clear_wavefunction(self):
+        """Drop the warm start, so that the next gs_energy() solves from a
+        fresh random MPS (Many_Body_Chain.restart()), as on the compiled
+        backends."""
+        self.wf0 = None
+        self._wf0_energy = None
+
     def gs_energy_generalized(self, terms_a, lam0=None):
         """Smallest generalized eigenvalue lambda solving
         H|psi>=lambda*A|psi> for this chain's own Hamiltonian H (already

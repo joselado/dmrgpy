@@ -1371,3 +1371,16 @@ are new. `ysr.bath_quasiparticle_gap` and `zaverage.bdg_poles` take an array
 of pairings, and `impurity_spin` reads `fc.tip_spin` when a chain has one;
 both are byte-identical on every existing chain, and no `kondo_chain` number
 moved (all `tests/test_ysr*.py` pins pass unchanged).
+
+`set_hamiltonian(H)` with the default `restart=True`, and every other path
+through `Many_Body_Chain.restart()`, now starts the next v2 and v3 solve from
+a fresh random MPS instead of the previous Hamiltonian's state, as
+`"python"` already did. A chain reused across Hamiltonians on v2/v3 (a field
+or parameter sweep on one chain object, `bandwidth()`, which solves h and
+then -h on one clone, `thermal.py`'s plain ground state) moves by its solver
+noise, and a sweep across a level crossing in total Sz no longer stays in an
+old sector (3.3e-2 at B=0.58 on the Kondo chain c S c S c, in about 40% of
+the passes on v3). A solve that was converged moves at the level of its
+convergence. `set_hamiltonian(H, restart=False)` and every explicit start
+(`set_initial_wf_guess`, `wf0=`) are unchanged. The extensions need a
+rebuild (`make pybind`) for this.

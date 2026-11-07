@@ -105,6 +105,7 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("gs_wavefunction",&Chain::gs_wavefunction,
              py::return_value_policy::copy)
         .def("set_wavefunction",&Chain::set_wavefunction,py::arg("wf"))
+        .def("clear_wavefunction",&Chain::clear_wavefunction)
         .def("excited_states",[](Chain& self, int n, double scale_lagrange,
                                   bool gram_schmidt) {
                 auto out = self.excited_states(n,scale_lagrange,gram_schmidt);

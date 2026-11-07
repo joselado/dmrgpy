@@ -2945,6 +2945,22 @@ the session's state as the next solve's warm start; before the 2026-09-24
 third pass it kept the stored state current, so every reader but
 `ground_state_on_session` answered for the old Hamiltonian (finding 5).
 
+`restart()` (so `set_hamiltonian(H)` with the default `restart=True`) also
+drops the session's own warm start, through `clear_wavefunction()` on the
+v2, v3 and `"python"` sessions, so the next solve starts from a fresh random
+MPS on every backend; `restart=False` keeps it, as above. Before 2026-11-07
+the v2/v3 session swept from the previous Hamiltonian's state after a
+restart too. ITensor's Davidson escapes an exact eigenstate (it randomizes a
+Krylov direction below a 1e-10 residual), so the polarized trap of the
+`"python"` finding 2 below did not fire there, but when every term
+conserves total Sz a two-site sweep, noise included, cannot leave the Sz
+sector of its start: a field sweep on a reused Kondo chain c S c S c stayed
+in the old sector across the level crossing between B=0.46 and 0.58 in
+about 40% of the passes on v3, 3.3e-2 too high
+(`tests/test_restart_drops_session_state.py`). `restart()` calls the method
+only when the session has it, so an extension built before it keeps the old
+behaviour silently; rebuild with `make pybind`.
+
 `ground_state_on_session` runs in `dynamics.get_dynamical_correlator`
 after the KPM route's argument checks (`kpmdmrg.check_kpm_arguments`, the
 same function `dynamical_correlator_moments` calls for its direct callers)

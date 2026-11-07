@@ -736,6 +736,18 @@ class Chain
         have_wf0_energy_ = false; // energy no longer matches wf0_
         }
 
+    // Drop the warm start, so that the next gs_energy() solves from a fresh
+    // random MPS (Many_Body_Chain.restart()). Without it a chain reused
+    // across set_hamiltonian() swept the previous Hamiltonian's state, and
+    // when every term conserves total Sz a two-site sweep cannot leave the
+    // sector of that state: a field sweep stayed in an old Sz sector.
+    void
+    clear_wavefunction()
+        {
+        have_wf0_ = false;
+        have_wf0_energy_ = false;
+        }
+
     // Generalized-eigenvalue DMRG: solves H|psi>=lambda*A|psi> for a
     // Hermitian positive-definite metric operator A (A=identity reduces
     // this exactly to plain gs_energy()) via a self-consistent Lagrange-
