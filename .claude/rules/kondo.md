@@ -4,6 +4,9 @@ paths:
   - "tests/test_kondo_spectrum*.py"
   - "tests/test_kondo_screening.py"
   - "src/dmrgpy/wilsonchain.py"
+  - "src/dmrgpy/ysr.py"
+  - "tests/test_ysr*.py"
+  - "src/dmrgpy/ysrtk/**"
   - "src/dmrgpy/kondoscreening.py"
   - "src/dmrgpy/kondocloud.py"
   - "tests/test_kondo_cloud.py"
@@ -164,3 +167,74 @@ warning when the sample coupling or the per-bias tip coupling
 `tests/test_kondo_leading_log.py`. Public as `get_kondo_spectrum(order="LL")`,
 `mode="ED"` and `T=0` only; `mode="DMRG"` raises because the TASK space does
 not close under the products of spin operators the flow needs.
+
+**A Kondo spin on a superconductor (2026-11-06)**, `ysr.py`, is the
+composite-operator dI/dV with a BCS Wilson chain (uniform onsite pairing
+on every site), plan in `docs/superconducting_substrate_dIdV_plan.md`,
+notes in `docs/development.md` 4.8f and 4.8g. Three things are
+load-bearing. The impurity is native spinful sites with a charge penalty
+(2S of them for spin S, bound by a ferromagnetic Hund coupling, and
+`fc.impurity` is a list), because only that class has Sz sectors, and
+E_ysr = E_free - E_screened is a few sector solves (Sz=0 and Sz=1 for
+S=1/2: even total parity, an odd bath with the bound quasiparticle, and
+odd total parity; every 2Sz up to 2S+1 with Dz or B);
+at Delta=0 an Sz-only solve keeps the N it started with, so
+`subgap_energies` raises there. On the default mesh (`mesh="mean"`) pass
+J*`lambda_factor(Lambda)` to stand for the continuum J; on `mesh="zp"`
+(Zitko-Pruschke, arXiv:0810.4765) pass J bare, and `fc.dos_factor` is the
+factor that applies, which `ysrtk/zaverage.py` reads for its continuum
+normalization (it was A_Lambda too large on zp before it did). On the mean
+mesh a coupling v on the chain acts as v/A_Lambda (checked on
+the classical YSR energy to 5e-4 of Delta, and on the two-loop slope of
+the measured T_K); the first version divided, and was 25 times off.
+And use Lambda=4: at Lambda=2 on 38 sites maxm=128 was not converged at the
+scale of Delta. Averaged over four twists z, Delta_c/T_K = 4.41 at the
+paper's J=0.2 (rho J=0.1, NRG 3.7), and 4.40 on the zp mesh; the rho J -> 0
+limit is not fixed by the data (3.8 to 4.1). The absolute scales at
+Lambda=4 depend on the mesh (Delta_c and T_K 29% and 8% above the paper on
+mean, 0.7% and 16.5% below on zp) while the ratio does not, so the 4.4
+against 3.7 is not the mesh; the first suspect is the local susceptibility
+used for T_K, which is not Wilson's chi_imp. Compare ratios at Lambda=4,
+not absolute values.
+
+On v3 a sector solve keeps the impurity charges of its start, since no term
+of H moves charge on or off an impurity site: S > 1/2 (`ysr.py`,
+`_seed_impurity_charge`) and several surrogate spins
+(`surrogate._warm_sector_solve`) first solve with a weak hopping onto the
+impurity, and both raise when a solved state is not singly occupied there.
+Do not remove the warm stage. The z-averaged continuum
+(`ysrtk/zaverage.py`) broadens in xi = sqrt(w^2 - Delta^2), not in
+w - Delta (2e4 times worse), and is resolved near the gap edge by `nkry`,
+not by `maxm`. The surrogate bath has no Kondo logarithm: it is
+quantitative only for Delta >= 0.1 D at L=4.
+
+`ysrtk/bcsperturbative.py` (second order with Dynes densities) must give
+back `conductance.second_order_dIdV` at Delta=0 to roundoff; its substrate
+relaxation rate carries the BCS coherence factor (the F F term), without
+which it was 2.9x too large just above 2 Delta, and a reused `kernel=` raises outside its
+range. `ysrtk/ysrcurrent.py` (Ruby et al. rate model) normalizes the
+composite-vertex weights by their total per tip spin, and `ysr.bcs_dos` at
+gamma=0 is exact now (zero inside the gap), while the rate model keeps its
+own `tip_dos`.
+
+Near the singlet-doublet transition a plain DMRG solve stops at random at a
+mixture of the two parities (elastic weight up to 1.2e-2 of the total on 8
+sites, poles split and moved, u2 halved); `parity=True` in
+`zaverage.stm_poles`, `zaverage_stm_spectrum` and
+`surrogate.get_stm_spectrum`, or `paritystate.parity_ground_state(fc)`,
+solves inside the parity sector and promotes the state to dense indices on
+its own clone (Index identity is per session, so never move it to another
+chain). The default stays False, so no pinned number moves. On "python" a
+sector solve of coupled surrogate spins needs about twice the sweeps (a
+strict xfail pins it). A promoted sector state of a degenerate pair has a
+smaller one-site tangent space than a plain mixture, so short chains need
+`fc.cutoff = 0`. TASK at J=0 keeps 1/3 of the ED weight at U=0 and 0.405 at
+U=0.3, not zero, and `ysr.get_stm_spectrum` warns there.
+
+`ysrtk/subgapscan.py` (warm-started scans over Delta, Dz and the Delta_c
+bisection) needs `set_initial_wf_guess` on every backend, since "python"
+drops its state when the terms change. The warm-sweep default
+`warm_sweeps` = min(nsweeps, max(8, nsweeps//3)) has its floor 8 from
+"python" (6 sweeps missed ED by 7e-9 on 4 sites); v3 does mix the chain's
+noise into a warm start that is already at maxm. A warm start does not see
+a large jump in Delta, so only `cold_every` catches it.

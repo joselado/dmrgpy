@@ -6047,6 +6047,538 @@ C0 saturates at 1.54, C1 reaches 1.98 on 12 sites, and C2 gives 2 to
 and the exact value to 4e-6 (8 bosons per site). Tests are in
 `tests/test_open_wilson_chain.py`.
 
+### 4.8f A Kondo impurity on a superconductor (`ysr.py`)
+
+`ysr.py` is the first part of `docs/superconducting_substrate_dIdV_plan.md`
+(milestones S1 to S3), the composite-operator route of
+`docs/kondo_higher_order_plan.md` with a BCS bath. The model is the one of
+Zitko, Bodensiek and Pruschke, arXiv:1008.1734. The pairing of an s-wave
+BCS band is the identity in the single-particle basis and the same for
+both spins, so the Wilson map, one real orthogonal matrix for both spins,
+leaves it as a uniform onsite pairing on every chain site; `wilson_chain`
+is unchanged and `kondo_chain` adds the term. The Nambu Green function of
+the first site agrees with the discretized BCS star to 1e-15, and a static
+exchange field binds the classical YSR state at
+Delta (1-a^2)/(1+a^2), a = pi rho J S/2, to 5e-4 of Delta at Lambda =
+1.5, 2 and 3, once a field v0 on the chain is read as v0/A_Lambda in the
+continuum (`ysr.lambda_factor`, Wilson's A_Lambda; without it the YSR
+energy is off by 0.3% to 37%). The mesh has a smaller low-energy density
+of states than the continuum, so the continuum J is J*A_Lambda on the
+chain. The first version of this module had the factor inverted (J/A_Lambda
+on the chain, an effective J/A_Lambda^2), which is what made its J=0.2
+transition 25 times lower than the paper's; the measured T_K themselves
+showed it, since against the nominal rho J their two-loop slope
+d ln(T_K/sqrt(rho J))/d(1/rho J) is -1.35, and -1.01 against
+rho J/A_Lambda^2. `star_levels`/`wilson_chain` take a twist `z` for z-averaging; z=0
+is the old mesh.
+
+The impurity is a native spinful site with a penalty Upen (N_0-1)^2. It
+has no hopping, so its charge is conserved exactly and the penalty only
+has to lift the empty and doubly occupied states. This choice, and not
+`Mixed_Spin_Fermion_Chain`, is what gives the parity sectors: the native
+class has Sz quantum numbers (the interleaved and the mixed classes offer
+only Nf, so `set_conserved_sector(Sz=)` refuses there), and with one
+electron on the impurity Sz=0 holds the even states of total parity (an
+odd bath, which holds the bound quasiparticle of the screened singlet) and
+Sz=1 (2*Sz units) the odd ones (an even bath, the free doublet). `subgap_energies` is then two sector solves, no
+excited state. Two traps. At Delta=0 the Hamiltonian conserves N too and
+an Sz-only solve stays at the N of its start (E=+2.87 instead of -1.70
+on 21 sites), so it raises there. And a sector solve can stop in a
+metastable state (the singlet plus a free quasiparticle): on a chain that
+reaches well below Delta (`reaches_gap`) the two sectors differ by at
+most Delta, and a larger difference warns. On a short chain there is no
+such bound (ED gives 9.6 Delta at n=5), so the check is off there.
+`nrestart` keeps the lowest of several random-start solves.
+
+The physics check is the ratio Delta_c/T_K of the singlet-doublet
+transition. Table I of arXiv:1008.1734 gives 3.7 for S=1/2 with Wilson's
+T_K. That value is at J=0.2 (rho J=0.1) and Lambda=2, with T_K = 1.16e-5,
+so Delta_c = 4.29e-5. It is a value at rho J=0.1, not a limit rho J -> 0.
+We measure T_K on the same chain and the same twist z at Delta=0. It
+comes from the local susceptibility chi = 2(E0 - E(B))/B^2 of a field B
+S^z on the impurity only, in the sector Nf=n+1, Sz=0 (n odd, nsweeps=30),
+as T_K = w/(4 chi) with w = 0.4128. The table uses a field B1 between
+T_K/12 and T_K/9.5 (T_K/7 at rho J=0.08). Doubling the field gives the
+same chi to 2.4e-3 or better. It is 8.3e-4 or better at rho J >= 0.125,
+except 1.5e-3 at (0.2, z=0.5). At rho J = 0.08 to 0.1 the differences are
+1.3e-3 to 2.4e-3. The one exception is rho J=0.08, z=0.75, where maxm=128
+was not enough. There the two fields differed by 1.9e-2, and E(0) was
+1.7e-9 above its maxm=160 value, which is twice the field signal. That
+T_K is from maxm=160, where the two fields agree to 2.8e-4 (9.191e-7,
+against 8.956e-7 at maxm=128). At rho J=0.1, z=0.75, maxm=160 moves T_K
+by 1.5e-4 and keeps the 2.2e-3 field difference, so there the difference
+is the field itself. At rho J=0.09, z=0.75, maxm=160 moves T_K by
+-3.8e-3, and the field difference grows to 5.3e-3. So at rho J <= 0.09
+the energy route has a floor of about 1e-11 in E0 - E(B), which is 0.4%
+to 0.5% of chi. Delta_c is bisected in ln Delta on the sign of E_ysr =
+E_odd - E_even (nsweeps=20), down to a bracket of 1.036 to 1.044, and
+then interpolated linearly in ln Delta. A quadratic through the three
+nearest points moves it by at most 1e-4 relative. The chain coupling is 2
+rho J A_Lambda (D=1), with Lambda=4, maxm=128 and itensor_version=3. At
+every Delta scanned the last hopping is below Delta/10. Runs on d22,
+except the maxm=160 checks, which ran locally:
+
+    rho J  n(Dc) n(TK)  Delta_c/T_K on one mesh            <Delta_c>  <T_K>      <ratio>
+                        z=0    z=0.25  z=0.5   z=0.75
+    0.08   30    33     4.283  4.391   4.337   4.319*     3.871e-6   8.93e-7    4.33
+    0.09   28    29     4.322  4.349   4.386   4.374      1.687e-5   3.871e-6   4.36
+    0.10   26    27     4.406  4.361   4.405   4.448      5.52e-5    1.253e-5   4.41
+    0.125  22    25     4.558  4.573   4.510   4.502      4.80e-4    1.058e-4   4.54
+    0.15   20    23     4.726  4.711   4.644   4.658      2.10e-3    4.487e-4   4.68
+    0.20   20    21     5.031  4.970   5.027   5.059      1.426e-2   2.840e-3   5.02
+
+(* T_K at maxm=160, see above. The averages are arithmetic over the four
+twists. The average of the ratios and the ratio of the averages agree to
+1e-3, and so do the geometric means.)
+
+The twist moves Delta_c and T_K together. At rho J=0.1, Delta_c goes from
+5.285e-5 (z=0) to 5.680e-5 (z=0.5) and T_K from 1.1995e-5 to 1.2896e-5,
+both by 7%. The ratio stays between 4.36 and 4.45. You can think of the
+twist as a small change of the effective coupling of the mesh, and both
+scales follow it. On a single mesh the ratio differs by 1.5% to 2.5% from
+one mesh to another, and the z=0 ratio is within 1.2% of the z average
+(the worst case is rho J=0.08). The z=0 values reproduce the older table
+at its relabelled rho J. At rho J=0.15 we get T_K = 4.30e-4 and Delta_c =
+2.03e-3, against 4.27e-4 and 2.02e-3 there. At rho J=0.1 we get Delta_c =
+5.285e-5 (z=0) and 5.680e-5 (z=0.5), against 5.29e-5 and 5.681e-5 in the
+higher-spin table. So z-averaging raises Delta_c and T_K by 3% to 5% and
+leaves the ratio about where it was.
+
+At the paper's point, rho J=0.1, averaged over four meshes, T_K =
+1.253e-5 is 8% above 1.16e-5. Delta_c = 5.52e-5 is 29% above 4.29e-5, and
+the ratio is 4.41 against 3.7, 19% above. Most of the offset is in
+Delta_c, and that part comes from the coarse Lambda=4 mesh. NRG at
+Lambda=4 reproduces the rho J=0.1 Delta_c at z=0 and z=0.5 to 2e-4
+relative, while NRG at Lambda=2 lands 3% to 5% above the table (see
+"Higher spin" below). Averaging over z does not reduce the offset. We did
+not separate the 8% in T_K into a part from the mesh and a part from
+using the local susceptibility instead of Wilson's chi_imp.
+
+The ratio is not linear in rho J. The six z-averaged points curve upward,
+so the extrapolation to rho J -> 0 depends on the fit. A straight line
+through all six gives 3.83 (largest residual 0.033). A straight line
+through rho J <= 0.15 gives 3.90 (0.019), and one through rho J <= 0.125
+gives 3.95 (0.012). A parabola through all six gives 4.10 (0.009). At rho
+J = 0.08 and 0.09 the ratio is 4.33 and 4.36, so it flattens. There the
+spread between meshes, 1.5% to 2.5%, is larger than the step between
+neighbouring points, 0.6% to 1.1%, so these data do not fix the limit; it
+is 3.8 to 4.1 by these fits. The earlier 3.74 was a straight line through
+rho J = 0.094 to 0.187 at z=0, and a straight line through the four
+points 0.10 to 0.20 here gives 3.77. The curvature at lower rho J pulls
+that intercept down. So the clean statement is the one at rho J = 0.1:
+4.41 against 3.7, with the difference mostly in Delta_c. The O(rho J)
+slope is expected in any case, since the local susceptibility is not
+Wilson's chi_imp. The two differ at that order, and we did not compute
+chi_imp.
+
+Convergence at rho J=0.1, z=0, Delta=5.1096e-5. maxm=192 moves
+E_ysr/Delta from 0.0116342 to 0.0116354, a shift of 4e-6 in ln Delta_c,
+and n=30 instead of 26 changes it by 2e-10. T_K is 1.19949e-5 at n=27,
+1.19896e-5 at n=31 and 1.19956e-5 at maxm=192. Every scan is monotonic in
+ln Delta, every point reaches below the gap, and no solve warned. On d22,
+one Delta point (two sectors) took 17 to 78 s for n=20 to 30, and one T_K
+solve took 47 to 95 s for n=21 to 33, on one core.
+
+Precision is set by the dynamic range. At Lambda=2, J=0.2 and Delta=4e-5
+on 38 sites, maxm=64 and maxm=128 differed by 9e-5 in E_odd, twice
+Delta, and the two lengths 30 and 38 gave opposite signs. At Lambda=4 on
+20 sites maxm=64, 128 and 200 give E_odd-E_even to 5e-7 and 2e-10. So
+Lambda=4 is the working choice, with J*A_Lambda.
+
+`get_stm_spectrum` sums the correlators (X, X^dag) at w and (X^dag, X) at
+-w over the tip spin; the hole part is evaluated on the increasing grid
+-es[::-1]. TASK and CVM agree with ED to 2e-12 to 4e-12 on a 4-site chain
+on "python" and v3; KPM is off by 0.16 there (Jackson line shape), and
+TASK is 1 to 2 s against 40 to 230 s for CVM, so TASK is the default. The
+sum rule is sum_sigma <{X_sigma, X_sigma^dag}> = 3/8 - <S.s_1> at U=0, not
+a constant. On the free-doublet side at B=0 any member of the doublet
+gives the same spin-summed spectrum. `tip_convolution` is the
+superconducting tip at T=0 at lowest order in the tip coupling, so
+Andreev processes are out. Tests are in `tests/test_ysr.py`.
+
+#### Higher spin and anisotropy
+
+A spin S > 1/2 is held as 2S native spinful sites, sites 0 to 2S-1, with the bath starting at site 2S. Each site holds one electron through Upen (N_a-1)^2. The sites are bound by a ferromagnetic Hund coupling -JH sum_{a<b} s_a.s_b = -(JH/2)(S_imp^2 - 3S/2). Upen and JH default to 2(D+|J|+|B|+2S|Dz|). The Dz term is skipped at Dz=0, so S=1/2 keeps its old value exactly. The reason for this layout is that Mixed_Spin_Fermion_Chain has no Sz sectors. J S_imp.s_0, Dz (S_imp^z)^2 and B S_imp^z are functions of the vector S_imp and commute with S_imp^2. So the spin-S multiplet is an exactly decoupled block, and JH only has to put it lowest (JH S is the gap to S-1). In every solved state, on ED, python and v3, on short chains and on 26-site chains at z=0 and z=0.5, <S_imp^2> = S(S+1) to 1e-14. The S=1/2 path is bit-identical: the Hamiltonian and the tunneling operators match the old module term by term, and tests/test_ysr.py passes unchanged. `fc.impurity` is now a list (`[0]` for S=1/2), the convention of anderson_chain and kondocloud, and kondoscreening already reads it. `tunneling_operators` and `get_stm_spectrum` default to the total spin of `fc.impurity` and to `fc.channels[0][0]`.
+
+The parity bookkeeping changes with S. The impurity carries 2S electrons, so the bath parity is (2Sz - 2S) mod 2. For S=1/2 this means that Sz=0 holds the even states of total parity (an odd bath, which holds the bound quasiparticle, the screened singlet) and Sz=1 the odd ones (an even bath, the free doublet). For integer S the free spin (bath even) sits at even 2Sz and the underscreened S-1/2 state at odd 2Sz, the opposite of S=1/2. `subgap_energies` therefore returns E_free and E_screened (bath even and bath odd), with E_ysr = E_free - E_screened (> 0 screened), which is the old E_odd - E_even for S=1/2. E_even and E_odd stay the literal total-parity minima. With Dz or B nonzero, every 2Sz up to 2S+1 is solved (both signs with B), since the lowest state of a parity can sit at any |Sz| up to S+1/2. The quasiparticle-gap warning compares only the two parity minima, since Dz splits the sectors of one parity by more than Delta.
+
+There is a trap on itensor_version=3. No term of H changes the charge of an impurity site, not even one factor across a bond. So neither the Davidson space nor White's noise term can leave the impurity charges of the starting state. v3's in-sector start is a sum of shuffled copies of one product plan, and `sector_state_plan` prefers state 1 (Emp), so it can leave an impurity site empty. On S=3/2, n=4, sectors 2Sz=0 to 3 came out at <S^2> = 2 and about 5.3 above ED, unchanged for noise 1e-7 to 1e-2 and for 15 or 40 sweeps. S=1/2 and S=1 escaped only by luck of the plan. `_seed_impurity_charge` (v3 only, S > 1/2) first solves with a weak hopping t=0.1 between the impurity sites and the first bath site, at maxm 16 and 4 sweeps, and the real solve starts from that state. `_check_impurity_charge` raises once a solved state has weight above 1e-6 outside one electron per impurity site. A cleaner fix belongs in C++: `sector_mps` could randomize the occupation plan or take one from Python.
+
+The checks. ED against DMRG (python and v3, n=4, J=0.6, Delta=0.1) gives every sector energy to 2.4e-12 for S=1 (Dz=0.05) and S=3/2 (Dz=-0.04), and to 1e-8 for S=2 (n=2) in the tests. The STM spectrum with TASK agrees with ED CVM to 3e-11 for S=1, and to 4e-7 for S=3/2 (maxm=60 on 7 sites, slightly truncated). At J=0 the sector differences are exactly the Dz (Sz^2) differences, to 1e-12. Delta_c was found on 26 sites at Lambda=4, chain J = 0.2*A_Lambda (rho J = 0.1, the paper's J=0.2), nsweeps=20, interpolated in log Delta between the two points where E_ysr changes sign:
+
+    S     z=0 (maxm 128)  z=0.5          ratio z=0  ratio z=0.5  ratio averaged  Table I
+    1/2   5.29e-5         5.681e-5 (128) 1          1            1               1
+    1     8.22e-5         8.990e-5 (192) 1.554      1.583        1.569           1.595
+    3/2   1.473e-4        1.510e-4 (192) 2.787      2.658        2.720           2.784
+    2     2.736e-4        3.026e-4 (192) 5.177      5.327        5.254           5.351
+
+The ratio is averaged as the sum of Delta_c over the two meshes. The ratio is the clean comparison. In arXiv:1008.1734, H_imp = sum_i J_i S_imp.s_i + D S_imp,z^2 + g mu_B B S_imp,z, with the full spin-S operator and J = 0.2 for all S, so T_K = 1.16e-5 is the same for every S. One mesh moves the ratio by up to 5% (S=3/2), so a single-z value agrees with the table only by chance. The z-averaged ratios are 1.6% to 2.3% below the table, which is inside the paper's 'accurate within few percent'. The absolute Delta_c, averaged over z, is 1.25 to 1.28 times 1.16e-5 times the table for every S. So z-averaging does not remove the offset, and it is mostly the Lambda=4 mesh. An independent NRG check by the reviewer, at Lambda=2, n=44, keep 1000 (checked at 1800), puts every Delta_c 3% to 5% above the table (4.493e-5, 7.089e-5, 1.2341e-4, 2.3885e-4), with ratios 1.578, 2.747, 5.316. That NRG reproduces the DMRG Delta_c above to 2e-4 relative at Lambda=4, at both z. DMRG at Lambda=2 was not converged at maxm=128 (see the precision paragraph above), so the Lambda=2 numbers are NRG only.
+
+Convergence is read off the multiplet partners, which are degenerate at Dz=B=0. At z=0 and maxm=128 they are split by 5e-5 to 1e-4 of Delta for S=1 (with 2Sz=0 always the higher), and by 2e-4 to 4e-4 of Delta for S=3/2 and 2. For S=1, maxm=192 moves E_ysr/Delta by 3e-5 and Delta_c not at all, while at maxm=64 the partners are split by 0.009 Delta. At z=0.5 the spin 3/2 at maxm=128 is not converged: its partners are split by 5e-3 to 1.1e-2 of Delta. At maxm=192 the split is 1.4e-4 to 1.7e-4 of Delta, E_ysr moves by 1.4e-3 Delta and Delta_c by 0.8% (1.498e-4 to 1.510e-4). So every z=0.5 point for S >= 1 uses maxm=192.
+
+The anisotropy check. At Delta = 1.07e-4, on the free side, the S=1 triplet has <(S^z)^2> = 0.861 (M=1) and 0.277 (M=0), against 0.867 and 0.266 in eq. 2 of the paper. The trace rule gives 2.000, and the screened doublet has 2/3, the Wigner-Eckart value, to 1e-7 at maxm=192. A Dz scan at Delta = 7e-5 (screened at Dz=0) gives the ground state Sz=+-1 for Dz <= -0.5 Delta, Sz=+-1/2 at -0.2 Delta (E_ysr = +0.002 Delta) and Sz=0 for Dz >= 0.2 Delta, as in Fig. 2 of the paper. The free splitting moves at 0.532 Dz, against the Hellmann-Feynman value 0.533. In the screened state at Dz = -0.2 Delta the two YSR excitations split by 0.53|Dz|.
+
+Cost per point on d22 (v3, one core, n=26, nsweeps=20). With the host at load 3 to 5: S=1/2 two sectors at maxm=128 take 49 s; S=1 three sectors at maxm=192 take 103 to 105 s; S=3/2 four sectors take 107 to 109 s at maxm=128 and 134 to 135 s at maxm=192; S=2 four sectors at maxm=192 take 130 to 131 s. With other users holding the host at load 11 to 15 the same points took 1.3 to 1.5 times as long. The tests are in tests/test_ysr_spin.py and the example in examples/kondo/ysr_high_spin_anisotropy.
+
+#### Warm-started scans (`ysrtk/subgapscan.py`)
+
+Before this module, a scan over Delta or Dz, and the bisection of Delta_c, called `subgap_energies` at every point. Each call made a deepcopy, solved every sector from a fresh start with the full nsweeps, and on v3 for S > 1/2 ran the seed solve again. `subgap_scan` and `find_transition` instead keep one chain per 2Sz sector for the whole scan. They set H(Delta, Dz) = H0 + Delta P + Dz Q, with Upen and JH fixed at the kondo_chain default for the largest |Dz| of the scan. Each point starts from the states of its neighbour through `set_initial_wf_guess`. On v3, `set_hamiltonian(restart=False)` alone also gives a warm start: on 14 sites one warm sweep is 1e-11 from a full solve, against 3.4 for one cold sweep. On "python" it does not, because pyitensor drops its state when the terms change, so the code takes the explicit route on every backend. A warm state keeps one electron on every impurity site, so the seed is needed only at the first point, and `_check_impurity_charge` still runs at every point. A solve must not be followed by a change of nsweeps: the stored state then no longer answers for the chain's parameters, and `get_gs()` or `vev()` solve again with the full sweep count.
+
+The number of warm sweeps sets the cost. Both backends take the bond dimension of the present state as the floor of the sweep schedule (`Chain::gs_energy` in `mpscpp3/chain_session.h` and `gs_energy` in `pyitensor/chain.py`, `floor_dim` into `make_sweeps_ramped`). A cold start spends half of its sweeps at a bond dimension growing from 10, and these sweeps are cheap. A warm start sweeps at maxm from the first sweep, so nsweeps warm sweeps cost 1.5 times a cold solve. The default is therefore nsweeps_warm = min(nsweeps, max(8, nsweeps//3)) on every backend, returned as `r["nsweeps_warm"]`. The floor of 8 comes from "python". On 4 sites (J=0.6, Lambda=4, maxm=64, nsweeps=15) the S=1 Delta scan at Dz=0.05 is 4.4e-5 off ED with a wrong Sz_ground at 4 warm sweeps, 6.8e-9 off at 6 and 3.6e-11 at 8; the Dz scan is 3.5e-9 off at 6 and 7e-14 at 8. v3 is at 3e-13 in all these cases from 4 sweeps on. "python" mixes no noise into a warm start. v3 does: a state already at maxm takes `make_sweeps`, with the chain's noise of 1e-7 on the first half of the sweeps.
+
+The checks. On 4 sites, every warm sector energy at the default equals ED to 3e-13 on v3 and 4e-11 on "python", and the cold `subgap_energies` to the same precision. This holds for the Delta scans at S=1/2 and at S=1 with Dz=0.05, and for the Dz scan from -0.1 to 0.1 at S=1. On 26 sites (v3, rho J=0.1, z=0, maxm=128, nsweeps=20), nsweeps_warm = 20, 8, 6 and 3 all reproduce the cold sector energies to 1e-12 for Delta from 4.6e-5 to 5.7e-5. `find_transition` from [4e-5, 7e-5] at 6 warm sweeps visits 6 points and gives Delta_c = 5.285318e-5 at z=0 and 5.680299e-5 at z=0.5. Cold solves of the final bracket ends give the same Delta_c (warm_cold 6e-15 and 4e-12). For S=1 at maxm=192 the free partners 2Sz=0 and 2Sz=2 split by 7e-7 to 1.3e-6 of Delta, cold and warm alike. The quasiparticle gap of the warning is computed on the mesh of the chain, and with mesh="zp" it equals `kondo_chain(mesh="zp").qp_gap`. A large jump at a small nsweeps_warm is caught only by `cold_every`. On 14 sites at 2 warm sweeps, Delta from 0.1 back to 0.001 gave E_ysr/Delta = 0.94 to 1.00 against 0.859 cold. A descending scan in steps of sqrt(10) at 2 sweeps left 1.4e-3 at Delta = 0.0032. `cold_every=1` warned at both points in both scans.
+
+Cost on d22, v3, one core, against the cold protocol in the same job. S=1/2, n=26, maxm=128, load 9 to 14: cold 58 to 73 s per point, warm 27 to 40 s at nsweeps_warm=8 (1.8x), 29 to 31 s at 6 and 15 to 16 s at 3. At nsweeps_warm = nsweeps = 20 a warm point costs 84 to 98 s against 57 to 63 s cold. S=1, n=26, maxm=192, three sectors: cold 102 to 126 s at load 7.6 to 10.4, warm 52 to 58 s at 8 (2.0x, load 5) and 32 to 35 s at 5 (load 4.4, so part of that ratio is the load). The 7-point Dz scan of examples/kondo/ysr_high_spin_anisotropy (n=10, maxm=32) takes 68 s cold and 29 s warm at 4 sweeps, at load 5. At the default of 8, the gain is therefore about 2x per warm point on 26 sites. The first point of every scan is solved cold and costs the same as before. Tests are in tests/test_ysr_scan.py, and the example is examples/kondo/ysr_transition_scan.
+
+#### z-averaged spectrum above the gap (`ysrtk/zaverage.py`)
+
+The question is how to turn the comb of poles that one Wilson chain gives above the gap into the continuum of dI/dV. Following NRG, `zaverage_stm_spectrum` builds one `kondo_chain` per twist z = k/nz. It solves each chain by DMRG and reads the discrete poles from `taskdmrg.get_poles` for the pairs (X, X^dag) at +omega and (X^dag, X) at -omega (`stm_poles`). Then it broadens every pole with the log-Gaussian of Weichselbaum and von Delft, K = exp(-(ln(x/x')/b - b/4)^2)/(b x sqrt(pi)), and averages. The kernel is written from the paper; NRG Ljubljana is GPL-3 and is not copied. Below omega0 it blends into a Gaussian reflected at x=0, with the crossover read at the pole, so every pole keeps its weight to 1e-7.
+
+The gap edge is a change of variables. A pole at |w| > |Delta| is broadened in xi = sqrt(w^2 - Delta^2) and mapped back with |w|/xi. Every Bogoliubov level of the pairing chain is sqrt(e_k^2 + Delta^2), so the kernel then acts on the log mesh it was made for, and no weight leaks into the gap. The obvious alternative, a log-Gaussian in w - Delta, was measured and is 2e4 times worse (8e-2 against 4e-6 at nz=4, b=0.4). Poles with |w| <= |Delta| stay out of the kernel. They are returned per z and added as Lorentzians of half-width `delta_sub`. The sign of Delta is a gauge: `broaden_poles` uses |gap|, and both signs give the same E0 (-1.6321847019), the same subgap poles and the same curve on 5 sites.
+
+The default omega0 is one helper, `_default_omega0`, used by both `bdg_chain_dos` and `zaverage_stm_spectrum`. It is the last hopping of the chain, its energy resolution, capped at Delta != 0 by the smallest xi of the continuum poles. With this cap no continuum pole takes the Gaussian part, the xi density vanishes at xi = 0, and the curve goes to zero at the edge. The earlier default, |t_last| alone, broke on a short chain. There the lowest continuum xi can be below t_last (xi = 0.038 against omega0 = 0.078 on 5 sites at Delta = 0.05), the xi density is then finite at xi = 0, and the map imposes a 1/sqrt(w - Delta) divergence. A grid point within roundoff of Delta then gave 5e5. An explicit larger omega0 still does this, and the docstring says so. On 20 sites the cap moves omega0 from 2.4e-6 to 6.7e-6 down to 2.0e-6 to 5.8e-6, and the curve for xi in [1e-4, 1e-2] is unchanged to 0. So the measurements below stand.
+
+A chain that does not reach below |Delta| (last hopping above |Delta|/10) has no clean subgap window. On 5 sites at J=0.6, z=0.25, E_ysr = 1.1186 Delta, while the lowest bath quasiparticle is at 1.0000 Delta because the odd chain has a zero mode. So classifying against qp_gap does not help. `zaverage_stm_spectrum` warns instead, and returns info["reaches_gap"] (computed with |Delta|, since kondo_chain's fc.reaches_gap was False for Delta < 0 until it took |Delta| too) and info["qp_gap"]. The warning is silent in a plain script, because `algebra/kpmextrapolate.py` installs a global ignore filter at import, so read the info keys. `stm_poles` and `zaverage_stm_spectrum` raise ValueError when `U != 0` comes together with `operators`, since U only builds the default vertices.
+
+Normalization: the z-averaged first-site density of states of the mean-energy mesh is rho/A_Lambda in the bulk, the same A_Lambda as the coupling. So the result is multiplied by A_Lambda (`continuum_norm`). After the scaling each side carries A_Lambda/2 = 0.578 (Lambda=4) against 0.5. Measured on the BdG chain (n=20, nz=1 and 4), this is 0.532 up to xi=1, 0.5775 up to 2 and 0.5776 up to 100. The bulk is right, and the whole excess sits within a factor Lambda of D and above D: this is the band-edge artefact of the top interval [D Lambda^-z, D] (Zitko and Pruschke, arXiv:0810.4765).
+
+Calibration on the BdG chain (Lambda=4, n=20, Delta=1e-3), maximum relative error against the BCS density for xi in [1e-4, 1e-2]: 0.32 (nz=1, b=0.6), 1.2e-2 (nz=1, b=1.0), 1.2e-3 (nz=2, b=0.6), 3.9e-6 (nz=4, b=0.4), 4.9e-9 (nz=8, b=0.3). Hence the defaults nz=4, b=0.4. The log-Gaussian is biased by exp(p(p+1)b^2/4) where the xi density goes as xi^p. That bias is zero for BCS (p=0), but a bound state makes the density vanish as sqrt(w-Delta) (p=2). On a classical spin against the Shiba formula the edge value is high by 1.270, 1.144, 1.034 and 1.015 at b = 0.4, 0.3, 0.15 and 0.1, which is the predicted exp(3b^2/2). Above 1.4 Delta it agrees to 3e-3.
+
+The TASK side is limited by Krylov resolution, not by maxm. At J=0 the TASK poles match the BdG poles to 5e-12 on 6 sites (python and v3). On 20 sites (maxm=128) E0 matches the BdG ground energy to 1e-11, but nkry=100 merges the levels within 1e-6 Delta of the edge: the density for xi in [Delta/10, Delta] is then off by 79%. It is off by 3.8e-4 at nkry=300, and by 2.2e-2 at nkry=100 with cutoff=1e-20 and maxm=256, at 10 times the cost. maxm=256 alone changes nothing.
+
+With rho J=0.15, Delta=1e-3 (singlet) and 4e-3 (doublet), on 20 sites at maxm=128 and nkry=300, the runs give:
+- The subgap pole equals |E_odd - E_even| of `subgap_energies` to at most 8.7e-8 absolute (1e-4 relative) on every z.
+- Electron and hole subgap weights are equal at U=0.
+- missing_weight is at most 1.2e-15.
+- E_ysr/Delta ranges from 0.249 to 0.277 over the four z on the singlet side, and from -0.185 to -0.205 on the doublet side.
+- nkry=600 leaves one mesh unchanged from 1.3 Delta up and changes it below 1.2 Delta.
+
+On the 10-site chain of the example (rho J=0.2, Delta=0.01, z=0) E_ysr/Delta is 0.11177, against 0.11180 at 14 and 18 sites. So the subgap energy is converged in n there, while the continuum is not: the lowest bath quasiparticle sits at 1.02 to 1.16 Delta.
+
+In the normal state (n=21, nkry=300) the lowest pole of each mesh is at 4e-5 to 6e-5, about T_K/10. The Kondo resonance below about T_K/3 is not resolved, so the unitary value 2/(pi^2 rho J^2) = 4.50 is not tested. nkry=600 on one z reaches 9e-6 at 2.3 times the cost.
+
+An unconverged unrestricted solve can mix the two parities. That shows up as an elastic weight <X^dag><X>, which must vanish for a parity-changing vertex: 5.5e-6 at maxm=48, nsweeps=15 on 10 sites. `stm_poles` drops the elastic term and warns, silently in a script for the reason above, and info["elastic"] carries it.
+
+Cost per z on d22 (shared, load 9 to 18 on 16 cores), 20 sites, maxm=128: GS 32 to 63 s, four TASK correlators 402 to 762 s at nkry=300 (997 s at 600), two sector solves 26 to 46 s. Tests are in `tests/test_ysr_zaverage.py`.
+
+#### The representative-energy mesh (`wilsonchain.py`, `mesh="zp"`)
+
+`star_levels`/`wilson_chain` and `kondo_chain` take `mesh="mean"` (the default, unchanged) or `mesh="zp"`, the representative energies of Zitko and Pruschke, PRB 79, 085106, arXiv:0810.4765. The cut points and the weights stay the same. For the flat band every interval below the top sits at its logarithmic mean, the energy of Campo and Oliveira. The top one, [Lambda^-Z, 1], sits at (1-Lambda^-Z)/ln(Lambda) + 1 - Z, with Z = z for z > 0 and Z = 1 for z = 0 (eq. 36). NRG Ljubljana's nrginit has the same closed form. |dE/dz| equals the weight of each interval to 4e-10 by finite differences, which is eq. 35. A general dos raises NotImplementedError, since the differential equation of appendix B is not done. The remainder [0, Lambda^-nint] keeps its level at the mean on both meshes. The default is byte-identical: 256 arrays (Lambda = 1.5, 2, 3, 4, z = 0 to 0.75, n = 1 to 40, an asymmetric band, a non-flat dos) are np.array_equal before and after, and t matches `flat_band_hoppings` to 8.9e-16. The logarithmic mean of [x/Lambda, x] is its mean divided by A_Lambda. So at z=0, the remainder aside, the zp chain is exactly the mean chain with every energy divided by A_Lambda, and `kondo_chain(mesh="zp", J)` at z=0 is `kondo_chain(J*A_Lambda)` in units shrunk by A_Lambda. The two meshes differ only for z > 0, through the top interval. `kondo_chain` stores `fc.mesh`, `fc.dos_factor` (A_Lambda on mean, 1 on zp, the factor the caller applies to J), `fc.J_chain` and `fc.t_last` (|t_{n-1}|, D for n=1).
+
+`ysrtk/zaverage.py` reads both: `zaverage_stm_spectrum` multiplies by `fc.dos_factor` and takes `fc.t_last` for omega0 and for reaches_gap, and `bdg_chain_dos` takes `mesh=`. Before that, `zaverage_stm_spectrum(..., mesh="zp")` ran with no error and was A_Lambda = 1.155 too large at Lambda = 4 (1.1552 on every continuum point, 6 sites, nz=1). Now the J=0 spectrum of the first bath site through TASK equals `bdg_chain_dos` of the same mesh to 3e-10 on both meshes (`tests/test_ysr_mesh.py::test_zaverage_spectrum_takes_the_factor_of_the_mesh`).
+
+What it fixes. The classical YSR energy (80 sites, Delta = 1e-3, JS = 0.3, 0.6, 1.0) with the bare field on zp is within 6e-4 Delta at Lambda = 1.5 and 2, and within 9.0e-4 at Lambda = 3 at z = 0 and 0.5. At the same continuum coupling (v0 bare on zp, v0 A_Lambda on mean) both meshes miss by the same amount per twist. Over 8 twists at Lambda = 4, JS = 1.0, the worst miss is 3.34e-3 Delta on mean and 3.33e-3 on zp, and the 8-twist averages are +3.2e-4 and +5.8e-4. At Lambda = 3 the worst is 8.4e-4 and 1.04e-3. This is the resolution of one coarse mesh, not chain truncation, and the twist average removes it. So the YSR energy does not tell the two meshes apart. What changes is the band edge of the BdG chain (n=20, Lambda=4, Delta=1e-3). The weight per side is 0.50000 on zp with no factor, against 0.57762 on the mean mesh after A_Lambda, at nz = 4, 16 and 64. The broadened density per spin at xi = 0.01, 0.1, 0.5, 0.7, 0.9, 1, 2 is:
+
+    nz=4,  b=0.4   zp   0.5025 0.5000 0.5049 0.4375 0.2917 0.2172 0.0022
+                   mean 0.5025 0.5000 0.6561 0.6480 0.3616 0.2358 0.0008
+    nz=16, b=0.15  zp   0.5025 0.5000 0.5013 0.4998 0.4127 0.2386 0.0000
+                   mean 0.5025 0.5000 0.5281 1.0842 0.2586 0.0823 0.0000
+    nz=64, b=0.05  zp   0.5025 0.5000 0.5000 0.5000 0.4992 0.2463 0.0000
+                   mean 0.5025 0.5000 0.5000 1.2723 0.2121 0.0245 0.0000
+
+The 0.5025 at xi = 0.01 is the BCS value 0.5|w|/xi. So the mean mesh piles its top levels up at about 0.7 D, while zp stays flat up to the band edge. Near D the curve is set by the kernel: at nz=4, b=0.4 both meshes are smeared over a factor of about 1.5 around D. For xi in [1e-4, 1e-2] both meshes give 0.5 bcs_dos to 1.55e-5, a few 1e-6 relative.
+
+Delta_c and T_K on the new mesh. rho J = 0.1, Lambda = 4, chain J = 0.2 bare on zp (0.2 A_Lambda on the mean mesh), v3, maxm = 128. Delta_c is on 26 sites, with nsweeps 20, a bracket below 1.04 and linear interpolation in ln Delta; the quadratic moves it by at most 3.2e-5 relative. T_K is on 27 sites, with Nf=28, Sz=0, nsweeps 30 and B = 1.2e-6. The fields 1.2e-6 and 2.4e-6 agree to 1.1e-3, 1.1e-3, 3.0e-3 and 1.4e-3 at the four twists. Every point reaches below the gap, every scan is monotonic, and no solve warned. The mean-mesh column is the table above (same n, maxm, fields).
+
+           Delta_c (1e-5)     T_K (1e-5)        Delta_c/T_K
+    z      mean    zp         mean    zp        mean    zp
+    0      5.285   4.575      1.1995  1.0384    4.406   4.406
+    0.25   5.471   4.348      1.2546  0.9968    4.361   4.362
+    0.5    5.680   4.082      1.2896  0.9296    4.405   4.391
+    0.75   5.649   4.042      1.2700  0.9104    4.448   4.439
+    avg    5.521   4.262      1.2534  0.9688    4.405   4.400
+
+The z=0 row is an identity check, not a test. There Delta_c is 4.575062e-5 against 5.285318e-5/A_Lambda = 4.575058e-5, and T_K is 1.038394e-5 against 1.038303e-5. The 8.8e-5 in T_K is the field, since 1.2e-6 on zp is 1.39e-6 on the mean mesh. The evidence is the rows z = 0.25, 0.5 and 0.75. There the ratio differs from the mean mesh by +0.001, -0.014 and -0.009. That is within the run-to-run noise of the susceptibility route. An independent rerun at z = 0.5 with the same parameters gave E(B=0) 1.6e-11 lower, which at E0 - E(B) = 8.0e-9 moves T_K by 0.19% (9.2965e-6 to 9.2787e-6) and the ratio from 4.391 to 4.400. The same rerun gave Delta_c 1.4e-4 higher. So the ratio is the same on both meshes within about 0.2% per T_K solve, and the 4.4 against the table's 3.7 does not come from the mesh. The absolute scales do depend on the mesh. The twist moves the zp scales the other way and further: 4.04 to 4.58 (13%), against 5.29 to 5.68 (7%). This is by construction, since E_1 sweeps the whole top interval as z runs from 0 to 1. The four-twist averages move by the same factor, 0.772 for Delta_c and 0.773 for T_K. On zp the averaged Delta_c, 4.262e-5, lands 0.7% below the table's 4.29e-5, while T_K, 9.69e-6, lands 16.5% below the paper's 1.16e-5. On the mean mesh the same numbers are 30% and 8% above. Both absolute scales shift by 23% between two meshes that are both right at low energy, so these are Lambda=4 numbers, not converged ones. Taken at face value, the zp numbers put the offset of the ratio in T_K rather than in Delta_c. The first suspect is the definition: the local susceptibility with w = 0.4128 is not Wilson's chi_imp, and the two differ at O(rho J). chi_imp was not computed, and neither was a Lambda = 2 run on zp.
+
+Checks. maxm = 192 at z=0.5, Delta = 4.0143e-5 moves E_ysr/Delta from 5.3501e-3 to 5.3635e-3, about 4e-5 in ln Delta_c. At z=0.5 a third field, B = 0.6e-6, gives T_K = 9.243e-6, 5.8e-3 below the B = 1.2e-6 value. At that field E0 - E(B) = 2e-9, so the 1.6e-11 run-to-run noise of E0 is about 1% of it. The smaller field is noise-limited and was not used. One Delta point took 48 to 92 s and one T_K solve 74 to 110 s on d22.
+
+Riders. `bcs_dos` at gamma=0 is now exact: zero for |e| <= |Delta|, |e|/sqrt(e^2-Delta^2) outside, equal to the old 1e-14j form to 1e-9 relative, and 1 at Delta=0. The edge |e| = |Delta| itself gives 0, where the old form gave about 1e5; no caller reaches it. `get_stm_spectrum` with TASK at J_chain = 0 warns (RuntimeWarning, naming mode="ED" and zaverage.bdg_chain_dos). At J=0 the ground state is a product of the impurity and the bath, and the one-site tangent space misses the part of X|GS> that flips the impurity spin and adds a bath electron at once. Measured on kondo_chain(4), Delta=0.1: TASK keeps 1/3 of the ED weight at U=0 (exactly the S^z channel) and 0.405 at U=0.3, the same on python and v3. It is not zero, and not missing_weight=1.
+
+#### Spin excitations on a superconductor at second order (`ysrtk/bcsperturbative.py`)
+
+This is milestone S0 of `docs/superconducting_substrate_dIdV_plan.md`,
+the experiment of Heinrich, Braun, Pascual and Franke, arXiv:1405.6984.
+`second_order_dIdV_bcs(ks, eVs, ...)` takes the KondoSpectrum of
+`edkondo.py`, or anything with `e`, `p`, `Sx`, `Sy`, `Sz`, `T` and `kB`.
+It reuses `conductance._spin_matrix_elements_squared` and
+`_occupied_states`, so the matrix elements and the 2 pi T0^2 prefactor
+are those of `second_order_dIdV`. The sign convention is that of
+`conductance.py`: t->s is C_ts(eV - eps[f,i]) and s->t is C_st(eV +
+eps[f,i]), with C_ts(x) = int rho_t(w) f(w) rho_s(w+x)(1-f(w+x)) and C_st
+the same with f and 1-f exchanged. So at Delta=0 the result is Theta(eV -
+eps) + Theta(-eV - eps). The code does not assume particle-hole symmetric
+densities of states: it computes both correlations, which is what lets
+`rho_s=` take a Wilson chain's local density of states. The elastic U
+channel is the same kernel at eps=0 with 4U^2. We found no open reference
+implementation of this lineshape, and the paper fits peak amplitudes with
+rate equations rather than a lineshape formula, so the code is written
+from the golden rule.
+
+The normal part of C (x/(1-exp(-x/kT)), and its derivative Theta) is in
+closed form. The gap part is computed as C - C_normal: an FFT
+cross-correlation on a uniform grid with w=0 on a node, minus the same
+correlation with rho=1, then differentiated by `np.gradient` and
+interpolated. When both sides are flat this part is skipped, so
+Delta_s=Delta_t=0 gives `second_order_dIdV` to 3.6e-15 on 14.8 (S=1 with
+a tilted field, U=0.3, T = 0, 1 and 4 K). With the grid forced and no
+subtraction, the bare quadrature gives it to 1e-11 at T=0, and to 1.2e-5
+and 3.1e-5 relative at 1 and 4 K with de=kT/20. At T=0 the normal part
+has a step at x=0, so there the sum is tabulated and interpolated as a
+whole. Adding the exact step to an interpolated table left a spike one
+grid step wide whenever eV - eps fell on 0. A gap needs gamma > 0: at
+gamma=0 and T=0 the two-gap peak is a delta function. The default step is
+a twentieth of min(gamma, kT, Delta/20). At gamma/10 the normal-tip
+lineshape missed rho_Dynes by 2.0e-3 of the peak, at gamma/20 by 5.7e-4
+and at gamma/40 by 1.6e-4, so the error is second order in de.
+
+A kernel from `bcs_kernel` can be passed again as `kernel=` with a new
+list of biases. It raises when max|eV| + max|eps| goes past the x range
+it was tabulated on, since np.interp clamps silently there (11% off
+before the check), and when its kT is not that of the spectrum (6% off
+for a 4.8 K kernel on a 1.2 K spectrum). With a callable density of
+states and nothing to set a step (no gap, T=0), both public routes raise
+and ask for `de`.
+
+The analytic checks: - A normal tip at T=0 gives rho_Dynes(x) theta(x). -
+Two gaps at T=0 give a peak at Delta_s + Delta_t of weight pi
+sqrt(Delta_s Delta_t)/2 per unit normal step. This is the SIS current
+jump, and the peak is a Lorentzian of half-width gamma_s + gamma_t.
+Height times 2 pi gamma over that weight is 1.0010 to 1.0049 for
+Delta_t/Delta_s = 1, 0.6 and 0.3 at gamma = 5e-4 to 1e-3, converging
+linearly. The peak sits at Delta_s + Delta_t to 1e-13 gamma. - The
+normal-tip peak scales as gamma^(-1/2), at Delta + 0.60 gamma. - A
+superconducting tip agrees with `ysr.tip_convolution` to 2.5e-4 of the
+peak.
+
+The independent check is a golden rule over explicit Bogoliubov
+quasiparticles of a discretized band, for tip and sample. It has
+coherence factors u^2 and v^2, quasiparticle occupations f(E_k), the four
+creation and annihilation processes, energy conservation broadened into a
+Lorentzian of half-width gamma_s + gamma_t, and a histogram of all pair
+energies. It shares no code with the module. With unequal gaps (1 and
+0.6) at kT=0.15, so that thermal quasiparticles contribute, max|I -
+I_brute|/max|I| is 8.3e-3, 4.1e-3 and 2.2e-3 at gamma = 0.02, 0.01 and
+0.005, linear in gamma. Inside the gap the two differ by 50%, 24% and 11%
+at V=0.4 for the same three gammas. The explicit sum puts the occupation
+at the level energy and the Dynes form at the broadened energy, and the
+subgap current is where that matters.
+
+Fe-OEP-Cl (S=5/2, D=0.7 meV, Delta=1.35 meV on both sides,
+gamma=Delta/100, 1.2 K) gives peaks at 2Delta=2.700 and 2Delta+2D=4.100
+meV. The height ratio is 0.884 at U=0 and 0.441 at U=1.15, a U picked to
+match the paper's ~0.4. At 4.8 K there are extra peaks at 0 (equal gaps),
+at 2Delta - 2D, at |Delta_s - Delta_t| + 2D, and at 2Delta + 4D = 5.5 meV
+from the thermally occupied 3/2. A feature at 1.55 meV of 1.7e-3 of the
+maximum at 1.2 K is Dynes leakage. The second peak of the paper at 2Delta
++ 4D at 1.2 K comes from current-driven pumping, and it is not here,
+since p_i is thermal.
+
+`substrate_relaxation_rates(ks, Jrho_s, Delta_s, gamma_s)` is the
+golden-rule rate of the substrate, 2 pi (J rho)^2 (|M|^2/2) int
+f(w)(1-f(w-eps)) [rho(w) rho(w-eps) + F(w) F(w-eps)]. F is
+`dynes_pair_dos`, the signed anomalous density of states
+Re[Delta/sqrt((w+i gamma)^2 - Delta^2)] on the branch where rho > 0,
+meaning sign(w) Delta/sqrt(w^2 - Delta^2) outside the gap and 0 inside
+it. The F F term is computed by a second
+`BCSKernel(subtract_normal=False)`. It is the coherence factor of a
+time-reversal odd vertex (case II): with w and w - eps of opposite sign
+(pair creation or annihilation) the bracket is rho rho' (1 - Delta^2/(E
+E')), and with the same sign (quasiparticle scattering) it is rho rho' (1
++ Delta^2/(E E')), the Hebel-Slichter factor. A callable `rho_s=` on a
+superconductor needs `pair_s=` as well, otherwise it raises. The first
+version had no F F term: at T=0 and eps=0.5 it gave 0.856 and 0.962 of
+the normal rate at Delta = 0.2 and 0.1, against 0.2976 and 0.7732 with
+the factor.
+
+The rate is now checked against a direct BCS quadrature in the test file,
+in units of the normal-metal rate (S=1 with D=0.5, decay eps=0.5): - T=0:
+quad 0, 0.29760 and 0.77317 at Delta = 0.3, 0.2 and 0.1; the module at
+gamma=1e-4 gives 0.00047, 0.29797 and 0.77329. - kT=0.1: quad 0.06473,
+0.37928 and 0.82807; the module at gamma=1e-4 gives 0.06521, 0.37964 and
+0.82816. - An explicit Bogoliubov sum (6000 levels) gives 0.2979 and
+0.7655 at T=0, and 0.0645, 0.3794 and 0.8223 at kT=0.1. - The module
+converges to the quadrature linearly in gamma. The error is the Dynes
+leakage, an absolute amount in units of the normal rate: 0.00188, 0.00094
+and 0.00047 at Delta=0.3, T=0 for gamma = 4e-4, 2e-4 and 1e-4, against an
+excess of 0.00096 over the quadrature at kT=0.1 for gamma = 2e-4. So the
+test tolerance is absolute, not relative to a small thermal rate. - At
+kT=0.1 the coherence factor raises the rate below 2Delta by 1.3x (0.0652
+against 0.0503 without it, Delta=0.3), and lowers it above 2Delta by 2.2x
+(0.3796 against 0.8271, Delta=0.2). - At T=0 the rate goes to zero
+continuously at 2Delta = eps: 0.18266, 0.06220, 0.03126 and 0.00628 at
+Delta = 0.22, 0.24, 0.245 and 0.249 (quadrature), with the module on top
+to the Dynes floor of about 1e-3. - It equals pi (J rho)^2 |M|^2 eps in a
+normal metal at T=0, to 1e-14.
+
+Against the many-body route: at J=0, `ysr.get_stm_spectrum` (ED, CVM,
+kondo_chain n=4, S=1, Dz=0.15, Delta=0.1, Lambda=4, delta=0.005) equals
+this module with `rho_s` the site-0 local density of states of the Wilson
+chain, divided by 4 pi. The factor comes from two conventions: ysr's X
+carries (sigma.S)/2 and sums the tip spin, giving |M|^2/2 against 2 pi
+|M|^2, and ysr's U is twice Ternes' U. The agreement is 1.2e-3 of the
+peak, limited by the Lorentzian tails the golden rule cuts at the Fermi
+level, with peaks at E_qp + Dz = 0.3175. At finite J, TASK poles on the
+same chain (maxm=64, 7 s per J) put the weight-averaged inelastic peak at
+0.3155, 0.3123, 0.3068, 0.2961 and 0.2825 for continuum J = 0.02, 0.05,
+0.1, 0.2 and 0.4. That is a shift of about -0.1 J, and the peak splits
+into two. ED CVM agreed at J=0.02 and 0.05 (0.315, 0.3125) and did not
+finish J=0.1 in 1200 s. The total inelastic weight is 0.129 at J=0.02
+against 0.124. A pole leaves the gap edge (0.1675) to 0.1674, 0.1669,
+0.1649, 0.1554 and 0.1103, with weight 7e-5 to 4.9e-2, of order J^2. This
+pole is the YSR state, and the second-order step has nothing there. On 8
+sites the positions agree to 0.001 to 0.004 at J=0.02. The short chain
+overstates the shift, since its lowest quasiparticle has weight 0.124 on
+site 0, while in the continuum a single quasiparticle is extended. TASK
+at J=0 itself returns missing_weight=1 and an empty spectrum (product
+state). Tests are in `tests/test_ysr_bcs_second_order.py` (20 tests, 13
+s), and the example is
+`examples/kondo/spin_excitations_on_superconductor`.
+
+#### Width of a YSR peak: the rate model of Ruby et al. (`ysrtk/ysrcurrent.py`)
+
+This is milestone S6 of the plan. `ysrcurrent.py` implements eqs. 1 and 2
+(S51, S52) of Ruby, Pientka, Peng, von Oppen, Heinrich and Franke,
+arXiv:1502.05048. The model is one YSR level (eps, u2, v2), a BCS tip
+with a Dynes width, a tip coupling g = 2 pi t^2 nu_t (`gamma_tip`),
+relaxation rates Gamma1 and Gamma2, and a temperature T. The
+single-particle current I_s and the Andreev current I_a are returned
+separately, in units of 2e^2/h. We found no public code for the paper, so
+the module is written from the paper and its supplement. As in the paper,
+three things are left out: the t^2 shift of the level, multiple Andreev
+reflection, and the frequency dependence of the rates. Because the rates
+are constant, a Lorentzian tail carries a current of order Gamma1 g/W at
+V=0, with W the integration window. This does not change dI/dV.
+
+The quadrature uses Gauss-Legendre panels on a mesh graded geometrically
+towards eps and the four tip edges ±V ± Delta_t. It agrees with scipy
+quad to 1e-14. dI/dV is a central difference with a step of 0.02 of the
+width of the peak. With a sharp tip edge the maximum of a peak is a cusp
+within Gamma1/2 of its threshold, so `peak_heights` adds a scan ten times
+finer and refines three times. `ysr.bcs_dos` at gamma=0 adds 1e-14j to w,
+which leaves a small density inside the gap. Next to a level with Gamma1
+= 1e-7 this added 23% to 58% to the saturated current e Gamma1/(3 hbar).
+So `tip_dos` uses the exact BCS density with zero inside the gap when
+gamma=0.
+
+The checks, in units of the tip gap, are these: - The linear regime
+(g=1e-8, Gamma1=4e-3, Dynes 1e-2) is pi g times the dI/dV of
+`tip_convolution` of u2 L(w-eps) + v2 L(w+eps), to 6.4e-5 of the peak.
+The difference grows linearly in g. - The threshold values of the
+supplement hold: S68 to 1e-5, S71 to 1e-4, and S70 to 1e-3. - With u2/v2
+= 0.13, Gamma1 = 1e-3 and Gamma2 = 2.5e-4, alpha+/alpha- is 0.130 at weak
+coupling and inverts to 4.82 at g=1e-2. alpha+ beta+ = alpha- beta-
+(0.9999) and beta-/alpha+ = Gamma2/Gamma1 (0.2500) hold at weak coupling.
+- The Andreev asymptote (v/u)^(10/3) = 30 needs a window between Gamma1
+and the hole broadening sqrt(omega_h^3/eps) of regime (iii) (S65, S85).
+With Gamma1 = 1e-7 and Gamma2 = 0, alpha+/alpha- is 23.47 at g=1e-5,
+against 29.2 from the threshold form S57. Since the maximum lies off the
+threshold, the paper allows up to 35% here (S III F). The ratio then
+falls to 12.75 at g=1e-3 and 6.58 at g=1e-2, where the hole width
+(6.45e-3) has reached omega_e (5.96e-3). With Gamma1 = 1e-3 there is no
+window, and the ratio reaches only 4.99 at g=1e-2. This is regime (iii),
+not a breakdown of the model at GN ~ 1. - With detailed balance at T=0.1
+and eps=0.3, beta-/alpha+ = exp(-eps/T) to 8e-4. At T=0.15 it is 0.9%
+lower, because of the thermal quasiparticles of the tip. - A normal tip
+gives the Breit-Wigner Andreev peak 4u2v2/(u2+v2)^2 to 2e-5, the same at
+both biases.
+
+`gamma_tip_from_GN` inverts by default S89 as printed, GN = 4x/(1+x), so
+that the paper's figures can be compared on the same axis. That form is
+not bounded by one spin-degenerate channel: it gives 2 at x=1.
+`exact=False` is the weak-coupling GN = 2 pi nu_s g, and
+`exact="landauer"` is 4x/(1+x)^2, which is at most 1. In x, the two exact
+forms differ by 0.25% at GN = 1e-2 and by 2.7% at GN = 0.1. The model
+itself holds only at GN << 1.
+
+The normalization of u2 and v2 is this: - On the BdG chain of a classical
+spin, A_Lambda times the chain weight of the subgap pole is the residue
+of S32. It agrees to 0.07% to 0.5% at Lambda=2 on 40 sites, and to 1% at
+Lambda=4 on 24 sites. So `rate_parameters(..., Lambda=)` multiplies by
+A_Lambda, the same factor as for J. - For the composite vertex X, the
+weights are divided by sum_sigma <{X, X^dag}>/2, read off the sum of all
+poles of `stm_poles`. This assumes that the weight of X above the gap is
+spread like that of the bare electron, up to O(rho J). - The ratio u2/v2
+needs neither factor. - For a doublet excitation the one-level model
+misses a degeneracy factor. `detailed_balance` takes `g_ratio`, and the
+default of `current` is 1.
+
+`rate_parameters` sums the electron poles (omega > 0) and the hole poles
+(omega < 0) within 1e-3 of the gap of the strongest subgap pole. A
+tolerance of 1e-6 of the gap, as in the first version, halved u2 and v2
+without warning whenever the doublet came out split. A RuntimeWarning
+fires in three cases: the gathered poles carrying weight are spread by
+more than 1e-6 of the gap, the elastic weight of `stm_poles` is nonzero,
+or subgap weight left out exceeds 1e-3 of u2+v2. `E_ysr=` raises when eps
+is not |E_ysr|.
+
+The split comes from DMRG. Near the singlet-doublet degeneracy, DMRG can
+stop at a mixture of the two parities, and then the subgap poles shift
+and split. This happens at random, from the random start. On 8 sites at
+J=0.6 A_Lambda (Lambda=4, Delta=0.1, U=0.3), ED gives eps = 0.0190312
+Delta. A run at maxm=60 and nsweeps=15 stopped at a mixture: elastic
+weight 7.0e-3, and poles at 0.01765 and 0.01833 Delta. These are now
+summed, giving u2 = 0.3215 with the split warning, where the old
+tolerance gave 0.158. Runs at maxm=30 and nsweeps=6 split by up to 3.4e-3
+Delta. That is beyond the tolerance, so u2 is still about half there, but
+a warning now says so. nsweeps=40 converged, with eps = 0.0190312 Delta,
+u2 = 0.333787 and v2 = 0.196261, and no warning. The example stays at
+nsweeps=15, because J=0.8 A_Lambda is far from the transition: the
+elastic weight there is 1e-26.
+
+Short chains: the 5-site chain does not reach the gap. At J=0.8 A_Lambda
+it gives eps = 0.4808 Delta and u2/v2 = 1.557. The 8-site chain, the
+first length that reaches the gap, gives 0.4582 Delta (ED and TASK agree
+to 1e-7 Delta) and 1.554. The example and the guide use 8 sites. The test
+uses 5 sites, where it checks agreement with ED.
+
+Cost, on one core with BLAS pinned: the 14 tests take 25 s, and the
+example 41 s, most of it the TASK poles of the 8-site chain.
+
+#### A ground state of definite parity (`ysrtk/paritystate.py`)
+
+Every tunneling vertex changes the fermion parity, so on a ground state of definite parity the elastic weight is exactly zero. `parity_ground_state(fc)` solves the lowest state of every 2Sz sector of `subgap_energies` (or of `surrogate.sector_energies`) on its own deepcopy, with `_seed_impurity_charge`/`_check_impurity_charge` for S > 1/2 and `_warm_sector_solve`/`_impurity_charge_error` for surrogate chains. It keeps the lowest copy (smallest |2Sz| within 1e-10 max(1,|E0|)), calls `promote_to_dense()` on it and returns that copy, since Index identity is per session. `stm_poles`, `zaverage_stm_spectrum` and `surrogate.get_stm_spectrum` take `parity=`, default False, so no pinned number moves. `zaverage_stm_spectrum` then skips the plain solve, takes E0 and E_ysr from the sector solves, and fills `info["parity"]`, which is always present (`[]` without parity). The elastic-weight warning of `stm_poles` names `parity=True` as the route. On `mode="ED"` the chain returned is a plain copy, since full ED already has a definite parity and an ED sector would restrict the vertex. All runs below are on d22 with BLAS pinned.
+
+TASK on a promoted state works on both backends. On the 4-site chain of `test_ysr.py` it agrees with ED CVM to 2.6e-11 (v3) and 8.2e-10 ("python"), with elastic weight 0 and missing weight below 7e-16 (run A1). On 8 sites at Lambda=4, J=0.6 A_Lambda, Delta=0.1, U=0.3, maxm=60, nsweeps=15, four plain v3 solves stopped at a mixture. Their elastic weights were 1.2e-2, 9.7e-5, 3.8e-3 and 3.6e-6 of the total, the poles went down to 0.0169 Delta, and u2 ranged from 0.153 to 0.33378. The parity state gave elastic weight 0, one pole per sign at 0.0190312 Delta (ED 0.01903116), and u2 = 0.333787, v2 = 0.196261 with no warning. It took about 9 s, against 7 to 11 s plain (run B1).
+
+On an uncoupled surrogate dimer (L=3, J=0.671, Delta=0.1, J12 = t_b = 0) the odd gap is 1.709e-3 and the in-sector gap 3.42e-3 (ED). Plain solves (maxm=64, nsweeps=20) were 9.4e-5 to 5.2e-4 above the ED energy on v3, with dI/dV off by 1.1e-2 to 4.0e-2 of the peak (7e-5 to 8.8e-4 on "python"). The parity route was 3.4e-12 (v3) and 2.3e-11 ("python") off (run C3). Once the two spins are coupled (J12 = t_b = 0.01) the "python" sector solve converges more slowly than the plain one. Its energy is 6.5e-11 above the ED sector energy, but dI/dV is off by 1.06e-4 of the peak at nsweeps=20 and 1.30e-6 at nsweeps=40, against 5.7e-7 and 9.0e-9 for the plain "python" route. On v3 the parity route gives 4.5e-9 at nsweeps=20, where one plain run was 2.9e-5 off (run r1). The "python" state stays in its sector (<Sz^2> - <Sz>^2 = 5.7e-15, elastic weight 4e-32), but its sum rule <X^dag X> is 1.3e-5 off at nsweeps=20 and 1.6e-7 at 40, against 6.5e-10 on v3 (run r2). So the error is an admixture of another state of the same sector, which the energy and the energy variance do not show. The likely place is the charge penalty of `pyitensor/sector.py`, not tested here.
+
+On 20 sites (rho J=0.15, Delta=1e-3, maxm=128, nsweeps=20, nkry=100) the plain solve was not mixed (elastic 2e-25, E0 equal to the sector E0 to 2e-15). Both routes put the subgap pole 1.0e-5 to 1.1e-5 above |E_ysr| = 2.4865e-4, asymmetric by 1.3e-6 between the bias signs, which is the Krylov size at nkry=100 (run q11, 245 s plain, 220 s parity).
+
+The tangent space of the state matters. For S=1, Dz=-0.05 (n=4) and S=3/2, Dz=-0.04 (n=3) the ground state is a degenerate pair at 2Sz=+-2. A plain solve returns a mixture of the pair, with a larger Schmidt rank. At the chain's cutoff 1e-12 the one-site tangent space of the sector state was 562 and 205, against 786 and 297 plain. Its spectrum was off ED by 8.7e-4 and 4.8e-2 of the peak, in the 2Sz=+1 poles above 0.6, while the subgap pole was exact to 4e-10 (runs D1, q4, q6). ED's own +2 and -2 members give the ED spectrum to 1e-12 (q3), so the state sets this, not the parity. With `fc.cutoff = 0` the tangent space fills the Hilbert space (2870 on v3, 4095 on "python"). The error then drops to 2.6e-7/1.6e-7 (S=1) and 8e-11/2e-10 (S=3/2) on v3/"python" (q5, q6). The plain route was exact on these short chains only because they saturate. `stm_poles` warns when the summed missing weight is more than half of the total, which is the J=0 case. Tests: `tests/test_ysr_parity.py`, 20 tests plus one strict xfail ("python" coupled dimer at nsweeps=20), 217 s on one core (run r5).
+
+### 4.8g Several spins on a superconductor: the surrogate bath (`ysrtk/surrogate.py`)
+
+This is milestone S4 and the surrogate half of S5 of `docs/superconducting_substrate_dIdV_plan.md`. It is the surrogate model of Baran, Frost and Paaske, arXiv:2307.11646, with a Kondo spin in place of their Anderson dot. A flat BCS band enters the impurity only through g(w) = (2/pi) arctan(D/sqrt(Delta^2+w^2))/sqrt(Delta^2+w^2) on the Matsubara axis. L levels with the same gap fit it as sum_l gamma_l/(xi_l^2+Delta^2+w^2), in pairs +-xi_l plus a level at zero for odd L. The fit is the paper's: absolute chi^2 on 1000 points log-spaced in [1e-3 Delta, wc], with wc = D by default. The authors' codes are both MIT licensed: github.com/virgilb91/surrogate_models (ITensors.jl, with the fitted tables) and github.com/emilfrost/fermpy (ED). Neither holds the fit, which was done in Mathematica. `fit_surrogate` uses log parameters and 40 seeded least-squares starts. It gives back their tables at D = wc = 10 Delta to 1e-7 for L = 1 to 8, with the same chi^2 at every L. All levels share Delta, so the star tridiagonalizes into a chain of L sites with uniform onsite pairing. The Nambu Green function of its first site equals the star's to 1e-15, and the onsite energies vanish.
+
+The Kondo map. The local orbital of the surrogate is psi = sum_l sqrt(w_l) a_l, with w_l = pi rho gamma_l. It has the Green function of the continuum at low energy, but its norm is W = pi rho sum gamma_l, so J S.s_psi is J W S.s_{f_1} on the normalized first chain site. W is 0.15, 0.40, 0.66, 0.83 at L = 1 to 4 for D = 10 Delta (0.99 at L = 8). At L = 4 it is 0.25 and 0.03 for D/Delta = 100 and 1000. The reason is that the paper's chi^2 is dominated by w < Delta, where g is largest, so the tail that holds the bandwidth is fitted loosely. We check the map where the answer has no logarithm: the classical YSR energy of a static field v on psi, against the exact continuum solution of 1 = v g(E)(E+Delta) at finite D. At L = 4 and v = 1 it is off by 0.004, 0.011, 0.013 Delta for D/Delta = 10, 100, 1000 (0.02 to 0.05 Delta at v = 0.3 and 3), flat in D/Delta. The potential scattering V is mapped the same way.
+
+The surrogate does not give the Kondo scale. One spin, E_odd - E_even against the Wilson chain of `ysr.py`: D = 1, chain J*A_Lambda, maxm=128, nsweeps=20, n two sites past `reaches_gap`, v3 on d22; surrogate by ED locally; Delta from 1e-4 to 1, four points per decade:
+
+    rho J   Delta_c Wilson (Lambda 4 / 2)   Delta_c surrogate L=1..4
+    0.15    2.0e-3   / -                    none (free spin at every Delta)
+    0.20    1.39e-2  / 1.18e-2              none
+    0.30    0.106    / 0.091                none, none, 0.049, 0.073
+    0.45    0.418    / 0.354                0.123, 0.285, 0.323, 0.330
+
+At fixed rho J the surrogate's E_odd-E_even/Delta goes to a constant as Delta/D -> 0 (L = 4: -0.594, -0.204, +0.484, +0.853 at the four rho J). This is the zero-bandwidth behaviour of a level of weight W ~ Delta/D, so the transition sits at a critical rho J of about 0.3 instead of at Delta_c ~ 4 T_K. Wherever Delta << D the surrogate underscreens, at every L. For Delta >= 0.1 D the reference itself moves with Lambda: Lambda=4 and Lambda=2 differ by up to 0.08 Delta there, since A_Lambda is a low-energy correction. Lambda = 1.5 (Delta = 0.1 to 1, n = 15 to 26 sites, d22) moves only 0.003 to 0.02 Delta further from Lambda = 2, so it is the reference there. It was run at one maxm (128) and one length per point, neither varied, and there is no z-averaging. It does not reach the transition at rho J = 0.3, which lies below Delta = 0.1. Against it, the error of L = 4 is at most 0.036, 0.027, 0.039, 0.056 Delta at Delta = 0.1 for rho J = 0.15, 0.2, 0.3, 0.45, and at most 0.010 Delta for Delta >= 0.56. L = 3 is as good at rho J <= 0.2 (0.025) and worse above (0.083, 0.107 at Delta = 0.1). L = 1 and 2 are off by up to 0.53 and 0.29 Delta. At rho J = 0.45, Delta_c is 0.34 at Lambda = 1.5 against 0.330 at L = 4. So the surrogate is a quantitative model for Delta >= 0.1 D at L = 4, and above D/2 at any L >= 2. A fit of the relative deviation |1-g~/g|^2, which keeps W near one, was tried and dropped. It moved Delta_c at rho J = 0.2 to 8.4e-3 at L = 4, but put it 3.5 times low at rho J = 0.15, and it gave E_odd-E_even = 7.6 Delta at L = 3, above the bath's own gap.
+
+Arguments. `surrogate_kondo_chain(N, J, Delta, L=None, D, t_b, J12, B, V, wc, fit=)`: L = None means 2 without a fit and the fit's own L with one. A fit passed in must match Delta, D, and L and wc when they are given, or ValueError is raised; before this check a fit at another gap was taken silently (`test_a_fit_made_elsewhere_is_refused`). `sector_energies(fc, sectors=None)` solves (0, 1) at B = 0, and every 2Sz from -(N+1) to N+1 at B != 0. That is 2N+3 warm-started solves on DMRG. With (0, 1) alone a field put E_odd 0.18 Delta off, since the lowest member of the doublet is at 2Sz = -1 (`test_field_solves_both_signs_of_sz`). `Sz_ground` is the smallest |2Sz| within 1e-10 max(1, |E0|) of E0, the rule of `ysr.subgap_energies`. Exact equality picked 2Sz = 2 on a ferromagnetic triplet whose 2Sz = 0 member was 6e-15 higher (`test_degenerate_multiplet_takes_the_smallest_sz`).
+
+Sector solves. Every spin is a native spinful site with the penalty Upen (N-1)^2, so with N spins 2Sz = N + N_bath mod 2. H conserves the charge of each spin site, and a DMRG solve keeps the charges of its start. The v3 sector start (`sector_mps`, a sum of at most 16 random in-sector product states) had no component with all spins singly occupied at four spins. Both sectors stopped at E = +4.40 (L = 1) and +4.52 (L = 2), and at L = 3 the even sector stopped at +4.21 instead of -1.97. `_warm_sector_solve` first solves with a hopping 0.1 Upen between each spin site and its first bath site, then sweeps the true H from that state. `sector_energies` raises if sum_i <(N_i-1)^2> exceeds 1e-6. With a quarter of the sweeps in the warm stage, the odd sector of four spins at L=1 on v3 ended 1.2e-3 above ED instead of 4.7e-4, so the warm stage gets the full nsweeps. That case also converges slowly on v3 for another reason: it needs 80 sweeps for 3e-13 (maxm 256 at 20 sweeps did not help), while `"python"` reaches 1e-8 at 20. At L=3 the same sector is converged at 20 sweeps (N=4: 4e-13 to 80 sweeps; N=6: 2.9e-10). `"python"` excited states inside a sector are refused. They ended Upen and 2 Upen above ED, with one or two spin sites at the wrong charge, since only the first sweep of a fresh ground-state solve mixes noise in.
+
+Dimer physics, by ED at L = 3, Delta = 0.1, D = 1, rho J = 0.45 (each spin screened, E_ysr = 0.443 Delta). Against arXiv:1008.1734 section VII: the two S=1/2 states (2Sz=1) stay exactly degenerate at every J12. The singlet of the two atomic spins comes down from 0.886 Delta at J12 = 0 and crosses the Kondo singlet between J12 = 2 and 3 Delta. The paper has 6 Delta at Delta/T_K = 0.86; the surrogate has no T_K, so only the order is comparable. At J12 = 10 Delta the odd states are at 0.944 Delta, near the gap edge Delta of odd L. The ferromagnetic triplet comes down much more slowly (0.28 Delta at J12 = -8 Delta, no crossing yet). At t_b = 0 the crossing is a true crossing for a plain reason: J12 moves no electron, so the parity of each bath is conserved. The Kondo singlet (both baths odd) and the singlet of the atomic spins (both even) cannot mix. Against arXiv:2203.15011: at V = 0 the two odd states do not split under t_b (to 1e-14 at L = 2). In the zero-bandwidth model of that paper, eq. A8, the splitting is t|u^2-v^2|, with u and v the amplitudes on the coupled site. Its eq. A1 would give |u^2-v^2| = 0.995 for V/Delta = 10, while the surrogate, where V enters as V W, gives split/t_b = 0.257. With V = 1, J = 1.5 (E_ysr = 0.290 Delta) the splitting is linear in t_b: 0.0257, 0.0514, 0.1027 Delta at t_b = 0.1, 0.2, 0.4 Delta, 0.2548 and 0.4960 Delta at 1 and 2 Delta. At t_b = 2 Delta the lower state is 0.040 Delta above the ground state, near the singly screened ground state of that paper.
+
+STM. `get_stm_spectrum(fc, es, spin=i)` is `ysr.get_stm_spectrum` with the spin and the first site of its bath. TASK against ED (CVM, itself exact to 3e-11 against a dense Lehmann sum) is 2.8e-8 on the dimer when the ground state is gapped (first excitation 0.65 Delta), on both backends. Near a degeneracy the plain solve that the correlator uses mixes in the other parity: at a gap of 1.7e-3 the v3 energy was 1e-6 off and the spectrum 1.4e-2 of a peak of 7.35.
+
+Chains, v3 on d22: L = 3, J = 1.5, V = 1.0, Delta = 0.1, t_b = 0.05, J12 = 0, nsweeps = 20, maxm = 128. Spectra on 401 points in [-0.5, 0.5] Delta (step 0.0025 Delta) with broadening 0.004 Delta and U = 0.3. The TASK Krylov size nkry has to grow with N. At N = 8 the default nkry = 100 gave six peaks for eight states, some at |eV| differing by up to 0.0125 Delta between the two bias signs. nkry = 300 gave all eight, at the same |eV| on both signs and at both spins, with the lowest on the sector value x. No nkry above 300 was tried. The earlier spectra on a coarse grid (step 0.025 Delta) at nkry = 100 for N = 6 and 8, and their maxm comparison, are withdrawn; N = 6 has energies only.
+
+    N  x=(E1-E0)/Delta  sectors  plain gs  nkry  dI/dV end  dI/dV middle
+    4  0.18629          372 s*   59 s      100   226 s      176 s
+    6  0.17448          176 s    142 s     -     -          -
+    8  0.16951          208 s    173-182 s 300   1712 s     1682 s
+
+(* with nstates = 4 in the odd sector; 102 s for one state per sector.) The even sector agrees with the plain solve to 1e-12 at N = 4 (run 'chain') and 1.3e-12 at N = 8 (runs 'chain_fine' and 'chain_nkry'). The N YSR states form a band, 0.186 to 0.393 Delta at N = 4 and 0.170 to 0.410 Delta at N = 8. At N = 8 the band has the positions of a cosine band of 8 open sites to the grid step. Every state shows at every spin. At N = 4 the end/middle weight ratio is 0.39, 2.6, 2.6, 0.39 (both bias signs, 0.382 to 0.390 and 2.56 to 2.61), against sin^2(k pi/5)/sin^2(2k pi/5) = 0.382, 2.618, 2.618, 0.382 of the open-chain modes. So the lowest state is 2.6 times weaker at the end, not absent there. At N = 8 (end against spin 3) the ratio is 0.14, 2.7, 1.00, 2.3, 2.3, 1.00, 2.6, 0.14, against 0.121, 3.53, 1, 2.35, 2.35, 1, 3.53, 0.121. It agrees to a few percent except for k = 2 and 7 (2.7 against 3.5) and k = 1 and 8 (0.14 against 0.12). The tests are in `tests/test_ysr_surrogate.py`, and the example is `examples/kondo/ysr_dimer_surrogate`.
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,

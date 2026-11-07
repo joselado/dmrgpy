@@ -19,6 +19,38 @@ reorthogonalization. For the flat band it reproduces Wilson's closed form
 to 1e-15 relative, down to t_n ~ 1e-12 (n = 50 at Lambda = 3), so the
 precision of the coefficients is not what limits the chain length; the
 bond dimension the ground state needs is.
+
+Two meshes. The mean-energy mesh above (mesh="mean", the default) has a
+smaller low-energy density of states than the continuum, rho/A_Lambda
+with Wilson's A_Lambda = (1+1/Lambda) ln(Lambda)/(2(1-1/Lambda)), since
+the mean of an interval [x/Lambda, x] sits A_Lambda above its logarithmic
+mean. Its top interval also carries too much weight near the band edge.
+The representative-energy mesh of Zitko and Pruschke (mesh="zp", PRB 79,
+085106, arXiv:0810.4765, eqs. 35-36) keeps the same cut points and the
+same weights and moves the levels, so that the z-averaged density of
+states of f_0 is rho(e) at every energy, the band edge included. For the
+flat band, in units of the band edge and with the paper's twist
+Z = z for z > 0 and Z = 1 for z = 0 (the same mesh), the top interval
+[Lambda^-Z, 1] has its level at
+
+    E_1 = (1 - Lambda^-Z)/ln(Lambda) + 1 - Z,
+
+and every lower interval [x/Lambda, x] its logarithmic mean
+x (1 - 1/Lambda)/ln(Lambda), the energy of Campo and Oliveira (PRB 72,
+104432). Then |dE/dz| equals the weight of the interval, the condition
+A_f0(w) = rho(w) of the paper; NRG Ljubljana's nrginit has the same closed
+form. A coupling on this chain acts on the impurity as the same coupling
+in the continuum, with no A_Lambda. At z=0 every level is the mean one
+divided by A_Lambda (the remainder below aside), so there the zp chain
+is exactly the mean chain with every energy divided by A_Lambda, and an
+impurity on it (J bare) is the
+mean-mesh one (J*A_Lambda) in units shrunk by A_Lambda: a ratio of two
+energy scales is the same on both meshes at z=0, and the meshes differ
+only at z > 0, through the top interval. The general density of states needs
+the differential equation of the paper's appendix B, which is not done
+here: mesh="zp" with dos raises NotImplementedError. The remainder
+[0, x Lambda^-nint] keeps its level at the mean on both meshes; its
+weight is Lambda^-nint.
 """
 
 import warnings
@@ -38,8 +70,49 @@ def flat_band_hoppings(n, Lambda=2.0, D=1.0):
             /np.sqrt((1.0-L**(-2*m-1))*(1.0-L**(-2*m-3))))
 
 
-def star_levels(Lambda=2.0, band=(-1.0, 1.0), dos=None, nint=60):
+MESHES = ("mean", "zp")
+
+
+def _check_mesh(mesh, dos):
+    if mesh not in MESHES:
+        raise ValueError("mesh must be one of %s, got %r"
+                         % (", ".join('"%s"' % m for m in MESHES), mesh))
+    if mesh == "zp" and dos is not None:
+        raise NotImplementedError("mesh=\"zp\" is the closed form of the flat "
+            "band; a general density of states needs the differential "
+            "equation of Zitko and Pruschke (arXiv:0810.4765, appendix B), "
+            "which is not implemented; use mesh=\"mean\"")
+
+
+def _zp_level(k, a, b, edge, Lambda, z):
+    """Representative energy of Zitko and Pruschke (flat band) of the
+    interval k (k = 0 is the top one) with ends a and b, on the side whose
+    band edge is edge (module docstring)."""
+    u_lo, u_hi = min(abs(a), abs(b)), max(abs(a), abs(b))
+    L = float(Lambda)
+    if k == 0:
+        Z = z if z > 0.0 else 1.0
+        u = abs(edge)*((1.0 - L**(-Z))/np.log(L) + 1.0 - Z)
+    elif u_lo == 0.0:
+        u = u_hi/2.0 # the remainder, at its mean
+    else:
+        u = (u_hi - u_lo)/np.log(u_hi/u_lo)
+    return np.sign(edge)*u
+
+
+def star_levels(Lambda=2.0, band=(-1.0, 1.0), dos=None, nint=60, z=0.0,
+                mesh="mean"):
     """Levels xi and weights w of the logarithmically discretized band.
+
+    z in [0,1) is the twist of the discretization: the cut points are
+    +-D Lambda^-(m+z), with one more interval [D Lambda^-z, D] at the top
+    when z > 0. Averaging a spectrum over several z (z-averaging) removes
+    most of the artificial structure of one logarithmic mesh.
+
+    mesh is where each interval keeps its level: "mean" (default) at the
+    mean energy of the interval, "zp" at the representative energy of
+    Zitko and Pruschke (flat band only, module docstring). The weights are
+    the integrals of rho over the intervals on both meshes.
 
     dos is the density of states per spin, a function of energy (flat if
     None); it is normalized here, so only its shape matters. nint intervals
@@ -52,13 +125,18 @@ def star_levels(Lambda=2.0, band=(-1.0, 1.0), dos=None, nint=60):
                          "(or emin = 0 < emax for a bosonic bath)")
     if Lambda <= 1.0:
         raise ValueError("Lambda must be larger than 1")
+    if not 0.0 <= z < 1.0:
+        raise ValueError("the twist z must be in [0,1)")
+    _check_mesh(mesh, dos)
     xs, ws = [], []
     for edge in (emax, emin):
         if edge == 0.0:
             continue # one-sided (bosonic) bath
-        pts = edge*float(Lambda)**(-np.arange(nint+1, dtype=float))
+        pts = edge*float(Lambda)**(-np.arange(nint+1, dtype=float)-z)
+        if z > 0.0:
+            pts = np.insert(pts, 0, edge)
         pts = np.append(pts, 0.0)
-        for a, b in zip(pts[1:], pts[:-1]):
+        for k, (a, b) in enumerate(zip(pts[1:], pts[:-1])):
             lo, hi = min(a, b), max(a, b)
             if dos is None:
                 w, e1 = hi-lo, (hi*hi-lo*lo)/2.0
@@ -67,7 +145,10 @@ def star_levels(Lambda=2.0, band=(-1.0, 1.0), dos=None, nint=60):
                 w = quad(dos, lo, hi, epsabs=0.0, epsrel=1e-13)[0]
                 e1 = quad(lambda e: e*dos(e), lo, hi, epsabs=0.0, epsrel=1e-13)[0]
             if w > 0.0:
-                xs.append(e1/w)
+                if mesh == "mean":
+                    xs.append(e1/w)
+                else:
+                    xs.append(_zp_level(k, a, b, edge, Lambda, z))
                 ws.append(w)
     w = np.array(ws)
     if np.any(w < 0.0):
@@ -75,15 +156,26 @@ def star_levels(Lambda=2.0, band=(-1.0, 1.0), dos=None, nint=60):
     return np.array(xs), w/np.sum(w)
 
 
-def wilson_chain(n, Lambda=2.0, band=(-1.0, 1.0), dos=None, nint=None):
+def wilson_chain(n, Lambda=2.0, band=(-1.0, 1.0), dos=None, nint=None, z=0.0,
+                 mesh="mean"):
     """Onsite energies eps (n values) and hoppings t (n-1 values) of the
     Wilson chain of n sites, for a band on [emin, emax] with density of
-    states dos (flat if None, normalized here)."""
+    states dos (flat if None, normalized here), twist z and mesh ("mean"
+    or "zp", see star_levels). On mesh="mean" the impurity sees the
+    low-energy density of states rho/A_Lambda; on mesh="zp" it sees rho.
+
+    The same chain describes a BCS band with s-wave gap Delta: the
+    pairing Delta sum_k (c^dag_{k up} c^dag_{-k dn} + h.c.) is diagonal in
+    energy and the same for both spins, and the Lanczos map is one real
+    orthogonal matrix applied to both spins, so it becomes the uniform
+    onsite pairing Delta sum_n (f^dag_{n up} f^dag_{n dn} + h.c.) on every
+    chain site (see ysr.py)."""
     if n < 1:
         raise ValueError("a Wilson chain needs at least one site")
     if nint is None:
         nint = n + 20 # site n probes the intervals around m ~ n/2
-    xi, w = star_levels(Lambda=Lambda, band=band, dos=dos, nint=nint)
+    xi, w = star_levels(Lambda=Lambda, band=band, dos=dos, nint=nint, z=z,
+                        mesh=mesh)
     if 2*len(xi) < n:
         raise ValueError("not enough intervals for %d sites, raise nint" % n)
     V = np.zeros((len(xi), n))
