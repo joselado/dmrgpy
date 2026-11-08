@@ -116,6 +116,41 @@ def test_chain_algebra_against_ed_and_python(version, model):
 
 
 @pytest.mark.parametrize("version", JULIA)
+def test_amb_is_exact_at_small_maxm(version):
+    """wf.aMb and chain.aMb contract <a|M|b> exactly. At maxm=6 on 8 sites
+    the truncated H|gs> of dot(H*gs) is visibly off, and the exact
+    contraction is what makes <gs|H|gs> equal the DMRG energy. All three
+    numbers come from the same state, so the random start does not matter."""
+    c = spinchain.Spin_Chain([2]*8, itensor_version=version)
+    h = sum(c.Sx[i]*c.Sx[i+1] + c.Sy[i]*c.Sy[i+1] + c.Sz[i]*c.Sz[i+1]
+            for i in range(7))
+    c.set_hamiltonian(h)
+    c.maxm = 6
+    gs = c.get_gs()
+    e0 = c.gs_energy()
+    assert gs.aMb(h, gs).real == pytest.approx(e0, abs=1e-8)
+    assert c.aMb(gs, h, gs).real == pytest.approx(e0, abs=1e-8)
+    assert abs(gs.dot(h*gs).real - gs.aMb(h, gs).real) > 1e-6
+
+
+@pytest.mark.parametrize("version", JULIA)
+@pytest.mark.xfail(strict=True, reason="C_k|psi> on a julia_live fermion "
+        "state needs parity-odd fermion MPOs (package B); until then "
+        "OpSum to MPO raises 'Parity-odd fermionic terms not yet supported'")
+def test_fermion_dm_and_correlation_matrix(version):
+    cj, hj = _fermions(6, version)
+    cp, hp = _fermions(6, "python")
+    gsj = cj.get_gs()
+    gse = cp.get_gs(mode="ED")
+    dmj = gsj.get_dm(inds=[0, 1])
+    dme = gse.get_dm(inds=[0, 1])
+    assert np.max(np.abs(np.array(dmj) - np.array(dme))) < 1e-6
+    cmj = gsj.get_correlation_matrix()
+    cme = cp.get_correlation_matrix(mode="ED")
+    assert np.max(np.abs(np.array(cmj) - np.array(cme))) < 1e-6
+
+
+@pytest.mark.parametrize("version", JULIA)
 def test_random_state_orthogonal(version):
     c, h = _heisenberg(6, version, maxm=64)
     gs = c.get_gs()
