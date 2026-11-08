@@ -50,7 +50,9 @@ against a pyitensor (itensor_version="python", no compiled extension
 needed) chain too and found to work unmodified, matching the ED
 reference even more tightly (~1e-14) than the compiled v3 backend does.
 The itensor_version=3 parametrization is still skipped when no compiled
-backend is available; itensor_version="python" always runs.
+backend is available; itensor_version="python" always runs. The
+julia_live parametrization drives tdvp.jl's tdvp_step and is skipped
+when no Julia toolchain is available.
 """
 import numpy as np
 import pytest
@@ -60,6 +62,7 @@ from dmrgpy import cppext
 from dmrgpy.kondospectrumtk.edkondo import KondoSpectrum
 from dmrgpy.kondospectrumtk.twotime import kondo_term_from_two_time
 from dmrgpy.kondospectrumtk.edtwotimeref import _levi_civita_coeff_G_chunk
+from _helpers import julia_live_param
 
 G = 2.0
 MUB = 5.7883818066e-5 # eV/T
@@ -69,6 +72,7 @@ _BACKENDS = [
         not cppext.available(3),
         reason="needs a compiled itensor_version=3 backend"), id="v3"),
     pytest.param("python", id="pyitensor"),
+    julia_live_param(),
 ]
 
 
@@ -203,3 +207,20 @@ def test_two_time_kondo_term_dmrg_matches_grid_consistent_ed_reference(itensor_v
                                         omega0, Gamma0)
 
     assert np.max(np.abs(dmrg_term - ed_term)) < 1e-4
+
+
+@pytest.mark.parametrize("itensor_version", [julia_live_param()])
+def test_get_kondo_spectrum_order3_julia_live_matches_python(itensor_version):
+    """The public call, get_kondo_spectrum(mode="DMRG", order=3), on
+    julia_live against the same call on "python": the second-order CVM
+    term and the two-time Kondo term together, on the 3-site chain"""
+    n_t2_half, n_tau_half = 10, 15
+    kw = dict(site=0, T=0.0, Jrho_s=-0.05, order=3, mode="DMRG",
+              submode="CVM", es=np.linspace(0, 4e-3, 81), omega0=2e-3,
+              Gamma0=5e-6, dt2=25./5e-6/n_t2_half, n_t2_half=n_t2_half,
+              dtau=(2*np.pi/2e-5)/n_tau_half, n_tau_half=n_tau_half)
+    eVs = np.linspace(-2e-3, 2e-3, 5)
+    _, ref = _build_chain("python").get_kondo_spectrum(eVs, **kw)
+    _, got = _build_chain(itensor_version).get_kondo_spectrum(eVs, **kw)
+    assert np.max(np.abs(ref)) > 1.
+    assert np.max(np.abs(np.array(got) - np.array(ref))) < 1e-5

@@ -266,9 +266,9 @@ class KondoSpectrumMixin():
             # TASK wherever it exists: exact at saturation, no grids to
             # choose, and orders of magnitude faster than the two-time
             # TDVP Kondo term on the same chain. v2 and julia_live have no
-            # TASK, so they get the correlator route, which there covers
+            # TASK, so they get the correlator route. On v2 it covers
             # order=2 only: the two-time Kondo term needs the TDVP of
-            # itensor_version="python" or 3.
+            # itensor_version="python", 3 or "julia_live".
             from ..taskdmrg import BACKENDS
             submode = "TASK" if self.itensor_version in BACKENDS else "KPM"
         if submode == "TASK":
@@ -320,11 +320,13 @@ class KondoSpectrumMixin():
             split_tol = delta
             short = self.get_mode(mode="DMRG") != "DMRG"
             if (order == 3 and not short
-                    and self.itensor_version not in ("python", 3)):
+                    and self.itensor_version not in ("python", 3,
+                                                     "julia_live")):
                 raise NotImplementedError(
                     "get_kondo_spectrum(mode=\"DMRG\", order=3) with "
                     "submode=%r: the two-time Kondo term runs on the TDVP "
-                    "of itensor_version=\"python\" and 3 only (got "
+                    "of itensor_version=\"python\", 3 and \"julia_live\" only "
+                    "(got "
                     "itensor_version=%r); use order=2, mode=\"ED\", or one "
                     "of those backends" % (submode, self.itensor_version))
             def terms():
