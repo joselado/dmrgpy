@@ -134,7 +134,10 @@ def start_mps(self):
     Built on self.jlsites directly, not through the chain-level
     random_state(), which honours self.mode and on mode="ED" returns an
     edtk State with no .jlmps."""
-    jlmps = Mainjl.dmrg_start_state(self.jlsites,start_linkdims(self))
+    from . import sector
+    jlmps = sector.start_state(self,start_linkdims(self)) # in a sector
+    if jlmps is None:
+        jlmps = Mainjl.dmrg_start_state(self.jlsites,start_linkdims(self))
     return MPS(jlmps,MBO=self)
 
 

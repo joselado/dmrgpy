@@ -324,3 +324,196 @@ def test_changing_sector_between_calls_actually_re_solves():
     fc.set_conserved_sector(Nf=6)
     e6 = fc.gs_energy()
     assert abs(e3 - e6) > 1.0
+
+
+# -- itensor_version="julia_live" ------------------------------------------
+#
+# The same API on the live Julia backend, with ITensors.jl's QN site
+# indices (mpsjulialive/sector.py). Every solve starts from an unseeded
+# random MPS in the sector, so the energies are checked on more than one
+# fresh start.
+
+from _helpers import julia_live_param  # noqa: E402
+
+JL = [julia_live_param()]
+
+
+def _jl(chain):
+    chain.setup_julia()
+    return chain
+
+
+def _julia_has_electron_sites():
+    """True once mpsjulialive/sites.jl builds spinful (code 1) sites"""
+    from dmrgpy.mpsjulialive.juliasession import Main, to_julia_strvec
+    try:
+        Main.get_sites(to_julia_strvec(["1", "1"]))
+    except Exception:
+        return False
+    return True
+
+
+@pytest.mark.parametrize("version", JL)
+@pytest.mark.parametrize("nf", [0, 1, 3, 6, 8])
+def test_julia_live_fermion_number_sector_matches_ed(version, nf):
+    fc, h, number = tV_chain(8)
+    _jl(fc)
+    fc.set_hamiltonian(h)
+    fc.set_conserved_sector(Nf=nf)
+    ref = ed_sector_energy(fc, h, number, nf)
+    for _ in range(2):  # two random starts
+        fc.restart()
+        assert fc.gs_energy() == pytest.approx(ref, abs=DMRG_TOL)
+        assert fc.vev(number).real == pytest.approx(nf, abs=1e-8)
+
+
+@pytest.mark.parametrize("version", JL)
+@pytest.mark.parametrize("two_sz", [-6, 0, 2, 8])
+def test_julia_live_total_sz_sector_matches_ed(version, two_sz):
+    sc, h, sz = heisenberg_chain(8)
+    _jl(sc)
+    sc.set_hamiltonian(h)
+    sc.set_conserved_sector(Sz=two_sz)
+    ref = ed_sector_energy(sc, h, sz, two_sz / 2.0)
+    for _ in range(2):
+        sc.restart()
+        assert sc.gs_energy() == pytest.approx(ref, abs=DMRG_TOL)
+        assert sc.vev(sz).real == pytest.approx(two_sz / 2.0, abs=1e-8)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_lowest_sector_is_the_ground_state(version):
+    n = 6
+    fc, h, number = tV_chain(n)
+    _jl(fc)
+    fc.set_hamiltonian(h)
+    e_ed = fc.gs_energy(mode="ED")
+    energies = []
+    for nf in range(n + 1):
+        fc.set_conserved_sector(Nf=nf)
+        energies.append(fc.gs_energy())
+    assert min(energies) == pytest.approx(e_ed, abs=DMRG_TOL)
+    fc.set_conserved_sector()
+    assert fc.gs_energy() == pytest.approx(e_ed, abs=DMRG_TOL)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_excited_states_stay_inside_the_sector(version):
+    n = 8
+    sc, h, sz = heisenberg_chain(n)
+    _jl(sc)
+    sc.set_hamiltonian(h)
+    sc.set_conserved_sector(Sz=0)
+    got = np.sort(np.array(sc.get_excited(n=3)).real)
+    ed = sc.get_ED_obj()
+    H = np.array(MO2matrix(h, ed).todense())
+    S = np.array(MO2matrix(sz, ed).todense())
+    sel = np.abs(np.diag(S).real) < 1e-9
+    want = np.linalg.eigvalsh(H[np.ix_(sel, sel)])[:3]
+    assert got == pytest.approx(want, abs=1e-5)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_conserving_observables_work_and_others_raise(version):
+    sc, h, sz = heisenberg_chain(8)
+    _jl(sc)
+    sc.set_hamiltonian(h)
+    sc.set_conserved_sector(Sz=0)
+    sc.gs_energy()
+    assert sc.vev(sc.Sz[0] * sc.Sz[1]).real == pytest.approx(
+        sc.vev(sc.Sz[6] * sc.Sz[7]).real, abs=1e-6)
+    with pytest.raises(ValueError, match="Sz=2|Sz=-2|definite charge"):
+        sc.vev(sc.Sx[0])
+    _, spectrum = sc.get_dynamical_correlator(name=(sc.Sz[0], sc.Sz[0]),
+                                              es=np.linspace(-1.0, 3.0, 20))
+    assert np.all(np.isfinite(spectrum))
+    with pytest.raises(ValueError):
+        sc.get_dynamical_correlator(name=(sc.Sx[0], sc.Sx[0]),
+                                    es=np.linspace(-1.0, 3.0, 20))
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_non_conserving_hamiltonian_is_rejected(version):
+    n = 6
+    sc = _jl(spinchain.Spin_Chain([2] * n))
+    h = sum(sc.Sz[i] * sc.Sz[i + 1] for i in range(n - 1)) \
+        + sum(0.3 * sc.Sx[i] for i in range(n))
+    sc.set_hamiltonian(h)
+    sc.set_conserved_sector(Sz=0)
+    with pytest.raises(ValueError):
+        sc.gs_energy()
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_invalid_and_rejected_requests(version):
+    fc, h, _ = tV_chain(8)
+    _jl(fc)
+    fc.set_hamiltonian(h)
+    fc.set_conserved_sector(Nf=3)
+    e3 = fc.gs_energy()
+    with pytest.raises(ValueError, match="empty"):
+        fc.set_conserved_sector(Nf=99)
+    assert fc.conserved_sector == {"Nf": 3}
+    assert fc.gs_energy() == pytest.approx(e3, abs=DMRG_TOL)
+    # the state kept is still on the chain's site set: operators reach it
+    assert fc.vev(sum(fc.N)).real == pytest.approx(3, abs=1e-8)
+    with pytest.raises(ValueError):
+        fc.set_conserved_sector(Sz=0)  # spinless fermions carry no Sz
+    with pytest.raises(ValueError):
+        fc.set_conserved_sector(Nq=1)
+    with pytest.raises(ValueError):
+        fc.set_conserved_sector(Nf=1.5)
+    assert fc.conserved_sector == {"Nf": 3}
+    assert fc.vev(sum(fc.N)).real == pytest.approx(3, abs=1e-8)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_sector_survives_a_clone_and_a_switch(version):
+    fc, h, number = tV_chain(8)
+    fc.set_hamiltonian(h)
+    fc.set_conserved_sector(Nf=5)
+    ref = ed_sector_energy(fc, h, number, 5)
+    _jl(fc)  # switching onto julia_live keeps the sector
+    assert fc.conserved_sector == {"Nf": 5}
+    assert fc.gs_energy() == pytest.approx(ref, abs=DMRG_TOL)
+    clone = fc.clone()
+    assert clone.conserved_sector == {"Nf": 5}
+    assert clone.gs_energy() == pytest.approx(ref, abs=DMRG_TOL)
+    # the clone shares the original's indices, so their states contract
+    assert abs(fc.get_gs().dot(clone.get_gs())) == pytest.approx(1.0, abs=1e-6)
+    fc.set_conserved_sector(Nf=2)
+    assert fc.gs_energy() == pytest.approx(
+        ed_sector_energy(fc, h, number, 2), abs=DMRG_TOL)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_hubbard_conserves_a_chosen_subset(version):
+    if not _julia_has_electron_sites():
+        pytest.skip("needs package C's code-1 (Electron) sites on julia_live")
+    n = 4
+    hc = _jl(fermionchain.Spinful_Fermionic_Chain_Native(n))
+    h = 0
+    for i in range(n - 1):
+        for c, cdag in [(hc.Cup, hc.Cdagup), (hc.Cdn, hc.Cdagdn)]:
+            h = h + cdag[i] * c[i + 1] + cdag[i + 1] * c[i]
+    h = h + sum(4.0 * hc.Nup[i] * hc.Ndn[i] for i in range(n))
+    hflip = h + sum(0.3 * (hc.Cdagup[i] * hc.Cdn[i] + hc.Cdagdn[i] * hc.Cup[i])
+                    for i in range(n))
+    ntot = sum(hc.Ntot)
+    szop = sum(hc.Nup) + (-1) * sum(hc.Ndn)
+    hc.set_hamiltonian(hflip)
+    hc.set_conserved_sector(Nf=n)
+    assert hc.gs_energy() == pytest.approx(
+        ed_sector_energy(hc, hflip, ntot, n), abs=DMRG_TOL)
+    hc.set_conserved_sector(Nf=n, Sz=0)
+    with pytest.raises(ValueError):
+        hc.gs_energy()
+    hc.set_hamiltonian(h)
+    hc.set_conserved_sector(Nf=n, Sz=2)
+    ed = hc.get_ED_obj()
+    H = np.array(MO2matrix(h, ed).todense())
+    dn = np.diag(np.array(MO2matrix(ntot, ed).todense())).real
+    dz = np.diag(np.array(MO2matrix(szop, ed).todense())).real
+    sel = (np.abs(dn - n) < 1e-9) & (np.abs(dz - 2) < 1e-9)
+    ref = float(np.linalg.eigvalsh(H[np.ix_(sel, sel)])[0])
+    assert hc.gs_energy() == pytest.approx(ref, abs=DMRG_TOL)

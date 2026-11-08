@@ -39,17 +39,18 @@ def get_mode(self,mode="DMRG"):
     """Return the mode of the calculation"""
     out = resolve_mode(self,mode=mode) # which solver actually answers
     # A conserved sector (Many_Body_Chain.set_conserved_sector) needs a
-    # solver that has quantum numbers: DMRG with itensor_version=3 or
-    # "python", or ED (which targets a sector by restricting to the basis
-    # states carrying the requested charge, see edtk/edchain.py). DMRG on
-    # itensor_version=2 or "julia_live" has none, and would silently answer
-    # with the *global* ground state instead of the requested sector's, so
-    # that combination raises rather than answering.
+    # solver that has quantum numbers: DMRG with itensor_version=3,
+    # "python" or "julia_live", or ED (which targets a sector by restricting
+    # to the basis states carrying the requested charge, see
+    # edtk/edchain.py). DMRG on itensor_version=2 has none, and would
+    # silently answer with the *global* ground state instead of the
+    # requested sector's, so that combination raises rather than answering.
     sector = getattr(self,"conserved_sector",None)
-    if sector and out=="DMRG" and self.itensor_version not in (3,"python"):
+    if sector and out=="DMRG" and self.itensor_version not in (3,"python",
+            "julia_live"):
         raise NotImplementedError(
             "conserved sector %s: DMRG can only target a quantum-number "
-            "sector with itensor_version=3 or itensor_version=\"python\" "
+            "sector with itensor_version=3, \"python\" or \"julia_live\" "
             "(this chain uses %s). Switch backend with setup_cpp(version=3)/"
             "setup_python(), run it with mode=\"ED\", or clear the sector "
             "with set_conserved_sector()."
