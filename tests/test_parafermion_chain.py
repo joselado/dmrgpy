@@ -19,6 +19,8 @@ import pytest
 from dmrgpy import parafermionchain
 
 from _helpers import energy_ed_v2_v3
+from _helpers import julia_live_param
+from _julia_site_helpers import check_julia_live_against_ed
 
 DMRG_TOL = 1e-6
 
@@ -44,3 +46,23 @@ def test_parafermion_chain_energy():
     assert e_ed == pytest.approx(-5.0, abs=1e-8)
     assert e_v2 == pytest.approx(-5.0, abs=DMRG_TOL)
     assert e_v3 == pytest.approx(-5.0, abs=DMRG_TOL)
+
+
+@pytest.mark.parametrize("Z", [2, 3, 4])
+@pytest.mark.parametrize("v", [julia_live_param()])
+def test_parafermion_chain_julia_live_matches_ed(Z, v):
+    """julia_live builds the Z2/Z3/Z4 clock sites of sites_custom.jl:
+    4-site chain with a transverse term Tau + Tau^dagger and the
+    parafermion hopping Chi_i^dagger Chi_(i+1) + h.c., whose Tau strings
+    are explicit in the terms, against ED"""
+    n = 4
+    pc = parafermionchain.Parafermionic_Chain(n, Z=Z)
+    h = -1.2*(pc.Tau[0] + pc.Taud[0])
+    for i in range(1, n):
+        h = h - 1.2*(pc.Tau[i] + pc.Taud[i])
+    for i in range(n - 1):
+        hop = pc.Chid[i]*pc.Chi[i + 1]
+        h = h - (hop + hop.get_dagger())
+    h = h + 0.3*pc.N[0]
+    obs = [pc.Tau[1], pc.N[0], pc.Sig[0]*pc.Sigd[1], pc.Chid[0]*pc.Chi[2]]
+    check_julia_live_against_ed(pc, h, obs, maxm=40, nsweeps=20)
