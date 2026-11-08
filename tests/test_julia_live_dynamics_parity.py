@@ -212,11 +212,43 @@ def test_hermitian_only_submodes_refuse_a_non_hermitian_h():
 
 
 def _applyinverse_available(sc):
+    """Skip only on the refusal mpsalgebra.applyinverse raises while
+    julia_live has no applyinverse; anything else is a failure."""
     try:
         sc.applyinverse(sc.hamiltonian + 3.0, sc.get_gs())
-    except (TypeError, AttributeError, NotImplementedError) as exc:
+    except NotImplementedError as exc:
+        if "julia_live" not in str(exc) or "applyinverse" not in str(exc):
+            raise
         pytest.skip("needs applyinverse on julia_live (package A): %s"
                     % str(exc)[:80])
+
+
+@pytest.mark.parametrize("submode,nh", [("CVM_explicit", False),
+                                        ("CVMimag", False),
+                                        ("CVM_explicit", True),
+                                        ("CVM", True), ("KPM", True)])
+def test_missing_routes_refuse_before_the_solve(submode, nh):
+    """What julia_live cannot run yet (applyinverse for the explicit
+    resolvents and the non-Hermitian CVM, the non-Hermitian KPM moments)
+    is refused naming julia_live, before any ground-state solve."""
+    sc = heisenberg(4)
+    if nh:
+        sc.set_hamiltonian(sc.hamiltonian + 0.3j * sc.Sz[0])
+    solves = []
+    orig = sc.get_gs
+    sc.get_gs = lambda *a, **k: solves.append(1) or orig(*a, **k)
+    try:
+        sc.get_dynamical_correlator(submode=submode,
+                                    name=(sc.Sz[0], sc.Sz[0]),
+                                    es=np.linspace(0, 1, 3), delta=0.2,
+                                    **({"E_max": 5.0} if submode == "KPM"
+                                       else {}))
+    except NotImplementedError as exc:
+        if "julia_live" not in str(exc):
+            raise
+        assert solves == []
+    else:
+        pytest.skip("submode=%r runs on julia_live now" % submode)
 
 
 @pytest.mark.parametrize("submode", ["CVM_explicit", "CVMimag"])
@@ -343,6 +375,10 @@ def test_get_gr_against_python():
             try:
                 MPO(fc.C[1], MBO=fc) * fc.get_gs()
             except Exception as exc:
+                # only the refusal of a parity-odd OpSum skips; any other
+                # failure of the MPO application is a failure
+                if "Parity-odd" not in str(exc):
+                    raise
                 pytest.skip("needs parity-odd MPOs on julia_live "
                             "(package B): %s" % str(exc)[:80])
         x, y = fc.get_gr(delta=0.1, es=es, i=1, j=1)

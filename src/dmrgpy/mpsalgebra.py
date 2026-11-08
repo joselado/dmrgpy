@@ -183,6 +183,13 @@ def applyoperator(self,A,wf,mode=None,**kwargs):
 
 
 def applyinverse(self,A,wf,mode=None,**kwargs):
+    from .edtk.edchain import State
+    if self.itensor_version=="julia_live" and not isinstance(wf,State):
+        # otherwise wavefunction_mode rejects the julia MPS as an
+        # "unsupported wavefunction type", which names neither
+        raise NotImplementedError("applyinverse is not implemented on "
+                "itensor_version='julia_live' yet; use itensor_version=3 "
+                "or \"python\", or an ED state")
     mode = wavefunction_mode(wf,mode=mode)
     # note mode= is consumed above and deliberately *not* forwarded:
     # applyinverse_dmrg takes only delta/maxn, so passing it on was a
