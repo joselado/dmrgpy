@@ -149,7 +149,8 @@ Things in here that are load-bearing and easy to break:
   pulled in.
 - **`src/dmrgpy/juliapkg.json` must stay in `package-data`.** juliacall/
   juliapkg reads it at import time to resolve and precompile ITensors,
-  ITensorMPS and ITensorNHDMRG; if it is missing from the wheel,
+  ITensorMPS, ITensorNHDMRG and KrylovKit (used directly by
+  `mpsjulialive/vumps.jl` and `cbe.jl`); if it is missing from the wheel,
   `pip install dmrgpy[julia]` yields a Julia backend with no ITensors.jl.
   `.gitignore`'s unanchored `julia*` pattern would also swallow it, hence
   the explicit `!src/dmrgpy/juliapkg.json` un-ignore. Do not remove either
