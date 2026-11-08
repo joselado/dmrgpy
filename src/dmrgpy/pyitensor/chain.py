@@ -1031,7 +1031,10 @@ class Chain:
         return self._apply_mpo(expH, wf)
 
     def multiply_operators(self, A, B):
-        return self._mult_mpo(A, B)
+        """The operator product A*B, B acting first. _mult_mpo(X, Y) is
+        Y*X (nmultMPO applies X to the ket first), hence the swap, as in
+        chain_session.h's multiply_operators and clik.py's mpo_product."""
+        return self._mult_mpo(B, A)
 
     def sum_operators(self, A, B):
         return self._sum_mpo(A, B)
@@ -2180,6 +2183,8 @@ class Chain:
         return mps_sum(A1, A2, cutoff=self.cutoff, maxdim=self.maxm)
 
     def _mult_mpo(self, A1, A2):
+        """The MPO of A2*A1: A1 acts on the ket first. Only H*H-type
+        products call it directly; multiply_operators swaps."""
         out = nmultMPO(A1, A2.copy().prime(), cutoff=self.cutoff, maxdim=self.mpomaxm)
         out.mapPrime(2, 1)
         return out

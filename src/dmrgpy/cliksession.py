@@ -72,8 +72,9 @@ class Session:
         return self.s.hermitian_operator(G)
 
     def product(self, first, then):
-        """The MPO of `then` after `first` (first acts first)."""
-        return self.s.multiply_operators(first, then)
+        """The MPO of `then` after `first` (first acts first), which is
+        the operator product then*first."""
+        return self.s.multiply_operators(then, first)
 
     def apply(self, A, psi):
         return self.s.apply_pure_operator(A, psi)

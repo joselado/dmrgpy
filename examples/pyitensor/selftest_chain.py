@@ -82,15 +82,10 @@ def test_spin_chain_basics():
 
     B = chain.build_operator([(1.0, [("Sx", 1)])])
     AB = chain.multiply_operators(A, B)
-    # multiply_operators(A,B) mirrors chain_session.h's mult_mpo(A,B): its
-    # own comment documents that nmultMPO(A,prime(B)) composes "A's
-    # level-0->1 map with B's now-level-1->2 map", i.e. A is applied to the
-    # ket *first*, B second -- so in standard matrix form the result is
-    # B_std @ A_std, not A_std @ B_std. Confirmed directly against both
-    # orderings before writing this reference.
-    ref_AB = dense_reference(chain.sites, [(1.0, [("Sx", 1)])]) @ dense_reference(chain.sites, sz1_terms)
-    check("Chain.multiply_operators(Sz_1,Sx_1) matches dense Sx_1 @ Sz_1 "
-          "(A-applied-first convention, see chain_session.h's mult_mpo comment)",
+    # multiply_operators(A,B) is the operator product A*B, B applied to the
+    # ket first, as chain_session.h's multiply_operators
+    ref_AB = dense_reference(chain.sites, sz1_terms) @ dense_reference(chain.sites, [(1.0, [("Sx", 1)])])
+    check("Chain.multiply_operators(Sz_1,Sx_1) matches dense Sz_1 @ Sx_1",
           np.allclose(mpo_to_dense(AB), ref_AB, atol=1e-6))
 
     conj_psi = chain.conjugate(psi)

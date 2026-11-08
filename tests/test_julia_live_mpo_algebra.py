@@ -70,14 +70,17 @@ def test_single_fermion_operators_reproduce_ed(itensor_version):
                 ref, abs=1e-6)
 
 
-# On itensor_version="python" (and v3, which shares the same
-# nmultMPO(A,prime(B)) construction) toMPO(A)*toMPO(B) comes out as the
-# operator B*A, with A acting first, so the two tests below fail there.
-REVERSED = pytest.mark.xfail(strict=True, reason="python's MPO product "
-        "is B*A (pyitensor/chain.py::_mult_mpo), not A*B as for "
-        "MultiOperator and mode=\"ED\"")
-ORDER_BACKENDS = [julia_live_param(),
-                  pytest.param("python", id="python", marks=REVERSED)]
+def _cpp_param(version):
+    from dmrgpy import cppext
+    return pytest.param(version, id="v%d" % version, marks=pytest.mark.skipif(
+        not cppext.available(version),
+        reason="the v%d extension is not compiled" % version))
+
+
+# toMPO(A)*toMPO(B) is the operator A*B on every backend, as for
+# MultiOperators and mode="ED"
+ORDER_BACKENDS = [julia_live_param(), pytest.param("python", id="python"),
+                  _cpp_param(3), _cpp_param(2)]
 
 
 @pytest.mark.parametrize("itensor_version", ORDER_BACKENDS)

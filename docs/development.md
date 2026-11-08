@@ -5325,10 +5325,12 @@ operator of pyitensor's `_custom_exp` and v3's `custom_exp`, built exactly
 and compressed at a relative cutoff of 1e-28. The MPO class
 (`mpsjulialive/mpo.py`, `mpo_ops.jl`) has `M*N` (N acting first, cut at
 `mpomaxm`), `M+N` (cut at `maxm`), scalars, `get_dagger()` (`dag` with
-`swapprime`), `trace()` and `aMb()`. On `"python"` the MPO product comes
-out in the reversed order (`pyitensor/chain.py::_mult_mpo`), pinned by a
-strict xfail in `tests/test_julia_live_mpo_algebra.py`; v3 is thought to
-build it the same way, but no test covers v3 there.
+`swapprime`), `trace()` and `aMb()`. `M*N` is the operator product with
+`N` acting first on every backend. On the session backends the internal
+`mult_mpo(X,Y)` (`nmultMPO(X,prime(Y))`, and v2's `nmultMPO`, which primes
+`Y` itself) applies `X` to the ket first, so it is `Y*X`; the public
+`multiply_operators(A,B)` swaps its arguments to give `A*B`, and
+`cliksession.py::product(first, then)` passes `(then, first)`.
 
 **Ground state and expectation values.** `groundstate._gs_energy_julia`
 takes `maxde=` (the doubling loop of `gs_energy_single`, from the stored

@@ -1,7 +1,9 @@
 # library for immutable operators: they can act over a wavefunction,
 # and (see __add__/__sub__/__neg__/__mul__/__truediv__ below) support
 # direct-sum/scalar algebra with each other on itensor_version 2, 3
-# and "python" (not "julia_live" yet)
+# and "python" (julia_live has its own MPO class, mpsjulialive/mpo.py).
+# A product of two of them is the operator product, self*v with v acting
+# first, as for MultiOperators.
 
 from ..mps import MPS
 from copy import copy as _shallow_copy

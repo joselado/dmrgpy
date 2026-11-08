@@ -593,7 +593,10 @@ class Chain
     MPO
     multiply_operators(MPO const& A, MPO const& B) const
         {
-        return mult_mpo(A,B);
+        // the operator product A*B, B acting first. mult_mpo(X,Y) is Y*X
+        // (nmultMPO applies X to the ket first, see mult_mpo below), so
+        // the arguments are swapped here, the one asymmetric caller
+        return mult_mpo(B,A);
         }
 
     // Public wrapper around the private sum_mpo() helper below (mirrors

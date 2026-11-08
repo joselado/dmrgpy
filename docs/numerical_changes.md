@@ -1433,3 +1433,17 @@ moves no number. These results do move, and only on `julia_live`:
   two differ: on 10 sites at `cvm_maxm=6` the conjugate gradient was 0.91 of
   the peak off ED and the variational solver 0.59. Converged, they agree to
   about 1e-6.
+
+## The 2026-11-08 order of an MPO product
+
+`toMPO(A)*toMPO(B)` on `itensor_version=2`, 3 and `"python"` was the
+operator `B*A`, with `A` acting first. It is now `A*B`, with `B` acting
+first, as for `MultiOperator`, `mode="ED"` and `"julia_live"`. Products of
+commuting operators do not change, and neither does the trace of a product
+of two. What changes is a product of operators that do not commute: for
+`toMPO(Cdag[i])*toMPO(C[j])` with i and j different the sign flipped, and
+for `toMPO(Sp[0])*toMPO(Sz[0])` the matrix element came out as that of
+`Sz[0]*Sp[0]`. Inside the library, the products are of commuting operators (powers of
+H, S^2, parity strings), except `atomtk/iets.py`'s `Cdag_i*C_j`. Its sign
+flips, but it enters only through the pair (A, A^dagger), so the IETS
+spectra do not move either.
