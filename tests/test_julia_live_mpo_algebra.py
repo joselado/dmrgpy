@@ -191,3 +191,24 @@ def test_mpo_trace(itensor_version):
         assert chain.trace(H) == pytest.approx(ref, abs=1e-8)
         assert chain.toMPO(H).get_dagger().trace() == pytest.approx(
                 np.conj(ref), abs=1e-8)
+
+
+@pytest.mark.parametrize("itensor_version", BACKENDS)
+def test_mpo_product_is_cut_at_mpomaxm_not_maxm(itensor_version):
+    """The MPO product is truncated at the operator bond dimension
+    mpomaxm, not at the wavefunction maxm. H^2 on a 6-site Heisenberg
+    chain has bond dimension up to 25, so a cut at maxm=2 would move
+    <H^2> far away from ED."""
+    sc = spinchain.Spin_Chain(["1/2"]*6)
+    h = 0
+    for i in range(5):
+        h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
+    sc.set_hamiltonian(h)
+    setup_backend(sc, itensor_version)
+    sc.maxm = 30
+    sc.nsweeps = 10
+    gs = sc.get_gs()  # exact at maxm=30 on 6 sites
+    ref = sc.vev(h*h, mode="ED")
+    sc.maxm = 2  # mpomaxm stays at its default
+    M = sc.toMPO(h)
+    assert (M*M).aMb(gs, gs) == pytest.approx(ref, abs=1e-8)

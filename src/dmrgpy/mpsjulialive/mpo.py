@@ -85,7 +85,9 @@ class MPO():
                     v.jlmps,self.MBO.maxm,self.MBO.cutoff)
             return MPS(jlmps,MBO=self.MBO)
         elif type(v)==MPO: # operator product, v acts first
-            jlmpo = Main.mult_mpo(self.jlmpo,v.jlmpo,self.MBO.maxm,
+            # cut at the operator bond dimension mpomaxm, as v3 and
+            # python do; only the sum uses the wavefunction maxm
+            jlmpo = Main.mult_mpo(self.jlmpo,v.jlmpo,self.MBO.mpomaxm,
                     self.MBO.cutoff)
             return MPO._from_jlmpo(jlmpo,self.MBO)
         elif type(v)==MultiOperator: # input is a multioperator
