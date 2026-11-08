@@ -343,6 +343,18 @@ def get_four_correlation_tensor(wf,ctmode=None,**kwargs):
 
 
 
+def _julia_sweep_applies(MBO):
+    """Whether mpsjulialive/fourpoint.py's sweep takes this chain: plain
+    spinless fermion sites, one C/Cdag per site."""
+    sites = list(getattr(MBO,"sites",[]))
+    n = len(sites)
+    return n>0 and all(int(s)==0 for s in sites) \
+            and _single_factor_modes(getattr(MBO,"C",[])) \
+                    ==[("C",m+1) for m in range(n)] \
+            and _single_factor_modes(getattr(MBO,"Cdag",[])) \
+                    ==[("Cdag",m+1) for m in range(n)]
+
+
 def _single_factor_modes(ops):
     """[(operator_name, site_1based), ...] read off a list of one-factor
     MultiOperators (a chain's own `self.C`/`self.Cdag`), or None if any entry
@@ -505,6 +517,9 @@ def get_four_correlation_tensor_sweep(wf,accelerate=True,**kwargs):
         raise NotImplementedError("ctmode=\"sweep\" has no native-spinful-site "
                 "counterpart yet; use ctmode=\"full\" "
                 "(four_correlation_tensor_spinful) instead")
+    if self.itensor_version=="julia_live": # mpsjulialive/fourpoint.jl
+        from ..mpsjulialive import fourpoint
+        return fourpoint.four_correlation_tensor_sweep(wf,accelerate)
     if self.itensor_version not in (3,"python") or \
             not hasattr(self._session,"four_correlation_tensor_sweep"):
         raise NotImplementedError("ctmode=\"sweep\" requires itensor_version=3 "
@@ -553,6 +568,8 @@ def _four_correlation_tensor_default_ctmode(wf):
         return "batched"
     if not is_native_spinful and itensor_version in (3,"python") \
             and hasattr(session,"four_correlation_tensor_sweep"):
+        return "sweep"
+    if itensor_version=="julia_live" and _julia_sweep_applies(self):
         return "sweep"
     if is_native_spinful:
         # "fold" before "full": for native spinful sites the only previous
