@@ -57,7 +57,10 @@ class Mixed_Spin_Fermion_Chain(Many_Body_Chain):
     regression test exercising this directly. itensor_version=2 has no
     such fallback and hard-aborts the whole process on the same input,
     so it is rejected up front in __init__; this class only supports
-    itensor_version in (3,"python").
+    itensor_version in (3,"python","julia_live"). On "julia_live" the
+    string is threaded by ITensorMPS, which puts an "F" on every site a
+    fermionic term crosses, and mpsjulialive/sites_custom.jl defines that
+    "F" as the identity on every spin site type.
 
     mode="ED" is exact diagonalization on the tensor product of the
     physical sites (edtk/mixededchain.py): a fermion mode is a two-state
@@ -92,9 +95,9 @@ class Mixed_Spin_Fermion_Chain(Many_Body_Chain):
         if itensor_version is None:
             from .cppext import default_backend
             itensor_version = default_backend()
-        if itensor_version not in (3, "python"):
+        if itensor_version not in (3, "python", "julia_live"):
             raise ValueError("Mixed_Spin_Fermion_Chain only supports "
-                    "itensor_version in (3,'python'), got "
+                    "itensor_version in (3,'python','julia_live'), got "
                     +str(itensor_version)+" -- itensor_version=2 has no "
                     "fallback for a Jordan-Wigner string crossing a spin "
                     "site and hard-aborts the process (see this class's "
