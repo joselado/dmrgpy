@@ -57,6 +57,8 @@ def initialize():
                                  # after both
     files += ["densitymatrix.jl"] # single-site reduced density matrix
     files += ["entropy.jl"] # SVD-based bond entanglement entropy
+    files += ["nhkpm.jl"] # non-Hermitian KPM moments; uses mpsalgebra.jl's
+                           # apply_op/summps
     files += ["correlations.jl"] # native <Cdag_i C_j> correlation matrix
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
