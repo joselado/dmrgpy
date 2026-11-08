@@ -12,8 +12,12 @@ import pytest
 
 from dmrgpy import cppext, spinchain
 
+from _helpers import julia_live_param
+
 VERSIONS = ["python", pytest.param(3, marks=pytest.mark.skipif(
     not cppext.available(3), reason="v3 extension not compiled"))]
+# julia_live exports its site tensors to the same code (taskdmrg.py)
+WITH_JULIA = VERSIONS + [julia_live_param()]
 
 G, MUB = 2.0, 5.7883818066e-5
 EV = np.linspace(-6e-3, 6e-3, 61)
@@ -34,7 +38,7 @@ def impurity_chain(nb=4, maxm=64, version="python"):
     return sc
 
 
-@pytest.mark.parametrize("version", VERSIONS)
+@pytest.mark.parametrize("version", WITH_JULIA)
 def test_saturated_task_matches_ed_at_zero_temperature(version):
     sc = impurity_chain(version=version)
     _, ed = sc.get_kondo_spectrum(EV, mode="ED", **KW)
@@ -51,7 +55,7 @@ def test_task_rejects_the_grid_keywords_of_the_other_routes():
         sc.get_kondo_spectrum(EV, mode="DMRG", submode="TASK", delta=1e-5, **KW)
 
 
-@pytest.mark.parametrize("version", VERSIONS)
+@pytest.mark.parametrize("version", WITH_JULIA)
 def test_task_is_the_default(version):
     sc = impurity_chain(version=version)
     _, ed = sc.get_kondo_spectrum(EV, mode="ED", **KW)
