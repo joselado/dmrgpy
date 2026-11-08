@@ -563,6 +563,8 @@ def test_julia_live_hubbard_conserves_a_chosen_subset(version):
         pytest.skip("needs package C's code-1 (Electron) sites on julia_live")
     n = 4
     hc = _jl(fermionchain.Spinful_Fermionic_Chain_Native(n))
+    # the default schedule stops 7e-6 above ED here; 40 sweeps reach 1e-14
+    hc.maxm, hc.nsweeps = 64, 40
     h = 0
     for i in range(n - 1):
         for c, cdag in [(hc.Cup, hc.Cdagup), (hc.Cdn, hc.Cdagdn)]:

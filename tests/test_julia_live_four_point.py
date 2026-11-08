@@ -44,7 +44,9 @@ def test_julia_full_four_point_tensor(version):
     np.random.seed(0)
     fj = _chain(itensor_version=version)
     wj = _quiet(fj.get_gs)
-    assert ce._four_correlation_tensor_default_ctmode(wj) == "full"
+    # "sweep" is the default on a julia_live spinless chain, so "full" is
+    # asked for by name below
+    assert ce._four_correlation_tensor_default_ctmode(wj) == "sweep"
     full = _quiet(lambda: wj.get_four_correlation_tensor(ctmode="full"))
     slow = _quiet(lambda: wj.get_four_correlation_tensor(ctmode="full",
                                                          accelerate=False))
