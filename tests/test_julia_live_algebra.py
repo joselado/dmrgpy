@@ -239,6 +239,21 @@ def test_exponential_against_ed_and_python(version):
     assert res[version, 0.3][1] > -0.25*(n-1) + 0.5
 
 
+@pytest.mark.parametrize("version", JULIA)
+def test_exponential_default_steps(version):
+    """c.exponential(h, wf) with no nt0: the number of steps comes from the
+    bandwidth of h, solved on a clone of the chain"""
+    n = 8
+    c, h = _heisenberg(n, version)
+    c.set_hamiltonian(sum((-1)**i*c.Sz[i] for i in range(n)))
+    neel = c.get_gs()
+    neel_ed = c.get_gs(mode="ED")
+    r = _evolved_sz(c, h, neel, -0.2j)
+    re = _evolved_sz(c, h, neel_ed, -0.2j, mode="ED")
+    for k in (0, 1):
+        assert r[k] == pytest.approx(re[k], abs=1e-6)
+
+
 def _inverse_numbers(c, h, eps, mode=None):
     kw = {} if mode is None else {"mode": mode}
     gs = c.get_gs(**kw)
