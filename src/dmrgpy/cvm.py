@@ -21,7 +21,7 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
     """
     AB = operatornames.str2MO(self,name,i=i,j=j) # resolve operators once
     A,B = AB[0],AB[1]
-    if _use_ddmrg(self,A,B): # variational solver (python and v3)
+    if _use_ddmrg(self,A,B): # variational solver (python, v3, julia_live)
         return dynamical_correlator_ddmrg(self,A,B,es=es,delta=delta)
     wf0 = self.get_gs() # computes or returns the cached GS; also sets self.e0
     # sweep parameters used both by B*wf0 below and by every CG solve
@@ -58,7 +58,7 @@ def _use_ddmrg(self,A,B):
       falls back to CG rather than silently minimizing the wrong thing.
     """
     if getattr(self,"cvm_solver","cg")!="variational": return False
-    if self.itensor_version not in ("python",3): return False
+    if self.itensor_version not in ("python",3,"julia_live"): return False
     # Unlike the CG path below, which only ever *applies* A and B (so the
     # already-built operators toMPO() returns work there unchanged), this
     # solver hands their symbolic term lists to ddmrg_correction_vector.
@@ -96,6 +96,10 @@ def dynamical_correlator_ddmrg(self,A,B,es=None,delta=1e-1):
     start can only reduce the number of sweeps needed.
     """
     self.get_gs() # ensure the ground state (and self.e0) exist
+    if self.itensor_version=="julia_live": # no session: ddmrg.jl
+        from .mpsjulialive import ddmrg as ddmrgjl
+        with _cvm_sweep_params(self):
+            return ddmrgjl.dynamical_correlator_ddmrg(self,A,B,es,delta)
     out,x = [],None
     with _cvm_sweep_params(self):
         for e in es:
