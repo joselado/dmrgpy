@@ -52,7 +52,7 @@ def ramp_key(self):
 
 DMRG_METHODS = ("TWO_SITE","CBE")
 CBE_BACKENDS = ("python",3,"julia_live") # dmrg_method="CBE"
-TDVP_CBE_BACKENDS = ("python",3) # tevol_method="TDVP_CBE"
+TDVP_CBE_BACKENDS = ("python",3,"julia_live") # tevol_method="TDVP_CBE"
 
 
 def check_dmrg_method(self):

@@ -246,3 +246,131 @@ function get_gs_cbe(H, psi0; nsweeps=10, cutoff=1e-8, maxm=80, noise=0.0,
   return energy, psi
 end
 
+
+# ---------------------------------------------------------------------------
+# CBE-TDVP
+# ---------------------------------------------------------------------------
+#
+# One-site TDVP with the same expansion before every forward step, the
+# julia_live counterpart of pyitensor/cbe.py's tdvp_cbe_step: a
+# left-to-right half sweep by dt/2, then a right-to-left one by dt/2, with
+# the paper's singular value thresholds (1e-4 preselection, 1e-6 final)
+# relative to the scale of the object they come from. The local
+# exponentials are KrylovKit.exponentiate with ishermitian=false (Arnoldi),
+# which is exact for a Hermitian H as well, so the same step serves real
+# time and the complex time steps of TDZ and METTS.
+
+const _CBE_TDVP_EPS_PRESELECT = 1e-4
+const _CBE_TDVP_EPS_FINAL = 1e-6
+
+function _cbe_expmv(f, t, x)
+  y, _ = _CBE_KK.exponentiate(f, t, x; ishermitian=false, tol=1e-12,
+                              krylovdim=30, maxiter=100, eager=true,
+                              verbosity=0)
+  return y
+end
+
+function _cbe_forward(L, R, H, x, i, tau)
+  Wi = H[i]
+  return _cbe_expmv(v -> noprime(((L*v)*Wi)*R), -im*tau, x)
+end
+
+_cbe_backward(L, R, C, tau) = _cbe_expmv(v -> noprime((L*v)*R), im*tau, C)
+
+function _cbe_half_sweep_lr!(psi, H, tau, cutoff, maxdim, delta)
+  N = length(psi)
+  Lenv = Dict{Int,ITensor}(0 => ITensor(1.0))
+  Renv = Dict{Int,ITensor}(N + 1 => ITensor(1.0), N + 2 => ITensor(1.0))
+  for i in N:-1:2
+    Renv[i] = _cbe_extend(Renv[i + 1], psi, H, i)
+  end
+  for i in 1:N
+    if i < N
+      _cbe_expand_bond!(psi, H, i + 1, i, Renv[i + 2], Lenv[i - 1], maxdim,
+                        delta, _CBE_TDVP_EPS_PRESELECT, _CBE_TDVP_EPS_FINAL)
+      Renv[i + 1] = _cbe_extend(Renv[i + 2], psi, H, i + 1)
+    end
+    Anew = _cbe_forward(Lenv[i - 1], Renv[i + 1], H, psi[i], i, tau)
+    if i == N
+      psi[i] = Anew
+      continue
+    end
+    left = i > 1 ? (commonind(psi[i], psi[i - 1]), siteind(psi, i)) :
+                   (siteind(psi, i),)
+    U, S, V = ITensors.svd(Anew, left...; cutoff=cutoff, maxdim=maxdim,
+                           lefttags="Link,l=$i", righttags="Link,l=$i")
+    psi[i] = U
+    Lenv[i] = _cbe_extend(Lenv[i - 1], psi, H, i)
+    C = _cbe_backward(Lenv[i], Renv[i + 1], S*V, tau)
+    psi[i + 1] = C*psi[i + 1]
+  end
+end
+
+function _cbe_half_sweep_rl!(psi, H, tau, cutoff, maxdim, delta)
+  N = length(psi)
+  Lenv = Dict{Int,ITensor}(0 => ITensor(1.0), -1 => ITensor(1.0))
+  Renv = Dict{Int,ITensor}(N + 1 => ITensor(1.0))
+  for i in 1:(N - 1)
+    Lenv[i] = _cbe_extend(Lenv[i - 1], psi, H, i)
+  end
+  for i in N:-1:1
+    if i > 1
+      _cbe_expand_bond!(psi, H, i - 1, i, Lenv[i - 2], Renv[i + 1], maxdim,
+                        delta, _CBE_TDVP_EPS_PRESELECT, _CBE_TDVP_EPS_FINAL)
+      Lenv[i - 1] = _cbe_extend(Lenv[i - 2], psi, H, i - 1)
+    end
+    Anew = _cbe_forward(Lenv[i - 1], Renv[i + 1], H, psi[i], i, tau)
+    if i == 1
+      psi[i] = Anew
+      continue
+    end
+    ll = commonind(psi[i], psi[i - 1])
+    U, S, V = ITensors.svd(Anew, ll; cutoff=cutoff, maxdim=maxdim,
+                           lefttags="Link,l=$(i-1)", righttags="Link,l=$(i-1)")
+    psi[i] = V
+    Renv[i] = _cbe_extend(Renv[i + 1], psi, H, i)
+    C = _cbe_backward(Lenv[i - 1], Renv[i], U*S, tau)
+    psi[i - 1] = psi[i - 1]*C
+  end
+end
+
+# One step exp(-i*dt*H) of one-site TDVP with controlled bond expansion,
+# on a copy of psi; dt may be complex. Bonds grow up to maxdim, trimmed
+# with cutoff. Same call shape as tdvp.jl's tdvp_step.
+function tdvp_cbe_step(H, psi, dt, cutoff, maxdim; delta=0.1)
+  length(psi) < 2 && error("tevol_method=\"TDVP_CBE\" needs at least two sites")
+  psi = noprime(copy(psi), "Link")
+  orthogonalize!(psi, 1)
+  tau = dt/2
+  _cbe_half_sweep_lr!(psi, H, tau, cutoff, maxdim, delta)
+  _cbe_half_sweep_rl!(psi, H, tau, cutoff, maxdim, delta)
+  return psi
+end
+
+# The CBE counterparts of tdvp.jl's evolve_and_measure_tdvp and
+# quench_tdvp: the same measurement before each step and the same norm
+# put back after it.
+function evolve_and_measure_tdvp_cbe(Hmpo, Aop, wf, nt, dt, cutoff, maxdim, delta)
+  norm0 = sqrt(abs(inner(wf, wf)))
+  psi = wf
+  correlator = ComplexF64[]
+  for it in 1:nt
+    push!(correlator, inner(psi', Aop, psi))
+    psi = tdvp_cbe_step(Hmpo, psi, dt, cutoff, maxdim; delta=delta)
+    psi = psi*(norm0/sqrt(abs(inner(psi, psi))))
+  end
+  return correlator, psi
+end
+
+function quench_tdvp_cbe(Hshiftmpo, A1mpo, A2mpo, wf0, nt, dt, cutoff, maxdim, delta)
+  psi1 = apply_clean(A1mpo, wf0, maxdim, cutoff)
+  psi2 = apply_clean(A2mpo, wf0, maxdim, cutoff)
+  norm0 = sqrt(abs(inner(psi1, psi1)))
+  correlator = ComplexF64[]
+  for it in 1:nt
+    push!(correlator, inner(psi2, psi1))
+    psi1 = tdvp_cbe_step(Hshiftmpo, psi1, dt, cutoff, maxdim; delta=delta)
+    psi1 = psi1*(norm0/sqrt(abs(inner(psi1, psi1))))
+  end
+  return correlator, psi1
+end

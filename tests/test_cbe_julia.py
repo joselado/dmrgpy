@@ -9,7 +9,9 @@ What is pinned here:
   with itensor_version="python"'s CBE;
 - from the Neel product state, all bonds 1, the expansion lets the bonds
   grow and the solve reaches the ground state;
-- tevol_method="TDVP_CBE" stays refused on julia_live.
+- tevol_method="TDVP_CBE" (one-site TDVP with the same expansion) follows
+  ED after a quench from the Neel state, takes complex time steps (the
+  TDZ route), and gives the quench correlator of submode="TD".
 
 Every case pins its sweep schedule; the Julia random starts are seeded
 through Julia's own generator.
@@ -139,13 +141,107 @@ def test_julia_cbe_grows_the_bonds_of_a_product_state(version):
     assert e == pytest.approx(sc.gs_energy(mode="ED"), abs=1e-8)
 
 
-def test_julia_cbe_is_accepted_and_tdvp_cbe_still_refused():
-    """Without starting Julia: the ground-state check lets julia_live
-    through, the time-evolution one does not."""
+def _neel_states(sc, n):
+    """The Neel state as a Julia product MPS (all bonds 1) and as an ED
+    state, the ground state of a staggered field."""
+    from dmrgpy.mpsjulialive.juliasession import Main
+    from dmrgpy.mpsjulialive.mps import MPS
+    h0 = 0
+    for i in range(n):
+        h0 = h0 + (-1) ** i * sc.Sz[i]
+    sc.set_hamiltonian(h0)
+    wfed = sc.get_gs(mode="ED")
+    # site 1 (Sz[0]) down, the ground state of the field above
+    neel = Main.seval('sites -> MPS(sites, [isodd(i) ? "Dn" : "Up" '
+                      'for i in 1:length(sites)])')(sc.jlsites)
+    return MPS(neel, MBO=sc), wfed
+
+
+def _quench(method, n=10, nt=40, dt=0.1):
+    sc = _heisenberg(n, "julia_live", maxm=32, nsweeps=6, tevol_method=method)
+    h = sc.hamiltonian
+    wf, wfed = _neel_states(sc, n)
+    sc.set_hamiltonian(h + 0.2 * sc.Sz[1])
+    op = sc.Sz[n // 2] + sc.Sz[n // 2 + 1] * 0.5
+    _, z, wft = _quiet(lambda: timedependent.evolve_and_measure(
+        sc, operator=op, wf=wf, nt=nt, dt=dt, return_wf=True))
+    _, zed = timedependent.evolve_and_measure(sc, mode="ED", operator=op,
+                                              wf=wfed, nt=nt, dt=dt)
+    err = np.max(np.abs(np.real(np.asarray(z)) - np.real(np.asarray(zed))))
+    return err, wft
+
+
+@pytest.mark.parametrize("version", JULIA)
+def test_julia_tdvp_cbe_quench_from_a_product_state_matches_ed(version, monkeypatch):
+    """Bond dimension 1 at t=0, so one-site TDVP alone would never leave
+    the product manifold; CBE-TDVP follows ED as two-site TDVP does."""
+    _require_julia(version)
+    from dmrgpy.mpsjulialive import juliasession
+    rec = _Recorder(juliasession.Main)
+    monkeypatch.setattr(juliasession, "Main", rec)
+    err_cbe, wft = _quench("TDVP_CBE")
+    assert "evolve_and_measure_tdvp_cbe" in rec.calls
+    monkeypatch.undo()
+    err_2s, _ = _quench("TDVP")
+    print("TDVP_CBE error %.3e, TDVP error %.3e" % (err_cbe, err_2s))
+    assert max(_links(wft)) > 1
+    assert err_cbe < 5e-5
+    assert err_cbe < 2 * err_2s + 1e-6
+
+
+@pytest.mark.parametrize("version", JULIA)
+def test_julia_tdvp_cbe_complex_time_step_matches_exact(version):
+    """The one-step route TDZ takes (advance_complex_time_step), with a
+    complex step, against exp(-i dz H) applied exactly."""
+    _require_julia(version)
+    import scipy.linalg as sla
+    from dmrgpy.multioperator import MO2matrix
+    from dmrgpy.mpsjulialive import timedependent as jtd
+    from dmrgpy.mpsjulialive.mpo import MPO
+    n = 6
+    sc = _heisenberg(n, version, maxm=64, nsweeps=6, tevol_method="TDVP_CBE")
+    h = sc.hamiltonian
+    wf, wfed = _neel_states(sc, n)
+    sc.set_hamiltonian(h)
+    dz = 0.05 * np.exp(-0.3j)
+    Hop = MPO(h, MBO=sc)
+    for _ in range(4):
+        wf = jtd.advance_complex_time_step(sc, Hop, wf, dz)
+    Hm = np.array(MO2matrix(h, sc.get_ED_obj()).todense())
+    v = sla.expm(-1j * 4 * dz * Hm) @ np.asarray(wfed.v).reshape(-1)
+    for i in range(n):
+        Sz = np.array(MO2matrix(sc.Sz[i], sc.get_ED_obj()).todense())
+        exact = (v.conj() @ Sz @ v).real / (v.conj() @ v).real
+        got = (wf.aMb(sc.Sz[i], wf) / wf.dot(wf)).real
+        assert got == pytest.approx(exact, abs=1e-6)
+
+
+@pytest.mark.parametrize("version", JULIA)
+def test_julia_tdvp_cbe_correlator_matches_ed(version):
+    """The quench correlator <GS|Sz e^{-i(H-E0)t} Sz|GS> (evolution_DC,
+    the route of submode="TD"), against ED."""
+    _require_julia(version)
+    n = 8
+    _seed(4)
+    sc = _heisenberg(n, version, maxm=32, nsweeps=8, tevol_method="TDVP_CBE")
+    _, c = _quiet(lambda: timedependent.evolution_DC(
+        sc, name=(sc.Sz[3], sc.Sz[3]), nt=30, dt=0.1))
+    _, ced = timedependent.evolution_DC(sc, mode="ED",
+                                        name=(sc.Sz[3], sc.Sz[3]), nt=30, dt=0.1)
+    err = np.max(np.abs(np.asarray(c) - np.asarray(ced)))
+    print("TDVP_CBE correlator error %.3e" % err)
+    assert err < 1e-4
+
+
+def test_julia_cbe_checks_accept_julia_live():
+    """Without starting Julia: both checks let julia_live through, and v2
+    is still refused."""
     stub = types.SimpleNamespace(dmrg_method="CBE", cbe_delta=0.1,
                                  itensor_version="julia_live")
     groundstate.check_dmrg_method(stub)
     stub = types.SimpleNamespace(tevol_method="TDVP_CBE",
                                  itensor_version="julia_live")
+    timedependent.check_tevol_method(stub)
+    stub = types.SimpleNamespace(tevol_method="TDVP_CBE", itensor_version=2)
     with pytest.raises(NotImplementedError, match='"python"'):
         timedependent.check_tevol_method(stub)
