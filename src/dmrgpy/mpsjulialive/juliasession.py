@@ -63,6 +63,10 @@ def initialize():
     files += ["mpo_ops.jl"] # MPO product, sum, dagger, trace, <a|A|b>
     files += ["bicgstab.jl"] # MPS BiCGSTAB for applyinverse; uses
                               # mpsalgebra.jl's apply_op/summps/conj_mps
+    files += ["nhkpm.jl"] # non-Hermitian KPM moments; uses mpsalgebra.jl's
+                           # apply_op/summps
+    files += ["arrays.jl"] # MPS/MPO site tensors as arrays, for TASK
+    files += ["correlations.jl"] # native <Cdag_i C_j> correlation matrix
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 

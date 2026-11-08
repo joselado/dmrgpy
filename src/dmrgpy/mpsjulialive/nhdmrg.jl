@@ -2,8 +2,10 @@
 # Non-Hermitian DMRG on the live Julia backend, via the real
 # ITensorNHDMRG.jl package (declared in ../juliapkg.json) rather than one
 # of this codebase's own ports of it. get_gs.jl's get_gs_nhdmrg already
-# calls it for plain non-Hermitian ground-state energies and keeps only
-# the right eigenvector; this file exposes the full biorthogonal pair, in
+# calls it for plain non-Hermitian ground-state energies, with no
+# tie-break, and groundstate.py keeps conj(wfl) of that solve as the left
+# state when its overlap with wfr is not ~0; this file exposes the full
+# biorthogonal pair, with the tie-break, in
 # the convention the rest of dmrgpy uses, and handles the two places
 # where "the rest of dmrgpy" and ITensorNHDMRG genuinely differ.
 #
@@ -233,8 +235,8 @@ end
 One NH-DMRG run from `psi0`, returning `(lambda, psil, psir)` in dmrgpy's
 convention (see `nh_biorthogonal_pair`). Same solver and same defaults as
 get_gs.jl's `get_gs_nhdmrg`, which stays as it is -- it feeds
-groundstate.py's plain non-Hermitian `gs_energy()` path, which only ever
-wanted the right eigenvector.
+groundstate.py's plain non-Hermitian `gs_energy()` path, which converts
+its left vector the same way but has no tie-break.
 """
 # Deliberately NOT given self.noise, unlike the Hermitian
 # get_gs_generalized: DMRG's density-matrix noise term is defined against

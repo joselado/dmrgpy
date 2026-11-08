@@ -3,10 +3,10 @@
 Port of the biorthogonal Chebyshev-moment algorithm from NHKPM.jl
 (https://github.com/GUANGZECHEN/NHKPM.jl, itself implementing the method of
 Phys. Rev. Lett. 130, 100401) to dmrgpy's ED and mpscpp3 (ITensor v3)
-backends. Unlike the ordinary (Hermitian) KPM dynamical correlator
-(kpmdmrg.py), the ground state here is a biorthogonal right/left pair
-(psi_R,psi_L) from the non-Hermitian solver (nhdmrg()/ED), and the
-Chebyshev moments are recomputed from scratch at every requested frequency
+backends, and to "python" and julia_live. Unlike the ordinary
+(Hermitian) KPM dynamical correlator (kpmdmrg.py), the ground state here
+is a biorthogonal right/left pair (psi_R,psi_L) from the non-Hermitian
+solver (nhdmrg()/ED), and the Chebyshev moments are recomputed from scratch at every requested frequency
 (the expansion operator (z*Id-H)/E_max itself depends on z) rather than
 amortized once over the whole spectrum as in the Hermitian case - this
 mirrors the reference algorithm's own cost profile.
@@ -19,7 +19,7 @@ from ..algebra import algebra
 def dynamical_correlator_nhkpm(self,name=None,delta=1e-1,
         es=np.linspace(0.,5.0,300),E_max=None,n=200,kernel="jackson"):
     """NH-KPM dynamical correlator for the DMRG backends (itensor_version
-    3 and "python" so far). name=(A,B) computes <psi_L|A(z) B|psi_R> at
+    3, "python" and "julia_live"). name=(A,B) computes <psi_L|A(z) B|psi_R> at
     z=e0+es+1j*delta, with (psi_L,psi_R) the biorthogonal ground state
     pair from nhdmrg(). E_max (a real upper bound for the spectral radius
     of H) must be supplied by the user - there is no automatic estimator
@@ -33,12 +33,14 @@ def dynamical_correlator_nhkpm(self,name=None,delta=1e-1,
         raise ValueError("E_max (an upper bound for the spectral radius "
                 "of the Hamiltonian) must be provided for the "
                 "non-Hermitian KPM dynamical correlator")
-    if self.itensor_version not in (3,"python"):
+    if self.itensor_version not in (3,"python","julia_live"):
         raise NotImplementedError("NH-KPM dynamical correlator is only "
-                "implemented for itensor_version 3 or \"python\" so far, "
-                "got "+str(self.itensor_version))
+                "implemented for itensor_version 3, \"python\" or "
+                "\"julia_live\" so far, got "+str(self.itensor_version))
     from .. import multioperator
-    e0 = self.gs_energy() # routes to nhdmrg, sets self.wf0/self.nh_left_wf
+    # routes to NH-DMRG and sets self.wf0/self.nh_left_wf, or returns the
+    # stored pair; on julia_live through mpsjulialive/groundstate.py
+    e0 = self.gs_energy()
     psir = self.wf0
     psil = getattr(self,"nh_left_wf",None)
     if psil is None or getattr(self,"_nh_left_for",None) is not psir:
@@ -54,7 +56,10 @@ def dynamical_correlator_nhkpm(self,name=None,delta=1e-1,
                 "and this chain has none: its state was set with set_gs(), "
                 "set_initial_wf() or gs_energy(wf0=...), which give a right "
                 "state only. Solve the biorthogonal pair with NH-DMRG "
-                "instead, restart() and then gs_energy()")
+                "instead, restart() and then gs_energy(). On julia_live a "
+                "solve whose left and right vectors came for two "
+                "eigenvalues tied in the real part keeps no left one "
+                "either; break the tie in H")
     # gs_energy_nhdmrg() renormalizes wf0=psir.normalize() to unit norm but
     # leaves nh_left_wf at nhdmrg()'s own <psil|psir>=1 scale, so the two
     # no longer satisfy <psil|psir>=1 together - restore that biorthogonal
@@ -71,9 +76,19 @@ def dynamical_correlator_nhkpm(self,name=None,delta=1e-1,
         z = e0+es[i]+1j*delta
         hs = (z*ident-self.hamiltonian)*(1./E_max)
         hs_dag = hs.get_dagger()
-        mu_n = self._session.nhkpm_moments(hs.to_terms(),hs_dag.to_terms(),
-                wfa.cpp_handle,wfb.cpp_handle,int(n),
-                int(self.kpmmaxm),float(self.kpmcutoff))
+        if self.itensor_version=="julia_live":
+            # mpsjulialive/nhkpm.jl, the same recursion on the Julia MPOs
+            # of hs and of its dagger, built at the MultiOperator level
+            from ..mpsjulialive.mpo import get_MPO
+            from ..mpsjulialive.juliasession import Main
+            mu_n = Main.nhkpm_moments(get_MPO(hs,self),get_MPO(hs_dag,self),
+                    wfa.jlmps,wfb.jlmps,int(n),
+                    int(self.kpmmaxm),float(self.kpmcutoff))
+            mu_n = [complex(x) for x in mu_n]
+        else:
+            mu_n = self._session.nhkpm_moments(hs.to_terms(),
+                    hs_dag.to_terms(),wfa.cpp_handle,wfb.cpp_handle,int(n),
+                    int(self.kpmmaxm),float(self.kpmcutoff))
         out[i] = kpm.spec_from_moments_nh(np.array(mu_n),kernel=kernel)
     return es,out
 
