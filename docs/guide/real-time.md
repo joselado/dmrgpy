@@ -107,7 +107,8 @@ example the return amplitude $\langle\psi(0)|\psi(t)\rangle$.
   a quench whose entanglement grows for a long time. Its accuracy is the
   one of `"TDVP"`. `sc.cbe_delta` (default 0.1) sets how far a bond is
   expanded, to $(1+\delta)$`maxm` states. Only on
-  `itensor_version="python"` and 3; the other backends raise an error. See
+  `itensor_version="python"`, 3 and `"julia_live"`; the other backends
+  raise an error. See
   `examples/time_evolution/tdvp_cbe_VS_ED_time_evolution`.
 - `"TEBD"`: second-order Trotter evolution with two-site gates. Faster
   than TDVP, but only for nearest-neighbor Hamiltonians; otherwise it

@@ -63,8 +63,10 @@ sites. A term with an odd number of fermion operators raises an error.
 - `"idmrg"`: infinite DMRG, which grows a finite chain from the center
   until the energy per site converges. Only `n_uc` of 1 or 2.
 
-Both run on `itensor_version="python"` and `3`. `itensor_version=2` and
-`"julia_live"` raise an error. The keywords are:
+Both run on `itensor_version="python"` and `3`. On `"julia_live"`,
+`"vumps"` runs for `n_uc` of 1 or 2 with couplings between neighboring
+cells, for the energy, `vev` and `correlator`; everything else raises an
+error there, and so does `itensor_version=2`. The keywords are:
 
 - `ic.maxm`, `ic.cutoff`: the bond dimension (default 30) and the
   truncation cutoff. Increase `maxm` until the results stop changing.

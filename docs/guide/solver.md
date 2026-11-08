@@ -67,8 +67,9 @@ On `itensor_version="python"` it also works with a conserved sector
 ([Fixed particle number or fixed magnetization](ground-state.md#fixed-particle-number-or-fixed-magnetization)).
 
 !!! note "Backends"
-    `"CBE"` exists on `itensor_version="python"` and on
-    `itensor_version=3`, where it does not work in a conserved sector. The
+    `"CBE"` exists on `itensor_version="python"`, on
+    `itensor_version=3` and on `"julia_live"`; on the last two it does not
+    work in a conserved sector. The
     other backends raise an error, and so do the excited-state search and
     the non-Hermitian ground state.
 
