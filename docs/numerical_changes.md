@@ -1397,3 +1397,39 @@ n solves are independent fresh starts; before, every solve after the first
 was warm-started from the previous answer. The padding strip of one-site TDVP drops weights below 1e-28,
 so a padded entangled state evolved with the flag off follows the unpadded
 run to 3e-15 instead of 8.9e-8.
+
+## The 2026-11-08 parity push on `julia_live`
+
+Most of what landed on `itensor_version="julia_live"` raised before, so it
+moves no number. These results do move, and only on `julia_live`:
+
+- **Bond entropy of a state that is not normalized.** The entropy is now
+  that of the normalized state. On an 8-site Heisenberg chain with
+  $0.1 S^z_0$, the state `2*gs` at bond 3|4 gives 0.4549713888, where the
+  old formula gave 3.7252918892. Unit-norm states do not change.
+- **`MPS.aMb` and `vev` are exact contractions.** Before, $M|b\rangle$ was
+  truncated at `maxm` and `cutoff` before the overlap. At `maxm=6` on an
+  8-site Heisenberg chain, $\langle gs|H|gs\rangle$ was -3.373267500 and is
+  now -3.373289247, equal to `gs_energy()`. This moves everything that reads
+  `aMb` (the fermionic parity, the explicit density matrix and correlation
+  entropy, `thermalvev`) by the truncation of $M|b\rangle$, and nothing once
+  `maxm` is large enough for the chain.
+- **`gs_energy_fluctuation()` is $\|(H-\langle H\rangle)|\psi\rangle\|^2$,**
+  as on the other backends. On a 10-site Heisenberg chain at `maxm=4` it
+  went from 9.243220e-02 to 1.215252e-01, the exact value for that state.
+- **`bond_ramp` is on by default**, as on the other backends. 24-site
+  Heisenberg energies do not change to 1e-10.
+- **`set_hamiltonian(H, restart=False)` sweeps from the old state**, and
+  `gs_energy(maxde=...)` returns the stored state when its fluctuation is
+  already below `maxde`, instead of a fresh random start.
+- **Hermitian TDVP uses Lanczos** instead of the KrylovKit default
+  (Arnoldi). On 16 sites the evolution differs from the old route by 4e-16.
+  The `TDVP_GSE` loop restores the input norm after every step, which
+  changes a non-Hermitian evolution and only roundoff for a Hermitian one.
+- **`get_kondo_spectrum` defaults to `submode="TASK"` on `julia_live`**, as
+  on `"python"` and 3, instead of KPM.
+- **`cvm_solver="variational"` runs the variational solver.** Before, it
+  ran the conjugate gradient without saying so. At truncated `cvm_maxm` the
+  two differ: on 10 sites at `cvm_maxm=6` the conjugate gradient was 0.91 of
+  the peak off ED and the variational solver 0.59. Converged, they agree to
+  about 1e-6.
