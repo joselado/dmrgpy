@@ -69,6 +69,7 @@ def initialize():
     files += ["correlations.jl"] # native <Cdag_i C_j> correlation matrix
     files += ["gs_extra.jl"] # exact <a|M|b>, uncapped MPO application
                               # and the four-point tensor
+    files += ["sites_qn.jl"] # QN site sets of conserved-sector mode
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 

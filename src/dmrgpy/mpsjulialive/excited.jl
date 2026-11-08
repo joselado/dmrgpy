@@ -17,7 +17,7 @@ end
 
 
 function excited_states_dmrg(H,psi0_gs,n,weight,sites,nsweeps,cutoff,maxm,
-		linkdims; noise=0.0)
+		linkdims; noise=0.0, states=nothing)
 	# whole n-state loop runs in one Julia call, same design as
 	# kpm.jl/tdvp.jl -- one new random-start warm state per additional
 	# excited state, deflated against every wavefunction found so far
@@ -28,7 +28,10 @@ function excited_states_dmrg(H,psi0_gs,n,weight,sites,nsweeps,cutoff,maxm,
 	# here, each state starting from a product state with no noise
 	wfs = MPS[psi0_gs]
 	for i=2:n
-		psi0 = dmrg_start_state(sites,linkdims)
+		# states: the in-sector product state of conserved-sector mode
+		# (sector.py), around which every start is drawn on QN sites
+		psi0 = states === nothing ? dmrg_start_state(sites,linkdims) :
+			sector_start_state(sites,states,linkdims)
 		e1,psi1 = excited_state_dmrg(H,wfs,psi0,weight,nsweeps,cutoff,maxm;
 			noise=noise)
 		push!(wfs,psi1)
@@ -36,6 +39,6 @@ function excited_states_dmrg(H,psi0_gs,n,weight,sites,nsweeps,cutoff,maxm,
 	# re-evaluate exact <wf|H|wf> for every state (including the ground
 	# state) rather than reusing dmrg()'s own penalized eigenvalue
 	# estimate -- mirrors mpscpp3/chain_session.h's Chain::excited_states
-	energies = ComplexF64[inner(w,H,w) for w in wfs]
+	energies = ComplexF64[inner(w',H,w) for w in wfs]
 	return energies,wfs
 end

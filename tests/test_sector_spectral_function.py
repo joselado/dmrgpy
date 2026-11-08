@@ -49,6 +49,8 @@ def tV_chain(n=6, v=1.5, backend="python"):
     fc = fermionchain.Fermionic_Chain(n)
     if backend == "python":
         fc.setup_python()
+    elif backend == "julia_live":
+        fc.setup_julia()
     else:
         fc.setup_cpp(version=backend)
     h = 0
@@ -66,6 +68,8 @@ def heisenberg_chain(n=6, backend="python"):
     sc = spinchain.Spin_Chain([2] * n)
     if backend == "python":
         sc.setup_python()
+    elif backend == "julia_live":
+        sc.setup_julia()
     else:
         sc.setup_cpp(version=backend)
     h = 0
@@ -463,3 +467,92 @@ def test_longitudinal_channel_elastic_pole_is_optional():
     con = sc.get_spin_spectral_function(connected=True, **common)[2]
     assert np.min(np.abs(raw["channels"]["zz"]["energies"])) < 1e-8
     assert np.min(np.abs(con["channels"]["zz"]["energies"])) > 1e-8
+
+
+# -- itensor_version="julia_live" ------------------------------------------
+#
+# The same pipeline on the live Julia backend: the sector solves run on a
+# clone with ITensors.jl QN sites, the states are promoted onto the clone's
+# dense sites, which the clone shares with the caller's chain. Called
+# through sectordc and get_spin_spectral_function/get_spectral_function,
+# which reach sectordc directly.
+
+from _helpers import julia_live_param  # noqa: E402
+
+JL = [julia_live_param()]
+# ITensorMPS's penalty excited states converge more slowly than the
+# session backends' over a whole sector (15 and 20 states here), so the
+# schedule is pinned longer than the 8 sweeps of the model helpers
+JL_NSWEEPS = 20
+
+
+def _skip_parity_odd(f):
+    try:
+        return f()
+    except Exception as e:
+        if "Parity-odd" in str(e):
+            pytest.skip("needs package B parity-odd MPOs")
+        raise
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_ladder_pair_poles_match_ed(version):
+    n = 6
+    sc, h = heisenberg_chain(n, backend="julia_live")
+    sc.nsweeps = JL_NSWEEPS
+    Sp, Sm = name2MO("Sp", sc), name2MO("Sm", sc)
+    for A, B, target in ((Sm[0], Sp[0], 2), (Sp[0], Sm[0], -2)):
+        e, w, info = sectordc.sector_poles(sc, name=(A, B), nex=100,
+                                           quiet=True)
+        assert info["target_sector"] == {"Sz": target}
+        assert info["captured"] == pytest.approx(1.0, abs=1e-6)
+        ref_e, ref_w = ed_sector_lehmann(
+            sc, h, {"Sz": 2 * sum(sc.Sz)}, {"Sz": 0}, {"Sz": target}, A, B)
+        compare_poles(np.array(e), np.array(w), ref_e, ref_w)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_spin_spectral_function_matches_ed_and_sum_rule(version):
+    n = 6
+    sc, h = heisenberg_chain(n, backend="julia_live")
+    sc.nsweeps = JL_NSWEEPS
+    es = np.linspace(-0.2, 4.0, 300)
+    x, S, info = sc.get_spin_spectral_function(
+        i=n // 2, nex=100, es=es, delta=0.1, return_poles=True, quiet=True)
+    assert info["channels"]["pm"]["sector"] == {"Sz": 2}
+    assert info["channels"]["mp"]["sector"] == {"Sz": -2}
+    Sp, Sm, Sz = (name2MO(k, sc) for k in ("Sp", "Sm", "Sz"))
+    ref = spinchain.Spin_Chain([2] * n)
+    ref.set_hamiltonian(h)
+    total = 0
+    for key, (A, B) in (("pm", (Sm[n // 2], Sp[n // 2])),
+                        ("mp", (Sp[n // 2], Sm[n // 2])),
+                        ("zz", (Sz[n // 2], Sz[n // 2]))):
+        xe, ye = ref.get_dynamical_correlator(mode="ED", submode="ED",
+                                              name=(A, B), es=es, delta=0.1)
+        assert np.max(np.abs(info["curves"][key].real - ye)) < 1e-4
+        total = total + (ye if key == "zz" else 0.5 * ye)
+    assert np.max(np.abs(S.real - total)) < 1e-4
+    # S-S+ + S+S- = 2(Sx^2+Sy^2) = 1 and Sz^2 = 1/4 on a spin-1/2
+    w = {k: np.sum(info["channels"][k]["weights"]).real
+         for k in ("pm", "mp", "zz")}
+    assert w["pm"] + w["mp"] == pytest.approx(1.0, abs=1e-6)
+    assert w["zz"] == pytest.approx(0.25, abs=1e-6)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_free_fermion_poles_match_ed(version):
+    n, nf = 6, 3
+    fc, h = tV_chain(n, v=0.0, backend="julia_live")
+    fc.set_conserved_sector(Nf=nf)
+    e, w, info = _skip_parity_odd(lambda: sectordc.sector_poles(
+        fc, name=(fc.C[0], fc.Cdag[0]), nex=100, quiet=True))
+    assert info["target_sector"] == {"Nf": nf + 1}
+    ref_e, ref_w = ed_sector_lehmann(
+        fc, h, {"Nf": sum(fc.N)}, {"Nf": nf}, {"Nf": nf + 1},
+        fc.C[0], fc.Cdag[0])
+    compare_poles(np.array(e), np.array(w), ref_e, ref_w)
+    x, A, info = _skip_parity_odd(lambda: fc.get_spectral_function(
+        i=1, nex=100, es=np.linspace(-6, 6, 200), delta=0.1,
+        return_poles=True, quiet=True))
+    assert float(np.sum(info["weights"]).real) == pytest.approx(1.0, abs=1e-6)

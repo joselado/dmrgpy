@@ -354,8 +354,14 @@ class Many_Body_Chain():
               # the pybind11 Chain (unsupported), and the clone gets a
               # fresh, empty session below anyway, so it must start with
               # no send-cache
+          elif (k in ("jlsites","jlsites_dense")
+                  and self.itensor_version=="julia_live"):
+              out.__dict__[k] = v # shared on purpose: a Julia Index is
+              # immutable, and a clone on the same indices is what lets
+              # its states contract with the original's (sectordc.py)
           elif (k in ("_dcex_excited_cache","_sector_states_cache")
-                  and self._session is not None):
+                  and (self._session is not None
+                       or self.itensor_version=="julia_live")):
               out.__dict__[k] = None # MPS of the old session, see below;
               # the sector cache would also deepcopy whole clone chains
           else: out.__dict__[k] = deepcopy(v,memo)
@@ -433,16 +439,18 @@ class Many_Body_Chain():
       invalidates the Hamiltonian/ground state already sent to the session,
       so the next gs_energy() re-sends and re-solves.
 
-      Three solvers implement this: DMRG with itensor_version=3 (genuinely
-      block-sparse QN tensors), DMRG with itensor_version="python" (a
-      charge grading on dense storage plus a charge penalty on the
-      variational solves, see pyitensor/sector.py), and mode="ED" (the
-      charge is diagonal in the ED product basis, so a sector is a set of
-      basis states and every assembled operator is restricted to the
-      corresponding submatrix, see edtk/edchain.py). The API, the units
-      (Sz in 2*Sz units) and the answers are the same on all three;
-      itensor_version=2 and "julia_live" have no quantum numbers at all
-      and still refuse rather than answering with the global ground state.
+      Four solvers implement this: DMRG with itensor_version=3 (genuinely
+      block-sparse QN tensors), DMRG with itensor_version="julia_live"
+      (ITensors.jl's QN site indices, see mpsjulialive/sector.py), DMRG
+      with itensor_version="python" (a charge grading on dense storage
+      plus a charge penalty on the variational solves, see
+      pyitensor/sector.py), and mode="ED" (the charge is diagonal in the
+      ED product basis, so a sector is a set of basis states and every
+      assembled operator is restricted to the corresponding submatrix, see
+      edtk/edchain.py). The API, the units (Sz in 2*Sz units) and the
+      answers are the same on all four; itensor_version=2 has no quantum
+      numbers at all and still refuses rather than answering with the
+      global ground state.
 
       Two things about the ED implementation differ in kind rather than in
       result. It builds the *full* Hilbert space and then restricts, so a
@@ -461,7 +469,7 @@ class Many_Body_Chain():
                   raise ValueError("set_conserved_sector: %s must be an integer "
                                    "(Sz is in 2*Sz units), got %s"%(k,repr(v)))
           self.conserved_sector = {k:int(v) for k,v in qns.items()}
-      if qns and self.itensor_version not in (3,"python"):
+      if qns and self.itensor_version not in (3,"python","julia_live"):
           # DMRG on this backend cannot do it, but ED can -- as long as
           # this chain type defines the requested quantum numbers at all
           try: charges = self.get_sector_charge_operators()
@@ -471,7 +479,7 @@ class Many_Body_Chain():
               self.conserved_sector = previous
               raise NotImplementedError(
                   "set_conserved_sector%s is implemented for "
-                  "itensor_version=3, itensor_version=\"python\" and "
+                  "itensor_version=3, \"python\", \"julia_live\" and "
                   "mode=\"ED\" (this chain uses %s%s). Switch with "
                   "setup_cpp(version=3) or setup_python(), or run it "
                   "with mode=\"ED\"."
@@ -539,13 +547,28 @@ class Many_Body_Chain():
       before this existed still works as long as no sector is requested."""
       self._sector_on_session = False
       ed_only_ok = self.mode=="ED" # ED targets the sector by itself
+      if self.itensor_version=="julia_live":
+          # the sector lives on the chain's Julia site set
+          # (mpsjulialive/sector.py): a QN set on self.jlsites while it is
+          # set, the dense self.jlsites_dense otherwise
+          if not hasattr(self,"jlsites_dense"): return # no Julia sites
+          # (a chain pinned to mode="ED" never builds them)
+          if self.conserved_sector and ed_only_ok \
+                  and len(set(self.conserved_sector)
+                          & self._ed_only_quantum_numbers())>0:
+              self.jlsites = self.jlsites_dense # see the session case below
+              self._jl_sector_plan = None
+              return
+          from .mpsjulialive import sector as jlsector
+          self._sector_on_session = jlsector.apply(self)
+          return
       if self.itensor_version not in (3,"python"):
           # this DMRG backend has no quantum numbers at all
           if self.conserved_sector and not ed_only_ok:
               raise NotImplementedError(
                   "this chain targets the conserved sector %s, which DMRG "
-                  "only implements for itensor_version=3 and "
-                  "itensor_version=\"python\" -- clear it with "
+                  "only implements for itensor_version=3, \"python\" and "
+                  "\"julia_live\" -- clear it with "
                   "set_conserved_sector(), or run it with mode=\"ED\""
                   %(self.conserved_sector,))
           return
@@ -636,15 +659,30 @@ class Many_Body_Chain():
       re-solving unconstrained. Call `restart()` if an unconstrained
       re-solve is what you want.
 
-      Nothing happens if no sector is set. itensor_version=3 and
-      itensor_version="python" only, like `set_conserved_sector` itself.
+      Nothing happens if no sector is set. itensor_version=3, "python" and
+      "julia_live" only, like `set_conserved_sector` itself.
       """
       if not self.conserved_sector: return # nothing to promote
-      if self.itensor_version not in (3,"python"):
+      if self.itensor_version not in (3,"python","julia_live"):
           raise NotImplementedError(
-              "promote_to_dense is implemented for itensor_version=3 and "
-              "itensor_version=\"python\" only (this chain uses %s)."
+              "promote_to_dense is implemented for itensor_version=3, "
+              "\"python\" and \"julia_live\" only (this chain uses %s)."
               %repr(self.itensor_version))
+      if self.itensor_version=="julia_live":
+          if not getattr(self,"_sector_on_session",False):
+              self.conserved_sector = None # never on the Julia sites
+              return
+          pending = groundstate.pending_injection(self)
+          current = groundstate.gs_is_current(self)
+          supplied = groundstate.state_supplied(self)
+          self.wf0 = self.promote_mps(self.wf0) # while still in the sector
+          self.conserved_sector = None
+          self._apply_conserved_sector() # back on the dense site set
+          self._session_ham_cache = None
+          if self.wf0 is not None and (pending is not None or current):
+              groundstate.mark_injected(self,self.wf0,
+                      reconverge=(pending=="reconverge"),supplied=supplied)
+          return
       if self._session is None:
           # No live session to promote: the sector was only ever recorded
           # on the Python object (_apply_conserved_sector is a no-op
@@ -691,6 +729,13 @@ class Many_Body_Chain():
       this before it can be contracted against an operator built afterwards.
       Returns a new `MPS`; a no-op on one that is already dense."""
       if wf is None: return None
+      if self.itensor_version=="julia_live":
+          if getattr(wf,"jlmps",None) is None \
+                  or not hasattr(self,"jlsites_dense"): return wf
+          from .mpsjulialive import sector as jlsector
+          out = wf.copy()
+          out.jlmps = jlsector.promote(self,wf.jlmps)
+          return out
       if self.itensor_version not in (3,"python") \
               or getattr(wf,"cpp_handle",None) is None:
           return wf

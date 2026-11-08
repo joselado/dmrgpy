@@ -352,3 +352,156 @@ def test_dynamical_correlator_of_a_charge_changing_operator_after_promotion():
 
     got, ref = spectrum(sector), spectrum(dense)
     assert np.max(np.abs(got - ref)) < 1e-6 * max(1.0, np.max(np.abs(ref)))
+
+
+# -- itensor_version="julia_live" ------------------------------------------
+#
+# Promotion on the live Julia backend: dense(psi) with its site indices
+# replaced by the chain's own dense ones (mpsjulialive/sector.py). The
+# julia_live MPS has no chain-level overlap()/applyoperator() of its own
+# yet, so these use the MPS methods (wf.dot, op*wf) directly.
+
+from _helpers import julia_live_param  # noqa: E402
+
+JL = [julia_live_param()]
+
+
+def _jl_vev(op, wf):
+    return complex(wf.dot(op * wf)) / complex(wf.dot(wf))
+
+
+def _jl_or_skip_parity_odd(f):
+    """f(), skipped when it needs a parity-odd fermion MPO (a bare C) on
+    dense julia_live sites, which ITensorMPS's OpSum does not build yet"""
+    try:
+        return f()
+    except Exception as e:
+        if "Parity-odd" in str(e):
+            pytest.skip("needs package B parity-odd MPOs")
+        raise
+
+
+def _jl_solved_in_sector(n=8, nf=3):
+    fc, h, number = tV_chain(n)
+    fc.setup_julia()
+    fc.set_hamiltonian(h)
+    fc.maxm = 40
+    fc.nsweeps = 8
+    fc.set_conserved_sector(Nf=nf)
+    e = fc.gs_energy()
+    e_ed, v_ed = ed_sector_ground_state(fc, h, number, nf)
+    assert e == pytest.approx(e_ed, abs=DMRG_TOL)
+    return fc, h, number, v_ed
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_promotion_keeps_the_sector_state(version):
+    n, nf = 8, 3
+    fc, h, number, v_ed = _jl_solved_in_sector(n=n, nf=nf)
+    e_before = fc.gs_energy()
+    fc.promote_to_dense()
+    assert fc.conserved_sector is None
+    assert fc.gs_energy() == pytest.approx(e_before, abs=DMRG_TOL)
+    assert fc.vev(h).real == pytest.approx(e_before, abs=DMRG_TOL)
+    assert fc.vev(number).real == pytest.approx(nf, abs=1e-8)
+    for i in range(n):
+        assert fc.vev(fc.N[i]).real == pytest.approx(
+            ed_vev(fc, fc.N[i], v_ed).real, abs=DMRG_TOL)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_annihilation_operator_after_promotion(version):
+    n, nf, site = 8, 3, 2
+    fc, h, number, v_ed = _jl_solved_in_sector(n=n, nf=nf)
+    with pytest.raises(ValueError):
+        fc.C[site] * fc.wf0
+    fc.promote_to_dense()
+    wf = _jl_or_skip_parity_odd(lambda: fc.C[site] * fc.wf0)
+    assert wf.norm() ** 2 == pytest.approx(
+        fc.vev(fc.N[site]).real, abs=DMRG_TOL)
+    assert _jl_vev(number, wf).real == pytest.approx(nf - 1, abs=1e-6)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_promoted_state_matches_ed_on_an_sx_correlator(version):
+    n, two_sz = 8, 0
+    sc, h, sz = heisenberg_chain(n)
+    sc.setup_julia()
+    sc.set_hamiltonian(h)
+    sc.maxm = 40
+    sc.nsweeps = 8
+    sc.set_conserved_sector(Sz=two_sz)
+    sc.gs_energy()
+    e_ed, v_ed = ed_sector_ground_state(sc, h, sz, two_sz / 2.0)
+    with pytest.raises(ValueError):
+        sc.vev(sc.Sx[0] * sc.Sx[1])
+    sc.promote_to_dense()
+    assert sc.vev(h).real == pytest.approx(e_ed, abs=DMRG_TOL)
+    for j in range(1, n):
+        got = sc.vev(sc.Sx[0] * sc.Sx[j]).real
+        assert got == pytest.approx(ed_vev(sc, sc.Sx[0] * sc.Sx[j], v_ed).real,
+                                    abs=DMRG_TOL)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_promote_mps_converts_a_held_state(version):
+    n, nf = 8, 3
+    fc, h, number, v_ed = _jl_solved_in_sector(n=n, nf=nf)
+    held = fc.get_gs().copy()
+    fc.promote_to_dense()
+    promoted = fc.promote_mps(held)
+    assert _jl_vev(number, promoted).real == pytest.approx(nf, abs=1e-8)
+    assert abs(promoted.dot(fc.wf0)) == pytest.approx(1.0, abs=DMRG_TOL)
+    again = fc.promote_mps(promoted)  # already dense: unchanged
+    assert abs(again.dot(promoted)) == pytest.approx(1.0, abs=DMRG_TOL)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_promotion_without_a_sector_and_setting_one_again(version):
+    n = 8
+    fc, h, number = tV_chain(n)
+    fc.setup_julia()
+    fc.set_hamiltonian(h)
+    e = fc.gs_energy()
+    fc.promote_to_dense()  # no sector: nothing happens
+    assert fc.conserved_sector is None
+    assert fc.gs_energy() == pytest.approx(e, abs=DMRG_TOL)
+    fc.set_conserved_sector(Nf=3)
+    e3 = fc.gs_energy()
+    fc.promote_to_dense()
+    fc.set_conserved_sector(Nf=5)
+    e5 = fc.gs_energy()
+    assert fc.vev(number).real == pytest.approx(5, abs=1e-8)
+    _, v5 = ed_sector_ground_state(fc, h, number, 5)
+    assert e5 == pytest.approx(ed_vev(fc, h, v5).real, abs=DMRG_TOL)
+    assert e5 != pytest.approx(e3, abs=1e-3)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_states_promoted_from_different_sectors_are_comparable(version):
+    """<gs_{Sz=-2}|S-_i|gs_{Sz=0}> between two promoted sector states, on
+    the chain's one dense site set, against ED."""
+    n = 6
+    sc, h, sz = heisenberg_chain(n)
+    sc.setup_julia()
+    sc.set_hamiltonian(h)
+    sc.maxm = 40
+    sc.nsweeps = 8
+    from dmrgpy.operatornames import name2MO
+    Sm = name2MO("Sm", sc)
+    sc.set_conserved_sector(Sz=0)
+    sc.gs_energy()
+    _, v0 = ed_sector_ground_state(sc, h, sz, 0.0)
+    sc.promote_to_dense()
+    wf0 = sc.wf0.copy()
+    sc.set_conserved_sector(Sz=-2)
+    sc.gs_energy()
+    _, v1 = ed_sector_ground_state(sc, h, sz, -1.0)
+    sc.promote_to_dense()
+    wf1 = sc.wf0.copy()
+    ed = sc.get_ED_obj()
+    for i in range(n):
+        z = abs(wf1.dot(Sm[i] * wf0)) ** 2
+        M = np.array(MO2matrix(Sm[i], ed).todense())
+        z_ed = abs(np.conjugate(v1) @ (M @ v0)) ** 2
+        assert z == pytest.approx(z_ed, abs=DMRG_TOL)

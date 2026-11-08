@@ -52,6 +52,8 @@ def operator_text(MO):
 
 def get_MPO(MO,MBO):
     """Transform a multioperator into a matrix product operator"""
+    from . import sector
+    MO = sector.prepare_operator(MO,MBO)
     ls = operator_text(MO)
     from .juliasession import Main, to_julia_strvec
     MPO = Main.toMPO(to_julia_strvec(ls),MBO.jlsites)
