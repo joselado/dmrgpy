@@ -38,8 +38,9 @@ def dynamical_correlator_nhkpm(self,name=None,delta=1e-1,
                 "implemented for itensor_version 3, \"python\" or "
                 "\"julia_live\" so far, got "+str(self.itensor_version))
     from .. import multioperator
-    if self.itensor_version=="julia_live": e0 = _julia_biorthogonal_pair(self)
-    else: e0 = self.gs_energy() # routes to nhdmrg, sets self.wf0/self.nh_left_wf
+    # routes to NH-DMRG and sets self.wf0/self.nh_left_wf, or returns the
+    # stored pair; on julia_live through mpsjulialive/groundstate.py
+    e0 = self.gs_energy()
     psir = self.wf0
     psil = getattr(self,"nh_left_wf",None)
     if psil is None or getattr(self,"_nh_left_for",None) is not psir:
@@ -55,7 +56,10 @@ def dynamical_correlator_nhkpm(self,name=None,delta=1e-1,
                 "and this chain has none: its state was set with set_gs(), "
                 "set_initial_wf() or gs_energy(wf0=...), which give a right "
                 "state only. Solve the biorthogonal pair with NH-DMRG "
-                "instead, restart() and then gs_energy()")
+                "instead, restart() and then gs_energy(). On julia_live a "
+                "solve whose left and right vectors came for two "
+                "eigenvalues tied in the real part keeps no left one "
+                "either; break the tie in H")
     # gs_energy_nhdmrg() renormalizes wf0=psir.normalize() to unit norm but
     # leaves nh_left_wf at nhdmrg()'s own <psil|psir>=1 scale, so the two
     # no longer satisfy <psil|psir>=1 together - restore that biorthogonal
@@ -87,25 +91,6 @@ def dynamical_correlator_nhkpm(self,name=None,delta=1e-1,
                     int(self.kpmmaxm),float(self.kpmcutoff))
         out[i] = kpm.spec_from_moments_nh(np.array(mu_n),kernel=kernel)
     return es,out
-
-
-def _julia_biorthogonal_pair(self):
-    """The energy of the biorthogonal pair on julia_live, solving it when
-    the chain holds none. gs_energy() there keeps the right state of the
-    Julia NH solve only, so the pair is solved through nhdmrg.py's
-    gs_energy_nhdmrg, the shared wrapper that also stores the left state
-    and pairs it with the right one. A state set by hand is left to
-    gs_energy(), and so refused below as on the other backends."""
-    from ..groundstate import pending_injection, state_supplied, gs_is_current
-    if pending_injection(self) is not None or state_supplied(self):
-        return self.gs_energy()
-    psil = getattr(self,"nh_left_wf",None)
-    if (self.computed_gs and psil is not None and self.wf0 is not None
-            and getattr(self,"_nh_left_for",None) is self.wf0
-            and gs_is_current(self)):
-        return self.e0
-    from ..nhdmrg import gs_energy_nhdmrg
-    return gs_energy_nhdmrg(self)
 
 
 def dynamical_correlator_nhkpm_ed(self,name=None,delta=1e-1,

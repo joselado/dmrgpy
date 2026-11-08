@@ -83,3 +83,21 @@ def test_nhkpm_julia_refuses_a_set_state(version):
     fc.set_gs(fc.get_gs().copy())
     with pytest.raises(RuntimeError, match="left eigenvector"):
         nhkpm.dynamical_correlator_nhkpm(fc, name=pairs(fc)[0], **KW)
+
+
+@pytest.mark.parametrize("version", [julia_live_param()])
+def test_nhkpm_julia_uses_the_solved_pair(version):
+    """After a plain gs_energy() the correlator reads the pair of that
+    solve: no second solve, the same state object and the same energy,
+    and a left state in the H^dagger convention, which the ED curve on a
+    non-symmetric H checks."""
+    ref = ed_reference(1)
+    fc = chain(version)
+    e = fc.gs_energy()
+    w = fc.wf0
+    fc.vev(fc.N[0])
+    A, B = pairs(fc)[1]
+    _, y = nhkpm.dynamical_correlator_nhkpm(fc, name=(A, B), **KW)
+    assert fc.wf0 is w
+    assert fc.e0 == e
+    assert np.max(np.abs(np.asarray(y) - ref)) < 1e-6 * np.max(np.abs(ref))

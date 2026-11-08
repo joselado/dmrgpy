@@ -48,9 +48,25 @@ def get_gs_dmrg(self,ishermitian=True,wf0=None):
             biorthoalg = NH_biorthoalg,
             alg = NH_alg,
             cutoff=self.cutoff,maxm=self.maxm)
-        wf0 = wfr0 # just the right one
+        wf0 = wfr0 # the right one is the chain's state
     from .mps import MPS
     WF = MPS(wf0,MBO=self)
+    if not use_dmrg:
+        # The left one is kept too, paired with WF, the object that
+        # _gs_energy_julia() stores as self.wf0, so that NH-KPM reads the
+        # pair of this solve (nonhermitian/kpm.py) instead of solving a
+        # second one over it. ITensorNHDMRG's wfl solves H^T, so the left
+        # state of the H^dagger convention is conj(wfl) (nhdmrg.jl's
+        # header, point 1); kpm.py fixes <psil|psir> itself. A left vector
+        # of the conjugate partner (point 2, a tie in the real part) has
+        # overlap 0 with wfr0 and is not kept, so NH-KPM refuses.
+        s = complex(Mainjl.nh_pair_overlap(wfl0,wfr0))
+        if abs(s)>float(Mainjl.PAIR_OVERLAP_TOL):
+            self.nh_left_wf = MPS(Mainjl.conj(wfl0),MBO=self)
+            self._nh_left_for = WF
+        else:
+            self.nh_left_wf = None
+            self._nh_left_for = None
     self.wf0 = WF # store wavefunction
     self.e0 = e0 # store energy
     self.computed_gs = True # assume that the ground state is computed
