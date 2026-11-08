@@ -32,7 +32,8 @@ path = os.path.dirname(os.path.realpath(__file__))
 # list of all the source files
 
 def initialize():
-    files = ["sites.jl"]
+    files = ["sites_custom.jl"] # site types ITensors.jl lacks, before sites.jl
+    files += ["sites.jl"]
     files += ["get_gs.jl"]
     files += ["read_operator.jl"]
     files += ["mpsalgebra.jl"]

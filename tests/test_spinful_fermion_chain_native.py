@@ -12,6 +12,8 @@ import pytest
 from dmrgpy import fermionchain
 
 from _helpers import energy_ed_v2_v3, vev_ed_v2_v3
+from _helpers import julia_live_param
+from _julia_site_helpers import check_julia_live_against_ed
 
 DMRG_TOL = 1e-6
 
@@ -125,3 +127,24 @@ def test_kpm_dynamical_correlator_matches_interleaved_chain():
             name=(fc_double.Cup[0], fc_double.Cdagup[0]), es=es, delta=0.3)
 
     assert y_native == pytest.approx(y_double, abs=5e-3)
+
+
+@pytest.mark.parametrize("v", [julia_live_param()])
+def test_native_hubbard_chain_julia_live_matches_ed(v):
+    """julia_live builds ITensors.jl's Electron site (Emp, Up, Dn, UpDn)
+    and threads the Jordan-Wigner strings itself: 4-site Hubbard chain,
+    t=1, U=4, a Zeeman field, an onsite Sx (a same-site Cdagup Cdn) and
+    site potentials, against ED, with hoppings that cross a site"""
+    n = 4
+    fc = fermionchain.Spinful_Fermionic_Chain_Native(n)
+    h = 0
+    for i in range(n - 1):
+        h = h + fc.Cdagup[i]*fc.Cup[i + 1] + fc.Cdagdn[i]*fc.Cdn[i + 1]
+    h = h + h.get_dagger()
+    for i in range(n):
+        h = h + 4.0*(fc.Nup[i] - .5)*(fc.Ndn[i] - .5)
+        h = h + 0.2*fc.Sz[i] + 0.05*(i + 1)*fc.Ntot[i]
+    h = h + 0.15*fc.Sx[0]
+    obs = [fc.Nup[1], fc.Sz[2], fc.Sx[0], fc.Cdagup[0]*fc.Cup[2],
+           fc.Cdagdn[0]*fc.Cdn[3], fc.Cdagup[1]*fc.Cdn[2]]
+    check_julia_live_against_ed(fc, h, obs, maxm=60, nsweeps=20)

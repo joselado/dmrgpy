@@ -22,6 +22,8 @@ import numpy as np
 import pytest
 
 from dmrgpy import mixedchain, spinchain, fermionchain
+from _helpers import julia_live_param
+from _julia_site_helpers import check_julia_live_against_ed
 
 from _dense_jw_reference import SX, SY, SZ, embed, fermion_ops, gs as _gs
 
@@ -272,3 +274,20 @@ def test_generate_bilinear_works_on_logical_location_lists():
     assert len(mc.Sx) < mc.ns
     h = mc.generate_bilinear(lambda i, j: 1.0 if i == j else 0.0, mc.Sx, mc.Sx)
     assert h is not None
+
+
+@pytest.mark.parametrize("model", ["kondo", "spin1"])
+@pytest.mark.parametrize("v", [julia_live_param()])
+def test_mixed_chain_julia_live_matches_ed(model, v):
+    """julia_live on the mixed chain: ITensorMPS puts an F on every site a
+    fermionic term crosses, the identity on a spin site (sites_custom.jl).
+    Both models of test_mixed_chain_ed.py hop across a spin site; energy,
+    one-site vevs, a spin-spin and a hopping correlator against ED"""
+    from test_mixed_chain_ed import MODELS
+    labels, ham = MODELS[model]
+    mc = mixedchain.Mixed_Spin_Fermion_Chain(labels,
+            itensor_version="julia_live")
+    h = ham(mc)
+    obs = [mc.Sz[1], mc.Ntot[0], mc.Sz[0]*mc.Sz[1],
+           mc.Cdagup[0]*mc.Cup[2], mc.Cdagdn[0]*mc.Cdn[2]]
+    check_julia_live_against_ed(mc, h, obs, maxm=60, nsweeps=30)
