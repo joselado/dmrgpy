@@ -18,9 +18,41 @@ def text_mpo(MO):
 
 
 
+def is_parity_odd(MO):
+    """True if some term of MO has an odd number of fermionic (C-type)
+    factors, the operators ITensorMPS's OpSum cannot turn into an MPO
+    from the raw names"""
+    from ..multioperatortk.canonical import _ODD
+    for term in MO.op:
+        if sum(1 for f in term[1:] if f[0] in _ODD) % 2 == 1: return True
+    return False
+
+
+def text_terms(terms):
+    """Text input for Julia from [(coeff,[(name,1-based site),...]),...],
+    the Jordan-Wigner-dressed form MultiOperator.to_terms() gives"""
+    ls = [str(len(terms))] # number of lines
+    for (c,factors) in terms:
+        ls += [str(len(factors))] # number of factors
+        ils = str(c.real)+"  "+str(c.imag)+"  "
+        for (name,i) in factors: ils += str(name)+"  "+str(i)+"  "
+        ls += [ils]
+    return ls
+
+
+def operator_text(MO):
+    """Text input for Julia. A parity-even operator keeps its raw names,
+    and ITensorMPS threads the Jordan-Wigner string itself. A parity-odd
+    one (a single C or Cdag) is sent pre-dressed with A/Adag/F names,
+    bosonic for OpSum (fermion_ops.jl), since OpSum refuses parity-odd
+    fermionic terms."""
+    if is_parity_odd(MO): return text_terms(MO.to_terms())
+    return text_mpo(MO)
+
+
 def get_MPO(MO,MBO):
     """Transform a multioperator into a matrix product operator"""
-    ls = text_mpo(MO)
+    ls = operator_text(MO)
     from .juliasession import Main, to_julia_strvec
     MPO = Main.toMPO(to_julia_strvec(ls),MBO.jlsites)
     return MPO
