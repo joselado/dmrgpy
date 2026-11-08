@@ -815,9 +815,11 @@ class Many_Body_Chain():
       an exact -1.780099 on a 4-site chain, 2026-09-24c audit, finding 5).
       On v2/v3 the warm start is the session's own state, which stays
       trapped in an eigenstate of the old Hamiltonian that is also one of
-      the new."""
+      the new. julia_live, which has no session, sweeps from the stored
+      state instead (groundstate.mark_warm_start())."""
       if restart: self.restart() # restar the calculation
       else:
+          groundstate.mark_warm_start(self) # the julia_live warm start
           self.computed_gs = False
           self.has_ED_obj = False
           self._gs_supplied = False

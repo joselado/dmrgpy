@@ -541,3 +541,52 @@ def test_julia_vev_takes_wf_and_npow(version):
         assert out[v]["ex"] == pytest.approx(out["ED"]["ex"], abs=1e-6), v
         assert out[v]["ex2"] == pytest.approx(out["ED"]["ex"], abs=1e-6), v
         assert out[v]["h2"] == pytest.approx(out["ED"]["h2"], abs=1e-6), v
+
+
+@pytest.mark.parametrize("version", [pytest.param("julia_live", id="julia_live")])
+@pytest.mark.parametrize("seed", [0, 1])
+def test_julia_restart_false_is_a_warm_start(version, seed):
+    """set_hamiltonian(H, restart=False) keeps the stored state as the warm
+    start of the next solve; on julia_live, which has no session, the next
+    solve started from a random MPS. It sweeps from the stored state now,
+    to the energy a cold solve gives, and restart() stays a cold start."""
+    _require_julia()
+    from dmrgpy import groundstate
+    np.random.seed(seed)
+    sc = _chain("julia_live", n=8, maxm=30, nsweeps=10)
+    _quiet(sc.gs_energy)
+    old = sc.wf0
+    stag = sum(((-1)**i)*0.4*sc.Sz[i] for i in range(sc.ns))
+    h2 = _heis(sc) + stag
+    sc.set_hamiltonian(h2, restart=False)
+    assert groundstate._warm_start(sc) is old
+    e_warm = np.real(_quiet(sc.gs_energy))
+    assert groundstate._warm_start(sc) is None # retired by the solve
+    ed = _chain("ED", n=8)
+    ed.set_hamiltonian(_heis(ed) + sum(((-1)**i)*0.4*ed.Sz[i]
+                                       for i in range(ed.ns)))
+    e_ed = np.real(_quiet(lambda: ed.gs_energy(mode="ED")))
+    assert e_warm == pytest.approx(e_ed, abs=1e-6)
+    sc.set_hamiltonian(_heis(sc)) # restart=True: cold
+    assert groundstate._warm_start(sc) is None
+
+
+@pytest.mark.parametrize("version", [pytest.param("julia_live", id="julia_live")])
+def test_julia_reconverge_and_stored_answer(version):
+    """stored_answer_holds() follows the session backends' rule on
+    julia_live: reconverge=False and maxdepth= alone get the stored answer,
+    reconverge=True sweeps from the stored state (and stays at its
+    energy), and a typo still raises."""
+    _require_julia()
+    np.random.seed(7)
+    sc = _chain("julia_live", n=6, maxm=30, nsweeps=10)
+    e0 = _quiet(sc.gs_energy)
+    w0 = sc.wf0
+    assert sc.gs_energy(reconverge=False) == e0
+    assert sc.gs_energy(maxdepth=3) == e0
+    assert sc.wf0 is w0
+    e1 = _quiet(lambda: sc.gs_energy(reconverge=True))
+    assert sc.wf0 is not w0 # a new solve...
+    assert np.real(e1) == pytest.approx(np.real(e0), abs=1e-8) # ...from it
+    with pytest.raises(TypeError):
+        sc.gs_energy(reconverg=True)

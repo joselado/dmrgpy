@@ -37,7 +37,7 @@ def _backend(version):
 
 from _helpers import julia_live_param
 
-BACKENDS = [_backend("python"), _backend(3), _backend(2)]
+BACKENDS = [_backend("python"), _backend(3), _backend(2), julia_live_param()]
 N = 8
 E0_EXACT = -3.37493260
 
@@ -187,3 +187,27 @@ def test_julia_fluctuation_of_a_state_that_is_not_an_eigenstate(version):
     f = sk.gs_energy_fluctuation()
     assert f > 1e-2
     assert f == pytest.approx(_exact_h2(sk, h), rel=1e-6)
+
+
+@pytest.mark.parametrize("version", [julia_live_param()])
+@pytest.mark.parametrize("seed", [0, 1])
+def test_julia_maxde_reaches_the_ed_energy(version, seed):
+    """gs_energy(maxde=1e-5) on a 10-site chain solved at maxm=4: julia_live
+    took no maxde= and raised. It doubles maxm until the fluctuation per
+    site is below maxde, as the session backends do, and the refined
+    energy is ED's."""
+    m = 10
+    sk = spinchain.Spin_Chain(["S=1/2"]*m, itensor_version=version)
+    h = sum(sk.Sx[i]*sk.Sx[i+1] + sk.Sy[i]*sk.Sy[i+1] + sk.Sz[i]*sk.Sz[i+1]
+            for i in range(m-1))
+    sk.set_hamiltonian(h)
+    sk.maxm, sk.nsweeps = 4, 10
+    np.random.seed(seed)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        e = sk.gs_energy(maxde=1e-5)
+    assert sk.maxm == 4 and sk.nsweeps == 10
+    assert sk.gs_energy_fluctuation()/m <= 1e-5
+    e_ed = sk.gs_energy(mode="ED")
+    assert np.real(e) == pytest.approx(np.real(e_ed), abs=1e-6)
+    assert sk.gs_energy() == e # the refined state is the stored answer

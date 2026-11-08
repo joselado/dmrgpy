@@ -249,14 +249,14 @@ def stored_answer_holds(self,kwargs):
       session has no energy of its own for a state taken as it was set,
       so its gs_energy(skip_dmrg=True) would sweep it, and NH-DMRG would
       solve again over it;
-    - julia_live (_gs_energy_julia()): wf0=None only, since that solver
-      takes neither maxde= nor maxdepth= and raises on reconverge= without
-      a state, so any other keyword raises there as on a fresh chain."""
+    - julia_live (_gs_energy_julia()): the same rule. That solver takes
+      reconverge=, maxde= and maxdepth= as gs_energy_single() does, with
+      reconverge=True sweeping from the stored state; until it did, the
+      stored answer there held for wf0=None only."""
     if not gs_is_current(self): return False
     if kwargs.get("wf0") is not None: return False
     extra = set(kwargs)-{"wf0"}
     if not extra: return True # nothing else asked
-    if self.itensor_version=="julia_live": return False # see above
     if extra-{"reconverge","maxde","maxdepth"}: return False # for the solver
     if kwargs.get("reconverge") is True: return False # a sweep, asked for
     return kwargs.get("maxde") is None # maxde=: a refinement, asked for
@@ -794,19 +794,50 @@ def gs_energy_single(self,wf0=None,reconverge=None,maxde=None,maxdepth=5):
     return out # return energy
 
 
-def _gs_energy_julia(self,ishermitian=True,wf0=None,reconverge=None):
+def mark_warm_start(self):
+    """Record that the stored state is to be the warm start of the next
+    julia_live solve: set_hamiltonian(H, restart=False) calls it. The
+    session backends keep their own state across that call, and julia_live
+    has none, so without the mark its next solve started from a random MPS
+    and restart=False did nothing there. The mark holds the state itself
+    and counts only while self.wf0 is that object, so restart() (which
+    sets wf0 to None) and any solve or setter retire it."""
+    self._gs_warm = self.wf0
+
+
+def _warm_start(self):
+    """The state mark_warm_start() recorded, while it is still the chain's,
+    or None."""
+    w = getattr(self,"_gs_warm",None)
+    if w is None or w is not self.wf0: return None
+    return w
+
+
+def _gs_energy_julia(self,ishermitian=True,wf0=None,reconverge=None,
+        maxde=None,maxdepth=5):
     """gs_energy() on julia_live, with gs_energy_single()'s precedence: an
     explicit wf0= (swept from, or taken unswept with reconverge=False),
     then a state the caller injected (taken unswept, with e0 = <wf|H|wf>,
     after set_gs()/set_initial_wf(), swept from after
-    set_initial_wf_guess()), then a solve from that backend's own random
-    start. Both branches used to call get_gs_dmrg() directly, so the mark
-    was never read and every setter was dropped (2026-09-24b hole hunt,
-    finding 12, recorded there as open for julia_live). The caller's state
-    is not moved: get_gs_dmrg() hands the solver a Julia-side copy, and
-    ITensorMPS's dmrg() sweeps a copy of that again (dmrg.jl, psi =
-    copy(psi0)). reconverge= means something only next to wf0=, since
-    there is no session state to re-sweep here.
+    set_initial_wf_guess()), then the stored state when reconverge=True
+    asks for a sweep from it or set_hamiltonian(H, restart=False) left it
+    as the warm start (mark_warm_start()), then a solve from that
+    backend's own random start. Both branches used to call get_gs_dmrg()
+    directly, so the mark was never read and every setter was dropped
+    (2026-09-24b hole hunt, finding 12, recorded there as open for
+    julia_live). The caller's state is not moved: get_gs_dmrg() hands the
+    solver a Julia-side copy, and ITensorMPS's dmrg() sweeps a copy of
+    that again (dmrg.jl, psi = copy(psi0)). reconverge=False without wf0=
+    is a plain call, as on the session backends, whose stored answer
+    stored_answer_holds() hands back when it is current.
+
+    maxde= is gs_energy_single()'s tolerance on the energy fluctuation per
+    site, with the same refinement: while ||(H-<H>)|psi>||/ns exceeds it,
+    maxm is doubled and the state swept twice from where it is, without
+    noise or ramp, at most maxdepth times, and the refined energy is
+    returned. On a non-Hermitian Hamiltonian it raises, since the
+    fluctuation of a right eigenvector is not the measure of convergence
+    there.
 
     A solve records its solver key, as gs_energy_single() does, so that a
     stored state is current only under the parameters it was solved with:
@@ -816,9 +847,10 @@ def _gs_energy_julia(self,ishermitian=True,wf0=None,reconverge=None):
     an 8-site Heisenberg chain; 2026-09-25 open items, "Left open"). A
     Hermitian solve also marks its energy as H's lower band edge
     (mark_lower_edge()), which the julia_live KPM window reads."""
-    if wf0 is None and reconverge is not None:
-        raise TypeError("gs_energy(reconverge=...) on julia_live needs a "
-                "state to take or sweep from, given as wf0=")
+    if maxde is not None and not ishermitian:
+        raise TypeError("gs_energy(maxde=...) on julia_live refines a "
+                "Hermitian ground state by its energy fluctuation; this "
+                "Hamiltonian is not Hermitian")
     supplied = True
     if wf0 is not None:
         mode = "skip" if reconverge is False else "reconverge"
@@ -828,17 +860,48 @@ def _gs_energy_julia(self,ishermitian=True,wf0=None,reconverge=None):
         start = self.wf0
         if mode is not None and len(self._gs_injected)>2:
             supplied = self._gs_injected[2]
-    if mode=="skip": return _take_injected_state(self,start,supplied=supplied)
-    from .mpsjulialive.groundstate import get_gs_dmrg
-    e0,wf = get_gs_dmrg(self,ishermitian=ishermitian,
-            wf0=start if mode=="reconverge" else None)
-    # the solve's own result: assigned, not injected
-    self.wf0 = wf
-    self._gs_injected = None
-    self._gs_supplied = False
-    self._gs_solver_key = solver_key(self) # see gs_is_current
-    if ishermitian: mark_lower_edge(self)
-    return e0
+        if mode is None and self.wf0 is not None and (reconverge is True
+                or _warm_start(self) is not None):
+            mode = "reconverge" # from the stored state, see above
+    if mode=="skip":
+        out = _take_injected_state(self,start,supplied=supplied)
+    else:
+        from .mpsjulialive.groundstate import get_gs_dmrg
+        out,wf = get_gs_dmrg(self,ishermitian=ishermitian,
+                wf0=start if mode=="reconverge" else None)
+        # the solve's own result: assigned, not injected
+        self.wf0 = wf
+        self.e0 = out
+        self._gs_injected = None
+        self._gs_supplied = False
+        self._gs_warm = None
+        self._gs_solver_key = solver_key(self) # see gs_is_current
+        if ishermitian: mark_lower_edge(self)
+    if maxde is not None: # gs_energy_single()'s refinement, see above
+        from . import vev as _vev
+        de = np.sqrt(abs(_vev.energy_variance(self,self.hamiltonian,
+                wf=self.wf0)))/self.ns
+        if de>maxde and maxdepth>0:
+            maxm,nsweeps,noise = self.maxm,self.nsweeps,self.noise
+            ramp = self.bond_ramp
+            print("Energy fluctuation per site = ",de,maxm)
+            self.maxm = maxm*2
+            self.nsweeps = 2 # just two sweeps
+            self.noise = 0.0
+            self.bond_ramp = False # a warm refinement, see gs_energy_single
+            try:
+                _gs_energy_julia(self,reconverge=True,maxde=maxde,
+                        maxdepth=maxdepth-1)
+            finally:
+                self.maxm = maxm
+                self.nsweeps = nsweeps # restore
+                self.noise = noise
+                self.bond_ramp = ramp
+            self.computed_gs = True
+            self._gs_solver_key = solver_key(self) # ...under these parameters
+            mark_lower_edge(self)
+            out = self.e0 # the refined energy, the one left on the chain
+    return out
 
 
 def gs_energy(self,**kwargs):
