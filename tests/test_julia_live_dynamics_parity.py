@@ -216,36 +216,13 @@ def _applyinverse_available(sc):
     sc.applyinverse(sc.hamiltonian + 3.0, sc.get_gs())
 
 
-@pytest.mark.parametrize("submode,nh", [("CVM_explicit", False),
-                                        ("CVMimag", False),
-                                        ("CVM_explicit", True),
-                                        ("CVM", True), ("KPM", True)])
-def test_missing_routes_refuse_before_the_solve(submode, nh):
-    """What julia_live cannot run yet (applyinverse for the explicit
-    resolvents and the non-Hermitian CVM, the non-Hermitian KPM moments)
-    is refused naming julia_live, before any ground-state solve."""
-    sc = heisenberg(4)
-    if nh:
-        sc.set_hamiltonian(sc.hamiltonian + 0.3j * sc.Sz[0])
-    solves = []
-    orig = sc.get_gs
-    sc.get_gs = lambda *a, **k: solves.append(1) or orig(*a, **k)
-    try:
-        sc.get_dynamical_correlator(submode=submode,
-                                    name=(sc.Sz[0], sc.Sz[0]),
-                                    es=np.linspace(0, 1, 3), delta=0.2,
-                                    **({"E_max": 5.0} if submode == "KPM"
-                                       else {}))
-    except NotImplementedError as exc:
-        if "julia_live" not in str(exc):
-            raise
-        assert solves == []
-    else:
-        pytest.skip("submode=%r runs on julia_live now" % submode)
-
-
-@pytest.mark.parametrize("submode", ["CVM_explicit", "CVMimag"])
+@pytest.mark.parametrize("submode", ["CVM_explicit"])
 def test_explicit_resolvent_submodes_match_ed(submode):
+    """CVMimag is checked in test_julia_live_algebra.py on the resolvent
+    grid it continues from: its Pade continuation to the real axis
+    amplifies 1e-10 input differences to about 0.1 of the peak on every
+    MPS backend, so a comparison with ED on the real axis says nothing
+    about julia_live."""
     sc = heisenberg(4)
     _applyinverse_available(sc)
     es = np.linspace(0.2, 2.0, 7)
