@@ -100,11 +100,11 @@ def _check_backend(self):
     internal clone -- the caller's chain typically has none set, so that
     guard never fires for a submode="SECTOR" call.
     """
-    if self.itensor_version not in (3, "python"):
+    if self.itensor_version not in (3, "python", "julia_live"):
         raise NotImplementedError(
             "get_dynamical_correlator(submode=\"SECTOR\") needs conserved-"
-            "sector support, which exists for itensor_version=3 and "
-            "itensor_version=\"python\" only (this chain uses %s). Switch "
+            "sector support, which exists for itensor_version=3, \"python\" "
+            "and \"julia_live\" only (this chain uses %s). Switch "
             "with setup_cpp(version=3) or setup_python(), or use "
             "submode=\"KPM\"/\"TD\"/\"CVM\", which work on every backend."
             % repr(self.itensor_version))
@@ -431,6 +431,15 @@ def _homogeneous_pairs(self, A, B, names):
     return pairs
 
 
+def _algebra(clone):
+    """overlap(a,b) and aMb(a,M,b) on the clone's states: the chain-level
+    ones on the session backends, the Julia MPS's own on julia_live, whose
+    states the chain-level MPS algebra does not take"""
+    if clone.itensor_version == "julia_live":
+        return (lambda a, b: a.dot(b)), (lambda a, M, b: a.aMb(M, b))
+    return clone.overlap, clone.aMb
+
+
 def _poles_for_pair(self, clone, names, reference, A, B, dqB, nex,
                     quiet=False, e_supplied=None, **kwargs):
     """One charge-homogeneous contribution: the poles of <0|A|n><n|B|0>
@@ -448,18 +457,19 @@ def _poles_for_pair(self, clone, names, reference, A, B, dqB, nex,
             "that reads the chain's state: KPM, CVM, CVM_explicit, ROOTN, "
             "TD, TDZ or EX." % (e_supplied, _sector_str(reference), e0))
 
-    norm0 = complex(clone.overlap(wf0, wf0)).real
+    overlap, aMb = _algebra(clone)
+    norm0 = complex(overlap(wf0, wf0)).real
     poles, weights, mel = [], [], []
     for e, wf in zip(energies, wfs):
-        nn = complex(clone.overlap(wf, wf)).real
+        nn = complex(overlap(wf, wf)).real
         scale = 1.0 / np.sqrt(nn * norm0)
-        a = complex(clone.aMb(wf0, A, wf)) * scale
-        b = complex(clone.aMb(wf, B, wf0)) * scale
+        a = complex(aMb(wf0, A, wf)) * scale
+        b = complex(aMb(wf, B, wf0)) * scale
         poles.append(float(np.real(e)) - float(np.real(e0)))
         weights.append(a * b)
         mel.append(b)
 
-    total = complex(clone.aMb(wf0, B.get_dagger() * B, wf0)).real / norm0
+    total = complex(aMb(wf0, B.get_dagger() * B, wf0)).real / norm0
     captured = float(sum(abs(x) ** 2 for x in mel) / total) if total > 1e-12 else 1.0
     info = {"reference_sector": reference, "target_sector": target,
             "quantum_numbers": names,
