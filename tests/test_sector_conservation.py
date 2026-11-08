@@ -433,6 +433,34 @@ def test_julia_live_conserving_observables_work_and_others_raise(version):
 
 
 @pytest.mark.parametrize("version", JL)
+def test_julia_live_long_chain_witness_is_not_a_basis_state(version):
+    """Past 24 sites is_hermitian() probes with maxm=1. In a sector the
+    witness has to stay a random in-sector state and not become the
+    in-sector product state, on which an exchange between two equal spins
+    reads 0, and a non-Hermitian H would then go to Hermitian DMRG."""
+    from dmrgpy.operatornames import name2MO
+    n = 26
+    sc, h, sz = heisenberg_chain(n)
+    _jl(sc)
+    sc.set_hamiltonian(h)
+    sc.set_conserved_sector(Sz=0)
+    plan = sc._jl_sector_plan
+    Sp, Sm = name2MO("Sp", sc), name2MO("Sm", sc)
+    same = [j for j in range(1, n) if plan[j] == plan[0]]
+    for j in (same[0], same[-1]):  # the nearest and the farthest equal spin
+        assert not sc.is_hermitian(h + 1j * (Sp[0] * Sm[j] + Sm[0] * Sp[j]))
+    assert sc.is_hermitian(h)
+    sc.maxm = 1
+    wf = sc.random_state()
+    sc.maxm = 30
+    assert wf.dot(wf).real == pytest.approx(1.0, abs=1e-8)
+    assert wf.dot(sz * wf).real == pytest.approx(0.0, abs=1e-8)
+    # every <Sz_k> is +-1/2 on a basis state
+    szk2 = sum(abs(wf.dot(sc.Sz[k] * wf)) ** 2 for k in range(n))
+    assert szk2 < 0.99 * n / 4
+
+
+@pytest.mark.parametrize("version", JL)
 def test_julia_live_random_state_is_inside_the_sector(version):
     """random_state() is the witness of is_hermitian()'s probe, so it has to
     work on the QN site set, where ITensors needs an in-sector state"""
