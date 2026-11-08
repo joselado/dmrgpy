@@ -663,8 +663,8 @@ wrong number (-0.3049 for an exact -0.5); that guard sits before the
 non-Hermitian dispatch, since NH-DMRG escapes v3's abort by never calling
 `dmrg()` but its own sweep is two-site too. A conserved sector
 (`set_conserved_sector`) makes `get_mode` raise on DMRG with
-`itensor_version=2` or `"julia_live"`, the two backends with no quantum
-numbers, rather than answer with the global ground state; falling back to
+`itensor_version=2`, the one backend with no quantum numbers, rather
+than answer with the global ground state; falling back to
 ED is correct there, since ED restricts to the sector itself.
 
 **Which backend a chain gets when the caller names none** is
@@ -752,7 +752,15 @@ cross-validated between solvers.
   its own parallel set of modules (`mpsjulialive/groundstate.py`, `vev.py`,
   `mps.py`, `mpo.py`, ...) mirroring the top-level ones but talking to
   Julia's ITensors.jl instead of the C++ pybind11 extension.
-  `Many_Body_Chain.setup_julia()` switches a chain to this mode.
+  `Many_Body_Chain.setup_julia()` switches a chain to this mode. Since
+  2026-11-08 its finite-chain surface is close to v3 and `"python"`
+  (sectors, SECTOR, TASK, NH-KPM, the explicit resolvents, MPO and MPS
+  algebra, every site type); `ROADMAP.md`'s Julia column is the list, and
+  `docs/development.md` 4.6 the architecture. A parity-odd operator (a bare
+  `C`) goes to OpSum as the Jordan-Wigner-dressed `A`/`Adag`/`F` names of
+  `MultiOperator.to_terms()` (`fermion_ops.jl`), since OpSum refuses a
+  parity-odd fermionic term; everything else keeps the raw names, whose
+  Jordan-Wigner string ITensors.jl threads itself.
   `itensor_version="julia"` (a separate, older subprocess-based Julia path
   via `juliarun.py`) is not reachable through the normal public API today
   and should be treated as legacy/inert.
@@ -764,8 +772,10 @@ cross-validated between solvers.
 
 **Conserved sectors.** `Many_Body_Chain.set_conserved_sector(Nf=6)`/
 `(Sz=0)`/`(Nf=8,Sz=0)` (off by default, no-args clears it) confines the
-whole calculation to one quantum-number sector, by three mechanisms behind
-one API: QN-carrying ITensor indices on `itensor_version=3`, dense storage
+whole calculation to one quantum-number sector, by four mechanisms behind
+one API: QN-carrying ITensor indices on `itensor_version=3` and, through a
+second, QN-carrying ITensors.jl site set beside the dense one
+(`mpsjulialive/sites_qn.jl`, `sector.py`), on `"julia_live"`; dense storage
 with a charge grading plus a charge penalty on `"python"`
 (`pyitensor/sector.py`), and a restriction of every assembled operator to
 the basis states carrying the charge on `mode="ED"` (`edtk/edchain.py`,
