@@ -57,6 +57,8 @@ def initialize():
                                  # after both
     files += ["densitymatrix.jl"] # single-site reduced density matrix
     files += ["entropy.jl"] # SVD-based bond entanglement entropy
+    files += ["bicgstab.jl"] # MPS BiCGSTAB for applyinverse; uses
+                              # mpsalgebra.jl's apply_op/summps/conj_mps
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 

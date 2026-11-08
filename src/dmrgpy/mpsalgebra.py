@@ -317,6 +317,11 @@ def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
     if maxn is None: maxn = self.cvm_nit # overwrite
     norm = np.sqrt(abs(wf.dot(wf).real)) # ||wf||, the scale of the residual
     if norm==0.: return wf.copy() # A^-1 0 = 0
+    if _is_julia(wf): # mpsjulialive/bicgstab.jl, the same BiCGSTAB
+        from .mpsjulialive.juliasession import Main
+        jlmps = Main.mps_bicgstab(_julia_mpo(self,A),wf.jlmps,
+                float(delta*norm),int(maxn),int(self.maxm),float(self.cutoff))
+        return _julia_mps(self,jlmps)
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))

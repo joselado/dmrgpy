@@ -147,3 +147,93 @@ def test_wrapper_methods_against_python(version):
         sc.nsweeps = 14
         cc[v] = sc.get_gs().get_CFT_central_charge()
     assert cc[version] == pytest.approx(cc["python"], abs=1e-4)
+
+
+def _inverse_numbers(c, h, eps, mode=None):
+    kw = {} if mode is None else {"mode": mode}
+    gs = c.get_gs(**kw)
+    e0 = c.gs_energy(**kw)
+    b = c.applyoperator(eps*c.Sz[0], gs)
+    A = h - (e0 + 1.0) + 0.1j
+    if mode is None:
+        x = c.applyinverse(A, b, delta=1e-8, maxn=400)
+    else:
+        x = c.applyinverse(A, b)
+    r = c.summps(c.applyoperator(A, x), c.scale_mps(-1., b))
+    return c.overlap(b, x), _norm(c, r), _norm(c, b)
+
+
+@pytest.mark.parametrize("version", JULIA)
+@pytest.mark.parametrize("eps", [1.0, 1e-2])
+def test_applyinverse_against_ed(version, eps):
+    c, h = _heisenberg(6, version, maxm=64)
+    bx, res, nb = _inverse_numbers(c, h, eps)
+    ce, he = _heisenberg(6, "python", maxm=64)
+    bxe, _, _ = _inverse_numbers(ce, he, eps, mode="ED")
+    assert res <= 1e-6*nb # BiCGSTAB stops on the bilinear residual
+    assert abs(bx - bxe) <= 1e-6*abs(bxe)
+
+
+ES = np.linspace(0., 4., 21)
+
+
+def _pair(c, which):
+    if which == "zz": return (c.Sz[0], c.Sz[0])
+    return (c.Sx[0], c.Sy[1])
+
+
+def _continuation_inputs(c, A, B, delta, es):
+    """The resolvent values CVMimag continues from, the grid of
+    cvm.dynamical_correlator_analytic_continuation"""
+    wf = c.get_gs()
+    wfa = A.get_dagger()*wf
+    wfb = B*wf
+    e0 = c.gs_energy()
+    xz = np.linspace(min(es), max(es), 20) + delta*40*1j
+    return np.array([wfb.dot(c.applyinverse(-c.hamiltonian+(e0+z), wfa))
+                     for z in xz])
+
+
+@pytest.mark.parametrize("version", JULIA)
+@pytest.mark.parametrize("which", ["zz", "xy"])
+def test_cvm_explicit_and_cvmimag(version, which):
+    out = {}
+    for v in (version, "python", "ED"):
+        # the field splits the triplet, without it <Sx0 ... Sy1> is zero
+        c, h = _heisenberg(6, "python" if v == "ED" else v, maxm=64,
+                           field=0.3 if which == "xy" else 0.)
+        if v == "ED": c.mode = "ED"
+        c.cvm_tol = 1e-9
+        A, B = _pair(c, which)
+        es, d = nhdynamics.dynamical_correlator_cvm_explicit(c,
+                name=(A, B), delta=0.1, es=ES)
+        es, a = cvm.dynamical_correlator_analytic_continuation(c,
+                name=(A, B), delta=0.1, es=ES)
+        f = _continuation_inputs(c, A, B, 0.1, ES)
+        out[v] = (np.array(d), np.array(a), f)
+    peak = np.max(np.abs(out["ED"][0]))
+    for v in (version, "python"):
+        assert np.max(np.abs(out[v][0]-out["ED"][0])) < 1e-5*peak
+    # CVMimag: the resolvent on the complex grid agrees with ED, and the
+    # Pade continuation to the real axis runs. The continuation itself
+    # amplifies a 1e-10 difference of its inputs to several percent of the
+    # peak on every MPS backend ("python" included, 0.03 of a 0.23 peak
+    # for (Sz0,Sz0)), so the continued curve is not compared.
+    fe = out["ED"][2]
+    assert np.max(np.abs(out[version][2]-fe)) < 1e-6*np.max(np.abs(fe))
+    assert np.all(np.isfinite(out[version][1]))
+
+
+@pytest.mark.parametrize("version", JULIA)
+def test_non_hermitian_cvm(version):
+    out = {}
+    for v in (version, "ED"):
+        c, h = _heisenberg(4, "python" if v == "ED" else v, maxm=32,
+                           extra=0.3j)
+        if v == "ED": c.mode = "ED"
+        c.cvm_tol = 1e-9
+        es, d = nhdynamics.dynamical_correlator_non_hermitian(c,
+                name=(c.Sz[1], c.Sz[1]), delta=0.1, es=ES)
+        out[v] = np.array(d)
+    peak = np.max(np.abs(out["ED"]))
+    assert np.max(np.abs(out[version]-out["ED"])) < 1e-5*peak
