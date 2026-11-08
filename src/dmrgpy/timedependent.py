@@ -50,8 +50,8 @@ def check_tevol_method(self):
     # reach with this name, and julia_live has no such integrator either,
     # so the request is refused here, ahead of every branch, rather than
     # answered by a different integrator.
-    from .groundstate import CBE_BACKENDS
-    if self.tevol_method=="TDVP_CBE" and self.itensor_version not in CBE_BACKENDS:
+    from .groundstate import TDVP_CBE_BACKENDS
+    if self.tevol_method=="TDVP_CBE" and self.itensor_version not in TDVP_CBE_BACKENDS:
         raise NotImplementedError(
             "tevol_method='TDVP_CBE' (one-site TDVP with controlled bond "
             "expansion) is implemented on itensor_version=\"python\" and 3 "

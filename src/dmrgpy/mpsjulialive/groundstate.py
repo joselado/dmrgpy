@@ -34,7 +34,17 @@ def get_gs_dmrg(self,ishermitian=True,wf0=None):
     else: # non-Hermitian Hamiltonian
         if NH_dmrg: use_dmrg = False # use the NH version
         else: use_dmrg = True # use conventional DMRG
-    if use_dmrg: # for Hermitian Hamiltonians, usual DMRG
+    if use_dmrg and getattr(self,"dmrg_method","TWO_SITE")=="CBE":
+        # one-site DMRG with controlled bond expansion (cbe.jl); dense
+        # indices only, so not in a conserved sector
+        if getattr(self,"conserved_sector",None):
+            raise NotImplementedError("dmrg_method='CBE' on julia_live "
+                    "does not run in a conserved sector; use "
+                    "dmrg_method=\"TWO_SITE\", or itensor_version=\"python\"")
+        e0,wf0 = Mainjl.get_gs_cbe(H.jlmpo,psi0,nsweeps=self.nsweeps,
+            cutoff=self.cutoff,maxm=self.maxm,noise=float(self.noise),
+            delta=float(self.cbe_delta),fresh=wf0 is None)
+    elif use_dmrg: # for Hermitian Hamiltonians, usual DMRG
         # with the chain's noise, on the first half of the schedule, as
         # the session backends run it (get_gs.jl's make_sweeps); it was
         # never passed, so self.noise did nothing on this backend

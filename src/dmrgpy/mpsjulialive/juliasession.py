@@ -57,6 +57,8 @@ def initialize():
                                  # after both
     files += ["densitymatrix.jl"] # single-site reduced density matrix
     files += ["entropy.jl"] # SVD-based bond entanglement entropy
+    files += ["cbe.jl"] # one-site DMRG with controlled bond expansion;
+                         # uses only ITensors/ITensorMPS
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 

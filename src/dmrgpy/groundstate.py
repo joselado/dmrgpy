@@ -51,7 +51,8 @@ def ramp_key(self):
 
 
 DMRG_METHODS = ("TWO_SITE","CBE")
-CBE_BACKENDS = ("python",3) # dmrg_method="CBE" and tevol_method="TDVP_CBE"
+CBE_BACKENDS = ("python",3,"julia_live") # dmrg_method="CBE"
+TDVP_CBE_BACKENDS = ("python",3) # tevol_method="TDVP_CBE"
 
 
 def check_dmrg_method(self):
@@ -59,9 +60,9 @@ def check_dmrg_method(self):
     backend that does not implement it.
 
     "CBE" (one-site DMRG with controlled bond expansion) exists on
-    itensor_version="python" (pyitensor/cbe.py) and 3 (mpscpp3/cbe.h,
-    dense indices only, so not in a conserved sector). v2 and julia_live
-    have no such solver, and quietly running their two-site DMRG, or the
+    itensor_version="python" (pyitensor/cbe.py), 3 (mpscpp3/cbe.h,
+    dense indices only, so not in a conserved sector) and julia_live
+    (mpsjulialive/cbe.jl, dense indices too). v2 has no such solver, and quietly running their two-site DMRG, or the
     ED fallback of a missing extension, would answer a different question
     than the one asked (docs/development.md 4.10), so the request raises
     there. Called by Many_Body_Chain.gs_energy()/
@@ -76,9 +77,10 @@ def check_dmrg_method(self):
     if method=="CBE" and self.itensor_version not in CBE_BACKENDS:
         raise NotImplementedError(
             "dmrg_method='CBE' (one-site DMRG with controlled bond "
-            "expansion) is implemented on itensor_version=\"python\" and 3 "
-            "only, and this chain uses itensor_version=%r. Switch the chain "
-            "with setup_python() or setup_cpp(version=3), or set "
+            "expansion) is implemented on itensor_version=\"python\", 3 and "
+            "\"julia_live\" only, and this chain uses itensor_version=%r. "
+            "Switch the chain with setup_python() or setup_cpp(version=3), "
+            "or set "
             "dmrg_method=\"TWO_SITE\"."
             %(self.itensor_version,))
     if method=="CBE": require_cbe_session(self,"dmrg_method='CBE'")
