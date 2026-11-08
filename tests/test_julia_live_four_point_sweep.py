@@ -14,7 +14,7 @@ from _helpers import julia_live_param, setup_backend
 
 pytestmark = pytest.mark.parametrize("version", [julia_live_param()])
 
-ED_TOL = 1e-6
+ED_TOL = 1e-8
 
 
 def spinless_chain(version, n=6):
@@ -84,3 +84,13 @@ def test_sweep_larger_chain_against_ed(version):
     ct = fc.get_gs().get_four_correlation_tensor(ctmode="sweep")
     ed = spinless_chain(version, n=8).get_gs(mode="ED")
     assert np.abs(ct - ed.get_four_correlation_tensor()).max() < ED_TOL
+
+
+def test_sweep_matches_the_python_sweep(version):
+    """Same model on the "python" backend: two different engines and two
+    independent DMRG solves of a gapped state."""
+    ct = spinless_chain(version).get_gs().get_four_correlation_tensor(
+        ctmode="sweep")
+    ref = spinless_chain("python").get_gs().get_four_correlation_tensor(
+        ctmode="sweep")
+    assert np.abs(ct - ref).max() < ED_TOL
