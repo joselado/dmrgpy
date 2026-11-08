@@ -8,9 +8,10 @@ between DMRG/ED, a fixed `self.ns`-length site list, KPM/dynamics/
 entanglement/excited-states machinery, ...) assumes a *finite* chain
 throughout, and none of the finite notions (an ED cross-check, a fixed
 number of sites) have any meaning for an infinite system.
-`itensor_version="python"` (default) or `3` are supported -- passing
-anything else raises NotImplementedError rather than silently doing
-something else. `self.gs_method` (`"vumps"` by default, on EITHER
+`itensor_version="python"` (default) or `3` are supported, and
+`"julia_live"` for the VUMPS ground state and its static observables only
+(mpsjulialive/vumps.jl) -- passing anything else raises
+NotImplementedError rather than silently doing something else. `self.gs_method` (`"vumps"` by default, on EITHER
 backend -- see `Infinite_Many_Body_Chain`'s own class docstring) picks
 the ground-state algorithm; `vev`/`correlator` work for BOTH values on
 BOTH backends: `"vumps"` via `pyitensor.vumps.onsite_expectation`/
@@ -275,8 +276,13 @@ class Infinite_Many_Body_Chain:
     `gs_method`, and supports `vev`/`correlator` under either too
     (`Chain::vumps_onsite_expectation`/`vumps_two_point_correlator`, and
     `Chain::idmrg_onsite_expectation`/`idmrg_two_point_correlator`).
-    `itensor_version=2` and `"julia_live"`/`"julia"` have no iDMRG port at
-    all and raise `NotImplementedError`.
+    `itensor_version="julia_live"` has a native Julia VUMPS
+    (`mpsjulialive/vumps.jl`, a port of `pyitensor/vumps.py`'s grouped
+    path): `gs_energy`/`vev`/`correlator` under `gs_method="vumps"` for
+    `n_uc<=2` and nearest-cell couplings, and `NotImplementedError` for
+    every other `gs_method`, cell and method (never the "python" engine
+    under the julia_live label). `itensor_version=2` and `"julia"` have no
+    port at all and raise `NotImplementedError`.
 
     `self.gs_method`: `"vumps"` (default -- `pyitensor/vumps.py`'s/
     `Chain::vumps_ground_state`'s direct fixed-bond-dimension solver, see
@@ -311,11 +317,12 @@ class Infinite_Many_Body_Chain:
     doing nothing."""
 
     def __init__(self, site_types, itensor_version="python"):
-        if itensor_version not in ("python", 3):
+        if itensor_version not in ("python", 3, "julia_live"):
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain: itensor_version={!r} is not "
-                "implemented -- only \"python\" and 3 (the ITensor v3 C++ "
-                "backend) support iDMRG".format(itensor_version))
+                "implemented -- only \"python\", 3 (the ITensor v3 C++ "
+                "backend) and \"julia_live\" (VUMPS only) support infinite "
+                "chains".format(itensor_version))
         self.itensor_version = itensor_version
         self.site_types = list(site_types)
         self.n_uc = len(self.site_types)
@@ -474,6 +481,10 @@ class Infinite_Many_Body_Chain:
                                       # dispersion/gap k-scan) -- invalidated
                                       # in set_hamiltonian exactly like
                                       # self._result already is.
+        self._julia_vumps = None  # itensor_version="julia_live" only: the
+                                   # mpsjulialive.vumps.JuliaVumpsResult of
+                                   # the last gs_energy(), whose state lives
+                                   # in Julia (mpsjulialive/vumps.jl)
         self._session3 = None    # itensor_version=3 only: the mpscpp3
                                   # Chain instance gs_energy() last ran a
                                   # ground-state method on, kept alive so
@@ -624,6 +635,29 @@ class Infinite_Many_Body_Chain:
         self._excitation_env = None
         self._session3 = None
         self._session3_has_vumps = False
+        self._julia_vumps = None
+
+    def _refuse_julia_live(self, caller):
+        """julia_live has a native Julia VUMPS ground state with its static
+        observables and nothing else; every other method raises here rather
+        than running the "python" engine under the julia_live label."""
+        if self.itensor_version != "julia_live":
+            return
+        from .mpsjulialive.vumps import SUPPORTED
+        raise NotImplementedError(
+            "Infinite_Many_Body_Chain.{}: not implemented on "
+            "itensor_version=\"julia_live\", which supports only {} -- "
+            "use itensor_version=\"python\" or 3".format(caller, SUPPORTED))
+
+    def _check_julia_live_scope(self, caller):
+        if self.gs_method != "vumps" or self.n_uc > 2 or self._reach_cells > 1:
+            from .mpsjulialive.vumps import SUPPORTED
+            raise NotImplementedError(
+                "Infinite_Many_Body_Chain.{}: gs_method={!r}, n_uc={}, "
+                "coupling reach {} cells is not implemented on "
+                "itensor_version=\"julia_live\", which supports only {}".format(
+                    caller, self.gs_method, self.n_uc, self._reach_cells,
+                    SUPPORTED))
 
     def gs_energy(self):
         """Run the ground-state solver (self.maxiter iterations/macro-
@@ -675,7 +709,21 @@ class Infinite_Many_Body_Chain:
         self._require_ground_state("gs_energy")
         self._excitation_env = None  # about to rebuild self._result; see __init__'s own comment
         self._cell_asymmetry = None
-        if self.itensor_version == "python" and self.gs_method == "idmrg":
+        if self.itensor_version == "julia_live":
+            self._check_julia_live_scope("gs_energy")
+            from .mpsjulialive import vumps as jlvumps
+            # same arguments as the "python" VUMPS branch below
+            self._julia_vumps = jlvumps.ground_state(
+                self.site_types, self._h_intra.op, self._h_inter.op, self.n_uc,
+                D=self.maxm, tol=self.etol, maxiter=self.maxiter,
+                niter=self.niter, nrestarts=self.vumps_nrestarts,
+                verbose=self.verbose)
+            self._result = None
+            self._vumps_result = None
+            self.e0 = self._julia_vumps.e0
+            self.converged = self._julia_vumps.converged
+            self._gauge_mismatch = self._julia_vumps.gauge_mismatch
+        elif self.itensor_version == "python" and self.gs_method == "idmrg":
             from .pyitensor import idmrg
             self._result = idmrg.idmrg_ground_state(
                 self.site_types, self._h_intra.op, self._h_inter.op, self.n_uc,
@@ -930,6 +978,13 @@ class Infinite_Many_Body_Chain:
         if not (0 <= p < self.n_uc):
             raise ValueError("vev: p must be in 0..{} (n_uc-1), got {!r}".format(
                 self.n_uc - 1, p))
+        if self.itensor_version == "julia_live":
+            self._check_julia_live_scope("vev")
+            if self._julia_vumps is None:
+                self.gs_energy()
+            self._warn_unconverged_vumps_state("vev")
+            from .mpsjulialive import vumps as jlvumps
+            return jlvumps.onsite_expectation(self._julia_vumps, opname, p)
         if self.itensor_version == "python" and self.gs_method == "idmrg":
             if self._result is None:
                 self.gs_energy()
@@ -1007,6 +1062,14 @@ class Infinite_Many_Body_Chain:
                 "({!r}, {!r}) has odd total fermion parity -- its "
                 "Jordan-Wigner string cannot be closed".format(
                     opname_i, opname_j))
+        if self.itensor_version == "julia_live":
+            self._check_julia_live_scope("correlator")
+            if self._julia_vumps is None:
+                self.gs_energy()
+            self._warn_unconverged_vumps_state("correlator")
+            from .mpsjulialive import vumps as jlvumps
+            return jlvumps.two_point_correlator(
+                self._julia_vumps, opname_i, p_i, opname_j, r)
         if self.itensor_version == "python" and self.gs_method == "idmrg":
             if self._result is None:
                 self.gs_energy()
@@ -1386,6 +1449,7 @@ class Infinite_Many_Body_Chain:
         modest maxm, as the examples do. The returned chain's
         gs_energy() raises RuntimeError (its state is not a ground state);
         set_hamiltonian() on it starts over."""
+        self._refuse_julia_live("apply_operator")
         from .pyitensor.tensor import ITensor
         result = self._python_state("apply_operator")
         W_bulk, opnorm = self._cell_operator_mpo(op, result)
@@ -1497,6 +1561,7 @@ class Infinite_Many_Body_Chain:
         apply_operator). Both chains must have the same gs_method and the
         same unit cell (ValueError otherwise). Works on the chains
         apply_operator/summps return too."""
+        self._refuse_julia_live("overlap")
         state_a = self._python_state("overlap")
         state_b = self._compatible_state(other, "overlap")
         from .pyitensor import idmrg
@@ -1555,6 +1620,7 @@ class Infinite_Many_Body_Chain:
         itensor_version=3 (gs_method="vumps"), same gs_method
         and unit cell on both chains (ValueError otherwise); `cutoff`/
         `maxdim` default to this chain's own `cutoff`/`maxm`."""
+        self._refuse_julia_live("summps")
         state_a = self._python_state("summps")
         state_b = self._compatible_state(other, "summps")
         if cutoff is None:
@@ -1671,6 +1737,7 @@ class Infinite_Many_Body_Chain:
         pair and the next level in place of the other, e.g.
         [0.289896072 0.291597913 0.313428946] for the dense
         [0.289896072 0.289896072 0.291597913] at k=0.37, maxm=10."""
+        self._refuse_julia_live("excitation_energies")
         # Both backends' ansatz is built on the grouped, reach-1
         # {GL, GR, bond_envs} triple (pyitensor/idmrg_excitations.py and
         # its C++ port), which a longer-range Hamiltonian's extra pending
@@ -1703,6 +1770,7 @@ class Infinite_Many_Body_Chain:
         discrete second state, only a momentum-resolved band, so the gap
         is defined as the band's own minimum. See excitation_energies'
         own docstring for the gs_method="vumps" requirement."""
+        self._refuse_julia_live("excitation_gap")
         if ks is None:
             ks = np.linspace(-np.pi, np.pi, 41)
         return min(self.excitation_energies(k, n=1)[0] for k in ks)
@@ -1799,6 +1867,7 @@ class Infinite_Many_Body_Chain:
 
         Sign convention: `k` labels the ansatz's own `sum_n e^{ikn}`; using
         the opposite sign relabels `k <-> -k` and changes nothing else."""
+        self._refuse_julia_live("spectral_weights")
         if self.itensor_version == 3:
             return self._spectral_weights_v3(opname, k, p, n, return_total)
         if self.itensor_version != "python":
@@ -1873,6 +1942,7 @@ class Infinite_Many_Body_Chain:
         be plotted as a heat map -- the underlying peaks are exact delta
         functions at exact momenta, so `spectral_weights` is what to use
         for anything quantitative."""
+        self._refuse_julia_live("dynamical_structure_factor")
         if ks is None:
             ks = np.linspace(-np.pi, np.pi, 41)
         ks = np.asarray(ks, dtype=float)
@@ -1935,6 +2005,7 @@ class Infinite_Many_Body_Chain:
         local_excitation_gap_windowed is explicitly a prototype rather than
         stable API (see its own docstring), so it was deliberately left out
         of the v3 port rather than pinned down in C++ first."""
+        self._refuse_julia_live("local_excitation_gap")
         if self.gs_method != "idmrg":
             raise NotImplementedError(
                 "Infinite_Many_Body_Chain.local_excitation_gap: only "
@@ -2119,6 +2190,7 @@ class Infinite_Many_Body_Chain:
         implementation is a new, nontrivial feature in its own right, not
         a small patch on top of kpm_finite -- flagged as a known,
         deliberate follow-up rather than attempted here."""
+        self._refuse_julia_live("kpm_finite")
         if self._h_intra is None:
             raise RuntimeError(
                 "Infinite_Many_Body_Chain.kpm_finite called "
@@ -2291,6 +2363,7 @@ class Infinite_Many_Body_Chain:
         codebase (it reuses `timedependent.py`'s own
         `_fourier_transform_correlator` directly). Returns `(ks, es,
         Skw)`, `Skw` shaped `(len(ks), len(es))`."""
+        self._refuse_julia_live("td_dynamical_correlator")
         if not (0 <= p_i < self.n_uc):
             raise ValueError("td_dynamical_correlator: p_i must be in 0..{} "
                               "(n_uc-1), got {!r}".format(self.n_uc - 1, p_i))

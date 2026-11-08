@@ -57,6 +57,7 @@ def initialize():
                                  # after both
     files += ["densitymatrix.jl"] # single-site reduced density matrix
     files += ["entropy.jl"] # SVD-based bond entanglement entropy
+    files += ["vumps.jl"] # infinite-chain VUMPS (module DmrgpyVumps)
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 
