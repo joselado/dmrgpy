@@ -129,6 +129,13 @@ def resolve_mode(self,mode="DMRG"):
         print("pyitensor's two-site DMRG can't handle a chain this short "
               "(n=%d < 2 sites), using default ED routines"%self.ns)
         return "ED" # use exact diagonalization
+    # ITensorMPS's dmrg() refuses a one-site chain outright ("dmrg
+    # currently does not support system sizes of 1", a juliacall
+    # JuliaError), so julia_live takes the same ED fallback as "python"
+    if self.itensor_version=="julia_live" and self.ns<2:
+        print("ITensorMPS's DMRG can't handle a chain this short "
+              "(n=%d < 2 sites), using default ED routines"%self.ns)
+        return "ED" # use exact diagonalization
     # A chain forced to ED answers every call by ED; otherwise the call's
     # own mode (both names were validated at the top of this function).
     # Only an "ED" on the chain overrides the call: every reader defaults to

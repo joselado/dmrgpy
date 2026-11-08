@@ -7,7 +7,18 @@
 # turn mirror mpscpp3/chain_session.h's C++ TDVP): one real-time step is
 # exp(-i*dt*H), i.e. tdvp's evolution parameter is -im*dt.
 
-function tdvp_step(H,psi,dt,cutoff,maxdim)
+# The Krylov exponentiator of each local step. herm=nothing keeps
+# ITensorMPS's own default (KrylovKit decides, Arnoldi for a ProjMPO), the
+# behaviour of every positional caller; the Python side passes herm=true
+# or false, decided once by chain.is_hermitian(h), so that a Hermitian H
+# takes Lanczos and a non-Hermitian one stays on Arnoldi, with a tight
+# tolerance either way.
+function tdvp_updater_kwargs(herm)
+	herm === nothing && return (;)
+	return (; ishermitian = Bool(herm), tol = 1e-12, krylovdim = 30)
+end
+
+function tdvp_step(H,psi,dt,cutoff,maxdim;herm=nothing)
 	# psi isn't always straight out of dmrg() or a previous tdvp_step()
 	# call (e.g. evolution_ABA()/tdz.py's first step both start from an
 	# operator applied via mpsjulialive/mpo.py's MPO.__mul__, which goes
@@ -36,10 +47,11 @@ function tdvp_step(H,psi,dt,cutoff,maxdim)
 	# where forcing mindim=2 would otherwise pad in a spurious near-zero
 	# singular value at a bond whose true Schmidt rank is 1.
 	return tdvp(H,-im*dt,psi;time_step=-im*dt,cutoff=cutoff,maxdim=maxdim,
-	            normalize=false,outputlevel=0)
+	            normalize=false,outputlevel=0,
+	            updater_kwargs=tdvp_updater_kwargs(herm))
 end
 
-function evolve_and_measure_tdvp(Hmpo,Aop,wf,nt,dt,cutoff,maxdim)
+function evolve_and_measure_tdvp(Hmpo,Aop,wf,nt,dt,cutoff,maxdim;herm=nothing)
 	# tdvp_step()'s internal normalize=false is deliberate and must stay
 	# false at that shared level: advance_complex_time_step() (tdz.jl's
 	# TDZ caller, see tdvp_step's own docstring) reuses tdvp_step for
@@ -69,7 +81,7 @@ function evolve_and_measure_tdvp(Hmpo,Aop,wf,nt,dt,cutoff,maxdim)
 		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
 		# the C++/pyitensor/ED copies of this loop.
 		push!(correlator,inner(psi,Aop,psi))
-		psi = tdvp_step(Hmpo,psi,dt,cutoff,maxdim)
+		psi = tdvp_step(Hmpo,psi,dt,cutoff,maxdim;herm=herm)
 		# norm(), not inner(psi,psi): tdvp_step's own orthogonalize!(psi,1)
 		# leaves psi with a well-defined orthogonality center, so norm()
 		# short-circuits to a cheap single-tensor norm (O(D^2)) instead of
@@ -103,7 +115,7 @@ function apply_clean(A,psi0,maxdim,cutoff;alg="densitymatrix")
 	return psi1
 end
 
-function quench_tdvp(Hshiftmpo,A1mpo,A2mpo,wf0,nt,dt,cutoff,maxdim)
+function quench_tdvp(Hshiftmpo,A1mpo,A2mpo,wf0,nt,dt,cutoff,maxdim;herm=nothing)
 	psi1 = apply_clean(A1mpo,wf0,maxdim,cutoff)
 	psi2 = apply_clean(A2mpo,wf0,maxdim,cutoff)
 	norm0 = sqrt(abs(inner(psi1,psi1)))
@@ -114,7 +126,7 @@ function quench_tdvp(Hshiftmpo,A1mpo,A2mpo,wf0,nt,dt,cutoff,maxdim)
 		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
 		# the C++/pyitensor/ED copies of this loop.
 		push!(correlator,inner(psi2,psi1))
-		psi1 = tdvp_step(Hshiftmpo,psi1,dt,cutoff,maxdim)
+		psi1 = tdvp_step(Hshiftmpo,psi1,dt,cutoff,maxdim;herm=herm)
 		# norm(), not inner(psi1,psi1) -- see evolve_and_measure_tdvp's
 		# comment above: tdvp_step's own orthogonalize!(psi,1) guarantees
 		# this short-circuits to the cheap O(D^2) path.
@@ -162,22 +174,24 @@ function gse_expand(H, psi, krylov_order, gse_cutoff, maxdim)
 end
 
 
-function tdvp_step_onesite(H, psi, dt, cutoff, maxdim)
+function tdvp_step_onesite(H, psi, dt, cutoff, maxdim; herm = nothing)
 	psi = noprime(copy(psi), "Link")
 	orthogonalize!(psi, 1)
 	# nsite=1: one-site TDVP conserves the bond dimension exactly, which
 	# is precisely why it needs the expansion above to grow at all.
 	return tdvp(H, -im * dt, psi; time_step = -im * dt, cutoff = cutoff,
-		maxdim = maxdim, normalize = false, outputlevel = 0, nsite = 1)
+		maxdim = maxdim, normalize = false, outputlevel = 0, nsite = 1,
+		updater_kwargs = tdvp_updater_kwargs(herm))
 end
 
 
 function evolve_and_measure_tdvp_gse(Hmpo, Aop, wf, nt, dt, cutoff, maxdim,
-		gse_sweeps, krylov_order, gse_cutoff)
-	# No per-step renormalization here, matching
-	# pyitensor/chain.py's evolve_and_measure_tdvp_gse (unlike
-	# evolve_and_measure_tdvp above, whose renormalization exists to undo
-	# two-site truncation drift -- one-site TDVP does no truncation).
+		gse_sweeps, krylov_order, gse_cutoff; herm = nothing)
+	# Renormalized to wf's own norm after every step, as
+	# evolve_and_measure_tdvp above and every other backend's loop: one-site
+	# TDVP does no truncation, but a non-Hermitian H changes the norm, and
+	# the measured <psi|Aop|psi> is meant on the normalized trajectory.
+	norm0 = sqrt(abs(inner(wf, wf)))
 	psi = wf
 	correlator = ComplexF64[]
 	for it = 1:nt
@@ -189,14 +203,15 @@ function evolve_and_measure_tdvp_gse(Hmpo, Aop, wf, nt, dt, cutoff, maxdim,
 		if it <= gse_sweeps
 			psi = gse_expand(Hmpo, psi, krylov_order, gse_cutoff, maxdim)
 		end
-		psi = tdvp_step_onesite(Hmpo, psi, dt, cutoff, maxdim)
+		psi = tdvp_step_onesite(Hmpo, psi, dt, cutoff, maxdim; herm = herm)
+		psi = psi * (norm0 / norm(psi))
 	end
 	return correlator, psi
 end
 
 
 function quench_tdvp_gse(Hshiftmpo, A1mpo, A2mpo, wf0, nt, dt, cutoff, maxdim,
-		gse_sweeps, krylov_order, gse_cutoff)
+		gse_sweeps, krylov_order, gse_cutoff; herm = nothing)
 	psi1 = apply_clean(A1mpo, wf0, maxdim, cutoff)
 	psi2 = apply_clean(A2mpo, wf0, maxdim, cutoff)
 	norm0 = sqrt(abs(inner(psi1, psi1)))
@@ -210,7 +225,7 @@ function quench_tdvp_gse(Hshiftmpo, A1mpo, A2mpo, wf0, nt, dt, cutoff, maxdim,
 		if it <= gse_sweeps
 			psi1 = gse_expand(Hshiftmpo, psi1, krylov_order, gse_cutoff, maxdim)
 		end
-		psi1 = tdvp_step_onesite(Hshiftmpo, psi1, dt, cutoff, maxdim)
+		psi1 = tdvp_step_onesite(Hshiftmpo, psi1, dt, cutoff, maxdim; herm = herm)
 		# quench_tdvp_gse *does* renormalize, matching pyitensor's own
 		# (its psi1 carries A1's physical scale through the trajectory,
 		# see quench_tdvp above).

@@ -73,7 +73,10 @@ def test_non_hermitian_blocks_kpm_but_not_excited_states():
     assert not sc.is_hermitian(sc.hamiltonian)
 
     name = (sc.Sz[0], sc.Sz[0])
-    with pytest.raises(NotImplementedError):
+    # the non-Hermitian KPM route (nonhermitian/kpm.py), the one the
+    # session backends take: it refuses without E_max, and on a backend
+    # with no NH-KPM moments
+    with pytest.raises((NotImplementedError, ValueError)):
         sc.get_dynamical_correlator(mode="DMRG", submode="KPM", name=name,
                 es=np.array([0.5]), delta=DELTA)
 

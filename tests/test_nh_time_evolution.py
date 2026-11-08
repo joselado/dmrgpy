@@ -21,6 +21,7 @@ import scipy.linalg as dlg
 from dmrgpy import cppext, spinchain, timedependent
 from dmrgpy.pyitensor import tdvp as tdvptk
 from dmrgpy.pyitensor.mpsalgebra import mpo_is_hermitian
+from _helpers import julia_live_param
 
 
 def _backend(version):
@@ -90,10 +91,12 @@ def _dmrg(version, n, gamma, nt, dt, site, tevol_method="TDVP"):
     return np.array(c)
 
 
-@pytest.mark.parametrize("version", [_backend("python"), _backend(3)])
+@pytest.mark.parametrize("version", [_backend("python"), _backend(3),
+                                     julia_live_param()])
 @pytest.mark.parametrize("gamma", [0.7j, 0.3 - 0.5j])
 def test_nh_tdvp_follows_exact_normalized_evolution(version, gamma):
-    """Was 3.6e-3 off on "python" at gamma=0.7i; v3 is 9e-7 off."""
+    """Was 3.6e-3 off on "python" at gamma=0.7i; v3 is 9e-7 off. On
+    julia_live the exponentiator is Arnoldi, chosen by is_hermitian(h)."""
     ex = _exact(4, gamma, 40, 0.05, 2)
     c = _dmrg(version, 4, gamma, 40, 0.05, 2)
     assert np.max(np.abs(c - ex)) < 3e-6
@@ -110,10 +113,12 @@ def test_nh_tdvp_python_matches_v3_beyond_one_block():
     assert np.max(np.abs(py - ex)) < 1e-5
 
 
-def test_nh_tdvp_gse_follows_exact_normalized_evolution():
-    """The one-site route (TDVP_GSE) takes the same exponentiator."""
+@pytest.mark.parametrize("version", [_backend("python"), julia_live_param()])
+def test_nh_tdvp_gse_follows_exact_normalized_evolution(version):
+    """The one-site route (TDVP_GSE) takes the same exponentiator; on
+    julia_live its loop also restores the norm after every step."""
     ex = _exact(4, 0.7j, 40, 0.05, 2)
-    c = _dmrg("python", 4, 0.7j, 40, 0.05, 2, tevol_method="TDVP_GSE")
+    c = _dmrg(version, 4, 0.7j, 40, 0.05, 2, tevol_method="TDVP_GSE")
     assert np.max(np.abs(c - ex)) < 3e-6
 
 

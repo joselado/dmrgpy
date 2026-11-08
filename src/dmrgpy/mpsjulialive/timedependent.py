@@ -69,6 +69,7 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,**kwargs):
     # exp(-i*e0*t) cancels in the <psi2|psi1(t)> correlator, mirroring
     # pyitensor.chain.Chain.quench_tdvp()/quench()
     Hshift_MO = H-self.e0*multioperator.identity()
+    herm = bool(self.is_hermitian(H)) # Lanczos or Arnoldi, see tdvp.jl
     A1 = MPO(A,MBO=self)
     A2 = MPO(B,MBO=self)
     from .juliasession import Main as Mainjl, to_julia_strvec
@@ -87,17 +88,19 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,**kwargs):
                 lambda: Mainjl.quench_tebd(hlines,self.jlsites,
                     A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm),
                 lambda: Mainjl.quench_tdvp(MPO(Hshift_MO,MBO=self).jlmpo,
-                    A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm))
+                    A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm,
+                    herm=herm))
     else:
         Hshift = MPO(Hshift_MO,MBO=self)
         if self.tevol_method=="TDVP_GSE":
             correlator,_wf = Mainjl.quench_tdvp_gse(Hshift.jlmpo,
                     A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm,
                     int(self.tdvp_gse_sweeps),int(self.tdvp_gse_krylov_order),
-                    self.tdvp_gse_cutoff)
+                    self.tdvp_gse_cutoff,herm=herm)
         else:
             correlator,_wf = Mainjl.quench_tdvp(Hshift.jlmpo,
-                    A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm)
+                    A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm,
+                    herm=herm)
     cs = np.array(correlator)
     ts = np.array([dt*ii for ii in range(int(nt))])
     return ts,cs.real-1j*cs.imag
@@ -117,7 +120,11 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     branches."""
     _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TEBD","AUTO"))
     if h is None: h = self.hamiltonian # Hamiltonian
-    if wf is None: wf = self.wf0 # get ground state
+    # the chain's ground state, solved if needed, as on the session
+    # backends (timedependent.py); self.wf0 is None on a fresh chain. An
+    # explicit wf= is evolved as given.
+    if wf is None: wf = self.get_gs()
+    herm = bool(self.is_hermitian(h)) # Lanczos or Arnoldi, see tdvp.jl
     Aop = MPO(operator,MBO=self)
     from .juliasession import Main as Mainjl, to_julia_strvec
     if self.tevol_method=="TEBD":
@@ -132,17 +139,20 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
                     self.jlsites,Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,
                     self.maxm),
                 lambda: Mainjl.evolve_and_measure_tdvp(MPO(h,MBO=self).jlmpo,
-                    Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,self.maxm))
+                    Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,self.maxm,
+                    herm=herm))
     else:
         Hop = MPO(h,MBO=self)
         if self.tevol_method=="TDVP_GSE":
             correlator,wf_final_jl = Mainjl.evolve_and_measure_tdvp_gse(
                     Hop.jlmpo,Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,
                     self.maxm,int(self.tdvp_gse_sweeps),
-                    int(self.tdvp_gse_krylov_order),self.tdvp_gse_cutoff)
+                    int(self.tdvp_gse_krylov_order),self.tdvp_gse_cutoff,
+                    herm=herm)
         else:
             correlator,wf_final_jl = Mainjl.evolve_and_measure_tdvp(Hop.jlmpo,
-                    Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,self.maxm)
+                    Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,self.maxm,
+                    herm=herm)
     # <psi(t)|O|psi(t)> as measured, not conjugated, like
     # timedependent.py::evolve_and_measure_dmrg (see its docstring);
     # evolution_dmrg_DC above keeps its conjugation, which is the

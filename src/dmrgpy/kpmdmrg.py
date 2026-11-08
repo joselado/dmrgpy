@@ -84,6 +84,13 @@ def get_dynamical_correlator(self,
     TypeError like any other unknown keyword, which is what the sibling
     submodes (CVM, CVM_explicit) already did.
     """
+    if self.itensor_version=="julia_live":
+        # the same moments and reconstruction, see
+        # mpsjulialive/dynamics.py::kpm_dynamical_correlator
+        from .mpsjulialive import dynamics as dynamicsjl
+        return dynamicsjl.kpm_dynamical_correlator(self,name=name,
+                delta=delta,kernel=kernel,es=es,hodc_order=hodc_order,
+                hodc_eta=hodc_eta,**kwargs)
     mus,emin,emax,scale,n,delta = dynamical_correlator_moments(self,
             name=name,delta=delta,**kwargs)
     # the frequency origin is the measured state's own energy, the one
@@ -169,8 +176,11 @@ def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
     # the chain's current state on both sides and the Hamiltonian on the
     # session, not a bare get_gs(): that is what makes a direct caller see
     # a state set with set_gs() and a Hamiltonian changed under it
-    from .groundstate import ground_state_on_session
-    ground_state_on_session(self) # also sets self.e0
+    if self.itensor_version=="julia_live":
+        self.get_gs() # no session: the chain's own state, solved if needed
+    else:
+        from .groundstate import ground_state_on_session
+        ground_state_on_session(self) # also sets self.e0
     # the documented string form ("ZZ"/"cdc"/... plus i=/j=) used to hit a
     # bare `raise` here -- i.e. the default submode was the one submode it
     # did not work with, and fermionchain.get_gr (name="cdc") could never
@@ -179,6 +189,17 @@ def dynamical_correlator_moments(self,name=None,delta=1e-1,i=0,j=0,**kwargs):
             require_symbolic_for="submode='KPM'")
     mi = name[1] # first operator
     mj = name[0].get_dagger() # second operator
+    if self.itensor_version=="julia_live":
+        # kpm.jl's native recursions (energy truncation was refused by
+        # check_kpm_arguments above)
+        from .mpsjulialive import dynamics as dynamicsjl
+        moments,emin,emax,scale,n = dynamicsjl.kpm_moments(self,mi,mj,
+                delta,n_scale)
+        mus = np.array(moments)[:n] # the calibrated count, see below
+        if self.kpm_extrapolate:
+            mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
+                    extrapolation_mode=self.kpm_extrapolate_mode)
+        return mus,emin,emax,scale,n,delta
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
@@ -277,11 +298,16 @@ def general_kpm_moments(self,X=None,A=None,B=None,
         X,scale,shift = scale_operator(self,X,a=a,b=b)
     num_p = int(3*scale/delta) # number of polynomials
     if wf is None: wf = self.get_gs() # no wavefunction provided
-    # compute the wavefunctions
-    if A is not None: wfa = self.applyoperator(A,wf)
-    else: wfa = wf
-    if B is not None: wfb = self.applyoperator(B,wf)
-    else: wfb = wf
+    # compute the wavefunctions; on julia_live as A*wf, the MPO product
+    # mpsjulialive's MPS supports, rather than the session's applyoperator
+    if self.itensor_version=="julia_live":
+        wfa = A*wf if A is not None else wf
+        wfb = B*wf if B is not None else wf
+    else:
+        if A is not None: wfa = self.applyoperator(A,wf)
+        else: wfa = wf
+        if B is not None: wfb = self.applyoperator(B,wf)
+        else: wfb = wf
     mus = general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,self.kpm_accelerate)
     if self.kpm_extrapolate:
         mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
@@ -299,6 +325,12 @@ def general_kpm_moments_cpp_ext(self,X,wfa,wfb,num_p,accelerate):
     kpm_accelerate is self.kpm_accelerate or hardcoded false, which the
     caller now passes in directly.
     """
+    if self.itensor_version=="julia_live":
+        # kpm.jl's recursions at the chain's maxm and cutoff, as the
+        # sessions' general_kpm; no energy truncation here either
+        from .mpsjulialive import dynamics as dynamicsjl
+        return dynamicsjl.general_kpm_moments(self,X,wfa,wfb,num_p,
+                accelerate)
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
