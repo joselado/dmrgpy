@@ -35,6 +35,8 @@ def _backend(version):
     return pytest.param(version, id=ident, marks=marks)
 
 
+from _helpers import julia_live_param
+
 BACKENDS = [_backend("python"), _backend(3), _backend(2)]
 N = 8
 E0_EXACT = -3.37493260
@@ -128,11 +130,9 @@ def test_maxde_meets_its_tolerance(version):
 
 
 def test_fluctuation_runs_on_julia_live():
-    """julia_live's vev takes no npow, so the old route raised TypeError
-    there; it takes the vev of the squared shifted operator. Its value is
-    only as good as julia_live's vev of a long operator sum, which the
-    record's New leads measure at 4e-4 on this chain, so this pins the
-    route rather than a digit."""
+    """julia_live's vev took no npow, so the old route raised TypeError
+    there; it is ||(H-<H>)|psi>||^2 with an uncapped application now, as
+    on the session backends."""
     from _helpers import julia_available
     ok, reason = julia_available()
     if not ok:
@@ -145,3 +145,45 @@ def test_fluctuation_runs_on_julia_live():
     sc.maxm, sc.nsweeps = 8, 10
     sc.gs_energy()
     assert sc.gs_energy_fluctuation() < 1e-6 # full bond dimension: exact
+
+
+@pytest.mark.parametrize("version", [julia_live_param()])
+def test_julia_fluctuation_of_a_state_that_is_not_an_eigenstate(version):
+    """On julia_live the variance of a state that is not an eigenstate is
+    the ED one: the state is (1+0.5 Sx0)|GS> built on both sides from each
+    one's own ground state, which differ only by a phase. And on a 10-site
+    chain at maxm=4 the uncapped route equals vev(h*h)-<h>^2, both exact,
+    for the same state."""
+    from dmrgpy import multioperator
+    n = 6
+    sc = spinchain.Spin_Chain(["S=1/2"]*n, itensor_version=version)
+    ed = spinchain.Spin_Chain(["S=1/2"]*n)
+    for c in (sc, ed):
+        c.set_hamiltonian(sum(c.Sx[i]*c.Sx[i+1] + c.Sy[i]*c.Sy[i+1]
+                              + c.Sz[i]*c.Sz[i+1] for i in range(n-1)))
+        c.maxm, c.nsweeps = 30, 10
+    np.random.seed(1)
+    g = sc.get_gs()
+    x = g + 0.5*(sc.Sx[0]*g)
+    gE = ed.get_gs(mode="ED")
+    xE = gE + 0.5*(ed.Sx[0]*gE)
+    xE = xE*(1.0/np.sqrt(np.real(xE.dot(xE))))
+    hE = ed.hamiltonian
+    eE = np.real(xE.dot(hE*xE))
+    var_ed = np.real(xE.dot(hE*(hE*xE))) - eE**2
+    assert var_ed > 1e-2
+    assert sc.gs_energy_fluctuation(wf=x)**2 == pytest.approx(var_ed, rel=1e-8)
+    # 10 sites, maxm=4: a state far from converged, two exact routes
+    m = 10
+    sk = spinchain.Spin_Chain(["S=1/2"]*m, itensor_version=version)
+    h = sum(sk.Sx[i]*sk.Sx[i+1] + sk.Sy[i]*sk.Sy[i+1] + sk.Sz[i]*sk.Sz[i+1]
+            for i in range(m-1))
+    sk.set_hamiltonian(h)
+    sk.maxm, sk.nsweeps = 4, 10
+    np.random.seed(2)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        sk.gs_energy()
+    f = sk.gs_energy_fluctuation()
+    assert f > 1e-2
+    assert f == pytest.approx(_exact_h2(sk, h), rel=1e-6)

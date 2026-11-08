@@ -480,3 +480,64 @@ def test_julia_solver_key(version):
     _quiet(lambda: sc.get_excited_states(n=2))
     assert _quiet(sc.gs_energy) == pytest.approx(ex, abs=1e-8)
     assert _fidelity(sc.get_gs(), x) == pytest.approx(1.0, abs=1e-10)
+
+
+# ------------------------------------------- julia_live vev and gs keywords
+
+def _tfim(sc, g=1.5):
+    """Open transverse-field Ising chain in the paramagnetic phase: the
+    ground state and the first excited state are both non-degenerate, so a
+    vev in either is a number and not a choice inside a multiplet."""
+    h = 0
+    for i in range(sc.ns-1):
+        h = h - 4.0*sc.Sz[i]*sc.Sz[i+1]
+    for i in range(sc.ns):
+        h = h - 2.0*g*sc.Sx[i]
+    return h
+
+
+@pytest.mark.parametrize("version", [pytest.param("julia_live", id="julia_live")])
+def test_julia_vev_takes_wf_and_npow(version):
+    """julia_live's vev() was vev(MBO,MO), so the wf=, npow= and T= that
+    Many_Body_Chain.vev forwards raised TypeError there. It takes them now,
+    as vev.py's multi_vev does: wf= is normalized, npow>1 applies the MPO,
+    T>0 raises naming mode="ED" and metts_vev(), and an unknown keyword
+    raises."""
+    _require_julia()
+    n = 8
+    out = {}
+    for v in ("julia_live", "python", "ED"):
+        np.random.seed(5)
+        kw = {} if v == "ED" else dict(itensor_version=v)
+        sc = spinchain.Spin_Chain(["S=1/2"]*n, **kw)
+        sc.set_hamiltonian(_tfim(sc))
+        sc.maxm, sc.nsweeps = 40, 14
+        h = sc.hamiltonian
+        if v == "ED":
+            es, ws = _quiet(lambda: sc.get_excited_states(n=2, mode="ED"))
+            m = dict(mode="ED")
+        else:
+            es, ws = _quiet(lambda: sc.get_excited_states(n=2))
+            m = {}
+        op = sc.Sz[0]*sc.Sz[3]
+        if v == "ED": # ED's vev reads its own ground state only
+            ex = ex2 = np.real(_expect(ws[1], op))
+        else:
+            ex = np.real(_quiet(lambda: sc.vev(op, wf=ws[1])))
+            ex2 = np.real(_quiet(lambda: sc.vev(op, wf=2.0*ws[1])))
+        out[v] = dict(ex=ex, ex2=ex2,
+            h2=np.real(_quiet(lambda: sc.vev(h, npow=2, **m))),
+            e1=np.real(es[1]))
+        if v == "julia_live":
+            with pytest.raises(NotImplementedError) as excinfo:
+                sc.vev(op, T=1.0)
+            assert "metts_vev()" in str(excinfo.value)
+            assert 'mode="ED"' in str(excinfo.value)
+            with pytest.raises(TypeError):
+                sc.vev(op, npows=2)
+            assert sc.vev(op, npow=0) == 1.0
+    for v in ("julia_live", "python"):
+        assert out[v]["e1"] == pytest.approx(out["ED"]["e1"], abs=1e-6), v
+        assert out[v]["ex"] == pytest.approx(out["ED"]["ex"], abs=1e-6), v
+        assert out[v]["ex2"] == pytest.approx(out["ED"]["ex"], abs=1e-6), v
+        assert out[v]["h2"] == pytest.approx(out["ED"]["h2"], abs=1e-6), v
