@@ -71,6 +71,8 @@ def initialize():
                               # and the four-point tensor
     files += ["sites_qn.jl"] # QN site sets of conserved-sector mode
     files += ["vumps.jl"] # infinite-chain VUMPS (module DmrgpyVumps)
+    files += ["ddmrg.jl"] # cvm_solver="variational" correction vector;
+                           # calls mpsalgebra.jl's apply_op
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 

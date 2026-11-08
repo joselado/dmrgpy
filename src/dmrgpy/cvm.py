@@ -21,7 +21,7 @@ def dynamical_correlator(self,es=np.linspace(0.,10.0,100),
     """
     AB = operatornames.str2MO(self,name,i=i,j=j) # resolve operators once
     A,B = AB[0],AB[1]
-    if _use_ddmrg(self,A,B): # variational solver (python and v3)
+    if _use_ddmrg(self,A,B): # variational solver (python, v3, julia_live)
         return dynamical_correlator_ddmrg(self,A,B,es=es,delta=delta)
     wf0 = self.get_gs() # computes or returns the cached GS; also sets self.e0
     # sweep parameters used both by B*wf0 below and by every CG solve
@@ -58,7 +58,7 @@ def _use_ddmrg(self,A,B):
       falls back to CG rather than silently minimizing the wrong thing.
     """
     if getattr(self,"cvm_solver","cg")!="variational": return False
-    if self.itensor_version not in ("python",3): return False
+    if self.itensor_version not in ("python",3,"julia_live"): return False
     # Unlike the CG path below, which only ever *applies* A and B (so the
     # already-built operators toMPO() returns work there unchanged), this
     # solver hands their symbolic term lists to ddmrg_correction_vector.
@@ -95,7 +95,16 @@ def dynamical_correlator_ddmrg(self,A,B,es=None,delta=1e-1):
     variational sweep is non-increasing in W from *any* start -- a closer
     start can only reduce the number of sweeps needed.
     """
-    self.get_gs() # ensure the ground state (and self.e0) exist
+    wf0 = self.get_gs() # ensure the ground state (and self.e0) exist
+    if self.itensor_version=="julia_live": # no session: ddmrg.jl
+        # No _cvm_sweep_params here: on julia_live it sets self.maxm, which
+        # is part of the solved state's solver key, so any get_gs() inside
+        # would re-solve at cvm_maxm and overwrite wf0/e0. Nothing in this
+        # route reads self.maxm (cvm_maxm, cutoff and mpomaxm go to
+        # ddmrg.jl explicitly), so the state is taken once, here.
+        from .mpsjulialive import ddmrg as ddmrgjl
+        return ddmrgjl.dynamical_correlator_ddmrg(self,A,B,es,delta,
+                                                  wf0=wf0,e0=self.e0)
     out,x = [],None
     with _cvm_sweep_params(self):
         for e in es:
@@ -361,7 +370,8 @@ def _warn_if_unconverged(self,omega,best_res,tol,bnorm,factor=100.):
         "can be off by up to about that fraction of its peak scale. If "
         "cvm_maxm is below the bond dimension the correction vector needs, "
         "the MPS truncation floors the solve: raise cvm_maxm, or -- on "
-        "itensor_version='python' with a diagonal correlator -- set "
+        "itensor_version='python', 3 or 'julia_live' with a diagonal "
+        "correlator -- set "
         "chain.cvm_solver='variational' to use the variational (Jeckelmann "
         "DDMRG) solver instead, which truncates inside the ansatz (see "
         "src/dmrgpy/pyitensor/ddmrg.py). If the residual was still falling, "
