@@ -270,8 +270,9 @@ constructors) before this class existed; only `mpscpp3` (the C++ side)
 and ED (`pyfermion.mbfermion.MBFermion.get_operator`, extended to
 understand `Cup`/`Cdn`/`Cdagup`/`Cdagdn`/`Nup`/`Ndn`/`Ntot` at a physical
 site index) actually wire it up today -- `mpscpp2` never registered a
-Hubbard/Electron site, and neither pyitensor nor `mpsjulialive`
-implement site-type code 1. See `fermionchain.py`'s class docstring for
+Hubbard/Electron site. pyitensor (`sites/fermion.py`'s `ElectronSite`)
+and `mpsjulialive` (ITensors.jl's own `"Electron"` site, see "The parity
+surface on `julia_live`" in section 4.6) implement code 1 too. See `fermionchain.py`'s class docstring for
 why this alternative isn't a general-purpose speedup over
 `Spinful_Fermionic_Chain` despite the halved site count (a directly
 measured result, not a theoretical claim).
@@ -293,9 +294,11 @@ caches) a `SiteType` subclass per requested dimension the same way
 `BosonFourSite` is generalized on the C++ side, since pyitensor's
 `SiteType` machinery is otherwise entirely class-level (no per-instance
 state) and has no other way to parameterize a site's dimension.
-`mpscpp2` and `mpsjulialive` still only handle the single code `104`, so
-a non-default `maxnb` should be run under `itensor_version=3` (the
-default) or `"python"` for cross-backend agreement. ED
+`mpsjulialive/sites.jl` builds the same range as ITensors.jl `"Boson"`
+sites of dimension `code-100`. `mpscpp2` still only handles the single
+code `104`, so a non-default `maxnb` should be run under
+`itensor_version=3` (the default), `"python"` or `"julia_live"` for
+cross-backend agreement. ED
 (`pyboson/boson.py::BosonChain`) always builds the exact requested
 per-site dimension regardless of backend.
 
@@ -2708,6 +2711,10 @@ compiled pybind11 extension isn't available (`cppext.available(version)`)
 `itensor_version="python"` never falls back *this* way, since it has no
 compiled-extension precondition at all; it does fall back below two
 sites, its two-site DMRG having no update to make on a one-site chain.
+`"julia_live"` takes the same fallback below two sites, since
+ITensorMPS's `dmrg()` refuses a one-site chain with a `JuliaError`
+(`mode.resolve_mode`); `gs_energy_generalized`, which has no ED route,
+raises a `RuntimeError` naming the size there instead.
 Most public `Many_Body_Chain` methods accept `mode="DMRG"|"ED"` so
 results can be cross-validated between the two solver families.
 
@@ -2716,7 +2723,7 @@ results can be cross-validated between the two solver families.
 | `2` | ITensor v2, in-process C++ (`mpscpp2`) | compiled pybind11 extension | ED |
 | `3` (default *when compiled*) | ITensor v3, in-process C++ (`mpscpp3`) | compiled pybind11 extension | ED |
 | `"python"` (default otherwise) | pure-Python `pyitensor/` | NumPy/SciPy only | ED below 2 sites |
-| `"julia_live"` | live in-process Julia session (`mpsjulialive/`), ITensors.jl | `juliacall`/PythonCall.jl (self-provisions Julia) | none (feature-by-feature; missing methods simply aren't implemented) |
+| `"julia_live"` | live in-process Julia session (`mpsjulialive/`), ITensors.jl | `juliacall`/PythonCall.jl (self-provisions Julia) | ED below 2 sites; otherwise none (feature-by-feature; a missing method raises `NotImplementedError` naming the backends that have it) |
 
 Regardless of `itensor_version`, if `self.mode` is forced to `"ED"`, or
 the requested backend isn't available, calculations run through
@@ -3189,10 +3196,12 @@ Notable, deliberate implementation details (not bugs to "fix"):
   is rebuilt (`sites.py::initialize`, `__deepcopy__`/`clone`), is part of
   `groundstate.py`'s Hamiltonian-send cache key, and is checked in
   `mode.py` against the solver that will actually answer (§4.3): DMRG on
-  `itensor_version=2`/`"julia_live"` *raises*, since those have no
-  quantum numbers and would silently return the global ground state
-  instead of the sector's, while a fallback to ED is fine because ED
-  targets the sector too (§4.3a).
+  `itensor_version=2` *raises*, since it has no quantum numbers and
+  would silently return the global ground state instead of the
+  sector's, while a fallback to ED is fine because ED targets the sector
+  too (§4.3a). `"julia_live"` has its own QN implementation, on a second
+  Julia site set (see "The parity surface on `julia_live`" in section
+  4.6).
 - **Promotion out of a sector** (`Chain::promote_to_dense`/`promote_mps`,
   `Many_Body_Chain.promote_to_dense()`/`promote_mps(wf)`): leaves sector
   mode *keeping* the state computed inside it, which
@@ -3369,9 +3378,9 @@ Notable, deliberate implementation details (not bugs to "fix"):
   combine Hamiltonians before ever building an MPO). It exists for
   combining operators that only exist as already-built `StaticOperator`s,
   e.g. two independently constructed products or exponentials.
-  `"julia_live"` doesn't implement this yet (`StaticOperator.__add__`
-  raises `NotImplementedError` rather than silently doing something
-  backend-specific).
+  `"julia_live"` has the same algebra on its own MPO class
+  (`mpsjulialive/mpo.py`, `mpo_ops.jl`), see "The parity surface on
+  `julia_live`" in section 4.6.
 - `mpscpp3`-specific: `Chain::gs_energy_generalized`
   (`mpscpp3/chain_session.h`, exposed as
   `Many_Body_Chain.gs_energy_generalized`) solves the generalized
@@ -3713,9 +3722,10 @@ the swept state's generalized Rayleigh quotient
 $\langle\psi|H|\psi\rangle/\langle\psi|A|\psi\rangle$. `mpscpp3` has
 since gained a line-for-line port of this same algorithm against real
 ITensor v3 calls (§4.4's own `mpscpp3`-specific bullet), so
-`itensor_version` 3 supports it too now — only `mpscpp2`
-(`itensor_version=2`) and `"julia_live"` still raise
-`NotImplementedError`, not having an analogous session method yet.
+`itensor_version` 3 supports it too now. `"julia_live"` has its own
+port (`mpsjulialive/generalized.jl`, see "Generalized-eigenvalue and
+non-Hermitian DMRG on `julia_live`" in section 4.6), so only `mpscpp2`
+(`itensor_version=2`) still raises `NotImplementedError`.
 
 `nhdmrg.py::nhdmrg_generalized` is the non-Hermitian counterpart,
 generalizing NH-DMRG (§4.4's own bullet above, and pyitensor's own port
@@ -4067,7 +4077,11 @@ top-level ones (`mpsjulialive/groundstate.py`, `vev.py`, `mps.py`,
 `mpo.py`, `dynamics.py`, ...) that talk to Julia's ITensors.jl instead of
 the C++ pybind11 extension. This is an independent implementation, not a
 shared protocol with the C++ path — a feature missing on one side simply
-isn't implemented there yet.
+isn't implemented there yet. The subsections below follow the order in
+which the pieces landed; the current architecture of conserved sectors,
+the extra site types, parity-odd MPOs, clones and the shared
+dynamical-correlator dispatch, with the load order of the `.jl` files, is
+in "The parity surface on `julia_live`" at the end of this section.
 
 `juliacall` replaced an earlier PyJulia-based bridge: PyJulia requires the
 Julia build's PyCall to be linked against a matching libpython (the same
@@ -4426,12 +4440,15 @@ The fermionic 4-point correlator tensor (`MPS.get_four_correlation_tensor`,
 `<Cdag_i C_j Cdag_k C_l>`) was missing the same way bond entropy was — no
 `get_four_correlation_tensor` method at all on `mpsjulialive/mps.py`'s
 `MPS` class — and needed the same fix: just add the method, delegating
-to `entropytk/correlationentropy.py`'s default `ctmode="explicit"` (a
+to `entropytk/correlationentropy.py`'s `ctmode="explicit"` (a
 Python loop of `MultiOperator` products + `.aMb()`/`.dot()`, already
-generic; `ctmode="full"`, a native per-element AutoMPO build, mirrors
-`pyitensor/chain.py`'s own `four_correlation_tensor` but isn't ported to
-Julia). Validated directly against ED on the same well-gapped free-fermion
+generic). Validated directly against ED on the same well-gapped free-fermion
 model `tests/test_four_point_correlator.py` uses (agreement to `~2e-15`).
+`ctmode="full"` was ported afterwards: `gs_extra.jl`'s
+`four_correlation_tensor` builds one exact MPO per tuple and contracts
+`inner(psi',M,psi)`, filling the conjugate partner as pyitensor does. It
+is the default on a `julia_live` chain of spinless fermions, and raises on
+any other site type, which keeps `"explicit"`.
 
 `get_four_correlation_tensor_explicit`'s Python loop
 (`entropytk/correlationentropy.py`) didn't exploit the tensor's own
@@ -4771,7 +4788,11 @@ a real `ITensorMPS.jl` limitation, not a bug on this side, and
 `explicit` is already fast in absolute terms (0.29s for a 10-site
 chain's full correlation matrix) — a from-scratch fermionic-JW-string
 MPO builder to work around it would be a disproportionate amount of new
-code for a performance-only win on an already-cheap operation.
+code for a performance-only win on an already-cheap operation. The
+limitation was later worked around without such a builder, by sending
+parity-odd operators in their Jordan-Wigner form (see "The parity
+surface on `julia_live`" below), and `dmmode="full"` now calls
+ITensorMPS's own `correlation_matrix` on spinless fermions.
 
 A final sweep of every remaining `self._session.` call site reachable
 from `julia_live` (`grep -rl "self\._session\." *.py`, checked against
@@ -4794,8 +4815,10 @@ Julia primitive" pattern every fix above followed:
   computing `sqrt(|<H>-<H>^2|)`. ED honours `npow` now, and raises on the
   cases it cannot answer (`NotImplementedError` at `T>0`, `ValueError`
   for a negative `npow`), so `julia_live` is genuinely the last backend
-  where this kwarg is unimplemented. The one
-  example exercising it, `examples/utilities/power_vev/main.py`, sets
+  where this kwarg is unimplemented (it no longer is: the `julia_live`
+  `vev` now has the signature of `vev.py`'s `multi_vev`, and
+  `gs_energy_fluctuation` goes through `vev.energy_variance` there too).
+  The one example exercising it, `examples/utilities/power_vev/main.py`, sets
   `sc.itensor_version = "julia"` directly (bypassing
   `setup_julia()`/`_reset_dmrg_state()` entirely) — the legacy,
   already-inert subprocess-based backend documented below, not
@@ -4836,9 +4859,11 @@ directly rather than left as follow-ups —
   before dispatching, the same way the `(2,3,"python")` branch already
   does — previously a non-Hermitian Hamiltonian silently ran the
   Hermitian-only KPM/CVM/TDZ math and returned numerically wrong output.
-  There's no non-Hermitian route to fall back to for `julia_live` yet
-  (that needs `applyinverse()`, C++-only today), so this raises a clear
-  `NotImplementedError` instead.
+  There was no non-Hermitian route to fall back to for `julia_live` at
+  the time (that needs `applyinverse()`), so this raises a clear
+  `NotImplementedError` instead. `applyinverse()` and the NH-KPM
+  recursion now exist there (`bicgstab.jl`, `nhkpm.jl`), see "The parity
+  surface on `julia_live`" below.
 - `mpsjulialive/excited.py`'s `get_excited_states_dmrg` now honors
   `self.excited_gram_schmidt` (previously silently dropped — `excited.jl`
   has no Gram-Schmidt step of its own), applying the same generic,
@@ -5212,6 +5237,143 @@ raises a plain Julia `error(...)`, surfacing to Python as a
 guard) -- see `tests/test_julia_live.py` and
 `examples/time_evolution/tebd_julia_VS_ED_time_evolution`.
 
+#### The parity surface on `julia_live`
+
+What we will now see is how `julia_live` reaches most of the finite-chain
+surface of v3 and `"python"`: conserved sectors, the extra site types,
+parity-odd fermion operators, clones, the chain-level MPS and MPO
+algebra, and the dynamical-correlator submodes. The matrix of what runs
+where is `ROADMAP.md`; this section is the architecture behind it.
+
+**Two Julia site sets.** The chain keeps `jlsites_dense`, the set
+`sites.jl::get_sites` builds, as its reference, and it never changes.
+`jlsites` is what every MPO and every start state is built on: the
+QN-carrying set of `sites_qn.jl::get_sites_qn` while a conserved sector
+is set, the dense set otherwise. So `mpo.py::get_MPO`, `mps.py::start_mps`
+and `excited.jl` build on the right one without knowing about sectors.
+`Many_Body_Chain._apply_conserved_sector` has a `julia_live` branch that
+calls `mpsjulialive/sector.py::apply`, and `promote_to_dense()`/clearing
+the sector only point `jlsites` back at the dense set. ITensorMPS's
+`dmrg()` keeps the flux of its start state, so the confinement is
+structural, as on v3, and needs no penalty. The charge bookkeeping is
+pyitensor's (`pyitensor/sector.py`, run over a `SiteX` built from the
+same site codes and used for nothing else): every operator passes
+`sector.prepare_operator` first, which expands `Sx`/`Sy` into `S+`/`S-`
+and raises the same `ValueError` as `"python"` for a term that breaks the
+sector, and a fresh solve, an excited state or `random_state()` starts
+from a random MPS (link dimension up to 4 for `random_state()`) around
+pyitensor's in-sector product state. The two backends agree on units and
+on basis-state order for every site type with a QN version (S=1/2, S=1,
+`Fermion`, `Electron`, `Boson`; any other code raises), which is what
+makes `promote_mps` a relabelling: `dense(psi)` with the site indices
+replaced by the dense set. An MPO applied to an MPS on QN sites uses
+`apply()` with the naive contraction, since the identity-MPO trick of
+`applyoperator` does not work with QN arrows. A chain with both spin and
+fermion sites keeps its sectors ED only, by `Mixed_Spin_Fermion_Chain`'s
+own rule.
+
+**Site types.** `get_sites` builds every code of
+`pyitensor/sites/siteset.py`: `Electron` (code 1), S=3/2, 2 and 5/2
+(codes 4 to 6), the Z2, Z3 and Z4 clock sites (codes -1 to -3) and
+`Boson` sites of dimension `code-100`; an unknown code raises naming it.
+`sites_custom.jl`, loaded before `sites.jl`, defines what ITensors.jl does
+not ship (the higher spins from one spin-S builder, the Z_n `Sig`/`Tau`
+of `pyitensor/sites/parafermion.py`, the `N0`..`N98` boson projectors,
+`Sp`/`Sm`/`ISy` on S=1/2 and S=1, `Sy` on `Electron`), each name only when
+`op()` does not know it already. It also makes `F` the identity on every
+spin site type, which is what lets `Mixed_Spin_Fermion_Chain` run: ITensorMPS
+puts an `F` on every site a fermionic term crosses, spin sites included.
+`Spinful_Fermionic_Chain_Native` runs on the `Electron` site, basis
+`Emp, Up, Dn, UpDn`, with the raw `Cup`/`Cdn` names, and ITensorMPS
+threads the strings with up before down on a site, the mode order of ED.
+
+**Parity-odd fermion MPOs.** ITensorMPS's OpSum refuses a parity-odd
+fermionic term ("Parity-odd fermionic terms not yet supported"), so a
+bare `C_i` could not be an MPO and there was no fermionic Green's
+function. `mpo.py::operator_text` now sends a parity-odd operator in the
+Jordan-Wigner form of `MultiOperator.to_terms()`,
+`C_i = F_1...F_{i-1} A_i`, the form v3 and `"python"` consume.
+`fermion_ops.jl` defines `A`/`Adag` on `Fermion` sites as plain local
+matrices with no fermion string, so OpSum treats the term as bosonic and
+the explicit `F` factors carry the sign; `Electron` already has
+`Aup`/`Adn`/`Fup`/`Fdn` in ITensors. Parity-even operators keep the raw
+names and let ITensorMPS thread the strings itself. This route is what
+`get_gr`, `dmmode="fast"`, the fermionic `submode="SECTOR"` spectral
+function and an `applyoperator(C[i], wf)` after a promotion stand on.
+
+**Clones.** `Many_Body_Chain.__deepcopy__` shares `jlsites` and
+`jlsites_dense` between a `julia_live` chain and its clone instead of
+deep-copying them: a Julia `Index` is immutable, and a clone on the same
+indices is what lets its states contract with the original's. The
+excited-state and sector caches are dropped from the copy, as on the
+session backends. `bandwidth()`, `lowest_eigenvalue()`, the KPM window's
+band edges and `submode="SECTOR"` all solve on clones, so the
+caller's chain is never touched.
+
+**Chain-level algebra.** `mpsalgebra.wavefunction_mode` recognizes a
+Julia state by its `jlmps` attribute, without importing `mpsjulialive`,
+and `overlap`, `aMb`, `applyoperator`, `summps`, `scale_mps` and
+`conjugate` have a Julia branch. `aMb` is the exact `inner(a',M,b)`
+(`mpsalgebra.jl`, and `gs_extra.jl` for the last factor of a `vev`
+power), not a dot with a truncated `M|b>`. `applyinverse` is
+`bicgstab.jl`, a line-by-line port of pyitensor's `_bicstab` with the
+same bilinear inner products and absolute stop; its sums are a direct sum
+compressed by SVD, since `summps`'s density-matrix algorithm squares the
+weights and resolves a cancellation only to about 1e-8 of its terms.
+`exponential` is `nt0` second-order Taylor steps in `mpsalgebra.jl`, the
+operator of pyitensor's `_custom_exp` and v3's `custom_exp`, built exactly
+and compressed at a relative cutoff of 1e-28. The MPO class
+(`mpsjulialive/mpo.py`, `mpo_ops.jl`) has `M*N` (N acting first, cut at
+`mpomaxm`), `M+N` (cut at `maxm`), scalars, `get_dagger()` (`dag` with
+`swapprime`), `trace()` and `aMb()`. On `"python"` the MPO product comes
+out in the reversed order (`pyitensor/chain.py::_mult_mpo`), pinned by a
+strict xfail in `tests/test_julia_live_mpo_algebra.py`; v3 is thought to
+build it the same way, but no test covers v3 there.
+
+**Ground state and expectation values.** `groundstate._gs_energy_julia`
+takes `maxde=` (the doubling loop of `gs_energy_single`, from the stored
+state), `reconverge=True` and the `restart=False` warm start, which
+`set_hamiltonian` marks with `groundstate.mark_warm_start`; only a cold
+solve marks `e0` as the KPM lower band edge. `get_gs.jl::make_sweeps_ramped`
+is the sweep-by-sweep counterpart of pyitensor's `_make_sweeps_ramped`,
+with the link dimension of a warm start as its floor. The Julia `vev` has
+the signature of `vev.py`'s `multi_vev` (`wf=`, `npow=`, `T=`, an unknown
+keyword raises), and `gs_energy_fluctuation` goes through
+`vev.energy_variance`. The NH branch of `mpsjulialive/groundstate.py`
+keeps `conj(wfl)` as `nh_left_wf`, paired with the state that becomes
+`wf0`, the conjugation because ITensorNHDMRG solves `H^T` for the left
+vector; no left state is kept when the overlap of the pair is about
+zero. `tdvp.jl` takes a `herm` keyword that `chain.is_hermitian(h)`
+decides once, Lanczos for a Hermitian H and Arnoldi otherwise.
+
+**Dynamical correlators.** `julia_live` takes the shared dispatch of
+`dynamics.py`, so `TD`, `ROOTN`, `TDZ`, `EX`, `maxent`, `TASK`, `SECTOR`
+and the non-Hermitian routes reach the same modules as on the session
+backends. Only the KPM moments are its own
+(`mpsjulialive/dynamics.py::kpm_moments` plus `kpm.jl`), reached through
+`kpmdmrg.dynamical_correlator_moments`, so `get_dynamical_correlator_moments`,
+`get_gr` and `get_distribution` work there too. `TASK` reads the site
+tensors through `arrays.jl` (see section 4.8). The NH-KPM recursion is
+`nhkpm.jl`, a line-by-line port of the coupled forward/adjoint Chebyshev
+recursion on the Julia MPOs of `(z-H)/E_max` and its dagger, on the
+`nh_left_wf` pair. At the time of writing, `get_dynamical_correlator`
+still refuses `CVM_explicit`, `CVMimag`, the non-Hermitian `CVM` and the
+non-Hermitian `KPM` on `julia_live` in a block ahead of the ground-state
+solve, although `applyinverse` and `nhkpm.jl` exist; removing that block
+is what opens those routes. `kpm_energy_truncate` raises naming the
+backends that have it.
+
+**Load order.** `juliasession.py::initialize()` evaluates the `.jl`
+files in this order: `sites_custom.jl`, `sites.jl`, `get_gs.jl`,
+`read_operator.jl`, `mpsalgebra.jl`, `kpm.jl`, `tdvp.jl`, `metts.jl`,
+`tebd.jl`, `excited.jl`, `nhdmrg.jl`, `generalized.jl`,
+`densitymatrix.jl`, `entropy.jl`, `fermion_ops.jl`, `mpo_ops.jl`,
+`bicgstab.jl`, `nhkpm.jl`, `arrays.jl`, `correlations.jl`, `gs_extra.jl`,
+`sites_qn.jl`. The comment next to each entry says which file it has to
+follow, for example `sites_custom.jl` ahead of `sites.jl` and `bicgstab.jl`
+and `nhkpm.jl` after `mpsalgebra.jl`, whose `apply_op`/`summps` they
+call. A new `.jl` file is appended to that list.
+
 ### 4.7 Supporting `*tk` packages
 
 Functionality is generally split into a top-level module (the public
@@ -5462,9 +5624,11 @@ Three consequences worth knowing:
   sector guard keys on `self.conserved_sector`, and the sector here lives
   on the clone — the caller's chain typically has none, so that guard
   never fires. `sectordc._check_backend` therefore rejects
-  `itensor_version` 2/`julia_live`, `ns<3` on v3 and non-Hermitian
-  Hamiltonians itself, `dynamics.py` rejects `"SECTOR"` on the
-  `julia_live` branch, and `edtk/dynamics.py` names it too — the last one
+  `itensor_version=2`, `ns<3` on v3 and non-Hermitian
+  Hamiltonians itself (`julia_live` is accepted: the sector solves run on
+  a clone that shares the caller's dense Julia site set, and the poles
+  are assembled with the Julia MPS's own `dot`/`aMb`), and
+  `edtk/dynamics.py` names it too — the last one
   because `mode.py` can route a well-formed DMRG call to ED *silently*
   (extension not compiled, or v3 below 3 sites), and a generic "no ED
   implementation" would misdescribe what happened.
@@ -5565,8 +5729,12 @@ session calls as well. Only the basis of each site index must be shared
 between the MPS and the MPOs, which it is since all are built on the
 session's own `sites_`. On a saturated 10-site Heisenberg chain v3 and
 `"python"` agree to 1e-11, and the export costs nothing next to the
-Lanczos. TASK is the Kondo default on both backends; v2 and `julia_live`
-raise.
+Lanczos. `julia_live` takes the same route: `mpsjulialive/arrays.jl`
+exports the ground-state MPS as `(chi_l,d,chi_r)` arrays and each MPO as
+`(w_l,d_out,d_in,w_r)` arrays, as they are, and `pyitensor/task.py` runs
+on them; `get_poles` hands that branch the MultiOperators, so the Julia
+MPOs carry their own Jordan-Wigner strings. TASK is the Kondo default on
+all three backends; v2 raises.
 
 Everything in `task.py` runs on the array library of
 `pyitensor/backend.py`, so under `backend.set_backend("jax")` the

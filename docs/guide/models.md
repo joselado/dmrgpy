@@ -64,8 +64,8 @@ compares the magnetization profile of DMRG and ED on a Kondo chain.
 !!! note "Backends"
     Some classes do not run on every backend:
 
-    - `Mixed_Spin_Fermion_Chain`: `itensor_version=3` and `"python"` only.
-    - `Spinful_Fermionic_Chain_Native`: not on `"julia_live"`.
+    - `Mixed_Spin_Fermion_Chain`: `itensor_version=3`, `"python"` and
+      `"julia_live"`, not `2`.
     - `SpinBoson_Chain`: no `mode="ED"`. Use `Bosonic_Chain` for a purely
       bosonic model.
     - `Mixed_Spin_Fermion_Chain` with both spin and fermion sites: a

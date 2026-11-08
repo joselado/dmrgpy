@@ -135,7 +135,8 @@ at any temperature, on small chains. `mode="DMRG"`
 works at $T=0$ only and never needs excited states. The second-order and
 potential terms come from the [dynamical correlator](dynamical-correlators.md), and the
 Kondo term from a real-time evolution of a three-point function. It runs
-on `itensor_version=3` and `"python"`, on chains of at least 3 sites.
+on `itensor_version=3`, `"python"` and `"julia_live"`, on chains of at
+least 3 sites.
 Here the chain has 3 sites, with the field on the first one and a weak
 Heisenberg coupling. Without a field the ground state is degenerate, see
 `n_gs` below:
@@ -171,8 +172,8 @@ These keywords have no default and must be chosen for the problem:
   ground state, `mode="ED"` averages over the multiplet, while DMRG
   returns one member. `n_gs=g` makes DMRG average over `g` states too.
 
-With `submode="TASK"`, the default on `itensor_version=3` and
-`"python"`, there is no frequency or time grid at all. On
+With `submode="TASK"`, the default on `itensor_version=3`, `"python"`
+and `"julia_live"`, there is no frequency or time grid at all. On
 `itensor_version=2` the default stays `"KPM"` with the two-time route
 above. The tangent-space Krylov method of
 [Choosing a correlator method](correlator-methods.md) gives the ground

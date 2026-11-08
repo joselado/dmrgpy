@@ -37,7 +37,8 @@ defined in [Dynamical correlators](dynamical-correlators.md#the-quantity).
   quantum-number sector that $B|\mathrm{GS}\rangle$ belongs to ($N+1$ for
   $c^\dagger$, $S^z+1$ for $S^+$). Use it for sharp low-energy
   excitations: the poles come out at converged energies with exact weights.
-  It needs `itensor_version=3` or `"python"`. `get_spectral_function` and
+  It needs `itensor_version=3`, `"python"` or `"julia_live"`.
+  `get_spectral_function` and
   `get_spin_spectral_function` are built on it.
 - `"TASK"`: the tangent-space Krylov method of Kovalska, von Delft and
   Gleis ([arXiv:2510.07279](https://arxiv.org/abs/2510.07279)). A Lanczos
@@ -47,7 +48,7 @@ defined in [Dynamical correlators](dynamical-correlators.md#the-quantity).
   The one approximation is that the excited states are one-site changes of
   the ground state, which is exact when `maxm` reaches the full Hilbert
   space and weakest for broad multi-particle continua. It needs
-  `itensor_version=3` or `"python"`.
+  `itensor_version=3`, `"python"` or `"julia_live"`.
 - `"ED"` and `"INV"` (`mode="ED"` only): the exact Lehmann sum and the
   exact resolvent. These are the references to check the other methods.
 - `"maxent"`: the smoothest spectrum with the first six moments of

@@ -100,7 +100,8 @@ are:
 - `njobs`: runs independent Markov chains in parallel processes. Only
   for `itensor_version="python"`.
 
-METTS works with `itensor_version=3` (at least 3 sites) and `"python"`. It
+METTS works with `itensor_version=3` (at least 3 sites), `"python"` and
+`"julia_live"`. It
 is not available on `itensor_version=2`, where it raises an error. It also
 raises if the basis operators are all diagonal and $H$ conserves a
 charge, such as the particle number, since the samples then never leave

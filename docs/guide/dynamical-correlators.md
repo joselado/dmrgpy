@@ -120,7 +120,8 @@ Two methods give the spin structure factor directly:
   three channels separately, so we can see which spin channel each
   excitation belongs to. `connected=True` removes the elastic peak
   $\langle S^z_i\rangle\langle S^z_j\rangle$ at $\omega=0$. It uses the
-  [SECTOR method](correlator-methods.md), so it needs `itensor_version=3` or `"python"`.
+  [SECTOR method](correlator-methods.md), so it needs `itensor_version=3`, `"python"`
+  or `"julia_live"`.
   The sector states are shared by all the pairs $(i,j)$, so a full
   $S(q,\omega)$ map costs about as much as one site. This is the better
   choice on a long chain. See `examples/dynamical_correlator/sector_spin_structure_factor`.
@@ -161,7 +162,7 @@ The chemical potential $\mu=(E_0^{N+1}-E_0^{N-1})/2$ is subtracted by
 default, so the gap is centered at $\omega=0$. Pass `shift=None` to keep
 the raw frequencies. `info` also gives the charge gap
 $E_0^{N+1}+E_0^{N-1}-2E_0^N$ and the two halves separately. This method
-needs `itensor_version=3` or `"python"`. See
+needs `itensor_version=3`, `"python"` or `"julia_live"`. See
 `examples/dynamical_correlator/sector_spectral_function_hubbard`, where the
 Mott gap opens with $U$.
 

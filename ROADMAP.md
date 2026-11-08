@@ -22,7 +22,7 @@ etc.) — this file is a feature-by-feature status board, not a design doc.
   after the kernel/contraction-order optimization pass (see
   `pyitensor/kernels.py`).
 - **Julia (`itensor_version="julia_live"`)** — a live, in-process Julia
-  session (`mpsjulialive/`, via `pyjulia`) driving real ITensors.jl. Its
+  session (`mpsjulialive/`, via `juliacall`) driving real ITensors.jl. Its
   own parallel, hand-written set of modules mirroring the top-level ones
   — a feature only exists here if someone has explicitly ported it; there
   is no automatic fallback into this backend for anything.
@@ -50,6 +50,12 @@ or is simply absent) · — not meaningful for this backend/method combo.
 | Generalized eigenvalue DMRG (Lagrange-multiplier trick, Hermitian) | ✅ | ✅ | ✅ | Julia via `mpsjulialive/generalized.jl`'s `get_gs_generalized` (same algorithm against ITensorMPS.jl's own `dmrg()`/`Sweeps`/`add()`). `groundstate.gs_energy_generalized` still raises for `itensor_version=2`. No ED fallback either (there is no ED implementation of this method at all). |
 | Non-Hermitian DMRG (biorthogonal, complex energies) | ✅ | ✅ | ✅ | Julia is the one backend that isn't a port of ITensorNHDMRG.jl — it calls the real package (`mpsjulialive/nhdmrg.jl`), with two corrections on top: its left vector solves the *transpose* equation (needs a conjugation), and its left solve isn't anchored to the right solve's eigenvalue, so a conjugate pair tied for the smallest real part needs an `exp(i*theta)*H` tie-break (anchored on the untied run's own eigenvalue, since the rotation can otherwise re-target a different one). Both are invisible on a complex-*symmetric* H — see `tests/test_nh_dmrg.py::nh_asymmetric_hopping_chain`. |
 | Non-Hermitian generalized eigenproblem | ✅ | ✅ | ✅ | Same story as above, one level up (`gs_energy_generalized_nhdmrg`; `mpsjulialive/generalized.jl`'s `get_gs_generalized_nhdmrg` wraps the same outer loop around real ITensorNHDMRG.jl sweeps). v2 still excluded. |
+| Conserved sectors (`set_conserved_sector(Nf=..)`/`(Sz=..)`, `promote_to_dense`, `promote_mps`) | ✅ | ✅ | ✅ | Julia uses ITensors.jl QN site indices (`mpsjulialive/sector.py`, `sites_qn.jl`), so the confinement is structural as on v3 and needs no penalty. QN sites exist for spinless fermions, `Electron`, S=1/2, S=1 and bosons; another site type in a sector raises. The charge bookkeeping and the in-sector start state are pyitensor's (`pyitensor/sector.py`), so an operator that breaks the sector raises the same `ValueError`. Checked against ED restricted to the sector in `tests/test_sector_conservation.py` and `tests/test_sector_promotion.py`. |
+| `gs_energy` keywords (`maxde=`, `reconverge=True`, `wf0=`, the `restart=False` warm start) | ✅ | ✅ | ✅ | Julia runs the same `maxde=` doubling loop as `gs_energy_single`, keeps the stored state under `maxde=`, and `stored_answer_holds` uses the session backends' rule. `set_hamiltonian(H, restart=False)` makes the stored state the next solve's start; `restart()` is still a cold start. Only a cold solve marks `e0` as the KPM lower band edge. See `tests/test_audit_2026_09_25b_session.py`. |
+| Bond-dimension ramp (`bond_ramp`, `bond_ramp_start`) | ✅ | ✅ | ✅ | Julia's `get_gs.jl::make_sweeps_ramped` is the sweep-by-sweep counterpart of pyitensor's `_make_sweeps_ramped`, warm-start floor included (`tests/test_bond_dimension_ramp.py`). |
+| `applyinverse` (`A^-1|wf>`) | ✅ | ✅ | ✅ | Julia: `mpsjulialive/bicgstab.jl`, a line-by-line port of pyitensor's `_bicstab`, with sums compressed by SVD rather than by `summps`. |
+| `exponential` (`exp(h)|wf>`) | ✅ | ✅ | ✅ | Julia: `nt0` second-order Taylor steps in `mpsalgebra.jl`, the same operator as pyitensor's `_custom_exp` and v3's `custom_exp`, built exactly and compressed at a relative cutoff of 1e-28. |
+| `clone()`/`copy()` of a chain | ✅ | ✅ | ✅ | A Julia clone shares the chain's Julia site indices, so states of the clone and of the original contract with each other (`submode="SECTOR"`, `bandwidth()`). |
 | iDMRG (infinite chain, ground state) | ✅ | ✅ | ❌ | `infinitechain.py` hard-restricts to `itensor_version in ("python", 3)` at construction time; v2 and Julia have no port at all. Both `gs_method` values are now on v3 too: `"idmrg"` (`Chain::idmrg_ground_state`) and `"vumps"` (`Chain::vumps_ground_state`, C++ port of `pyitensor/vumps.py` — dense LAPACK-based linear algebra, not ITensor tensor-network objects, see that method's own doc comment for why; the default on BOTH backends since 2026-08-08). Cross-checked directly against `itensor_version="python"`'s own VUMPS at `D=1,2,3` on TFIM and Heisenberg (n_uc=1 and 2), matching to ~1e-10 or tighter — see `tests/test_vumps_v3.py`. |
 | iDMRG vev / two-point correlator | ✅ | ✅ | ❌ | Both backends cover both `gs_method`s. pyitensor: `"idmrg"` (`idmrg.py`, dominant-right-fixed-point eigenproblem on the gauge-consistent cell of `IDMRGResult`) and `"vumps"` (`vumps.py`, exact contraction on the mixed-gauge `{AC, AR}`, following arXiv:1810.07006 Eq.(34)/(37)-(39)). v3: `"vumps"` through `Chain::vumps_onsite_expectation`/`vumps_two_point_correlator` (a C++ port of the same AC/AR formula, falling through to the `vms_*` pair for the sequential solver) and `"idmrg"` through `Chain::idmrg_onsite_expectation`/`idmrg_two_point_correlator` (dense arrays on the extracted cell `idmrg_cell_`, `ic_*` helpers). `Infinite_Many_Body_Chain.vev`/`correlator` dispatch to all four combinations. Cross-checked against `itensor_version="python"` in `tests/test_vumps_correlator_v3.py`, `tests/test_idmrg_correlator_v3.py` and `tests/test_infinite_chain.py::test_itensor_version3_matches_python_backend`. |
 | iDMRG excitation ansatz (quasiparticle, tangent-space) | ✅ | ✅ | ❌ | `Chain::vumps_excitation_energies` (C++ port of `pyitensor/idmrg_excitations.py`, same dense-array approach as `vumps_ground_state`) — requires `gs_method="vumps"` on both backends. Cross-checked directly against `itensor_version="python"` across a full momentum scan at `D=1,2,3` on TFIM (n_uc=1) and Heisenberg (n_uc=2), matching to ~1e-10 (TFIM, gapped) or ~1e-4..1e-7 (Heisenberg, gapless/critical — both backends land on slightly different local optima of the same non-convex restart search, not a discrepancy in the algorithm itself) — see `tests/test_vumps_excitations_v3.py`. Any `D>=1` is supported, matching pyitensor. Both of the solver improvements the pure-Python implementation carries are on v3 too since 2026-09-22 (item 10 below): the channel resolvents are built once per momentum and kept with their LU factorization rather than rebuilt inside every application of `H_eff(k)`, and `H_eff(k)` is solved by Lanczos on its action above `vumps_h_eff_dense_max_` instead of being assembled. A 3-momentum scan at `D=16` on TFIM went from 164.1 s to 1.8 s and at `D=10` on the `n_uc=2` Heisenberg cell from 15.6 s to 1.2 s, the latter on a state that came out the same either way, its dispersion agreeing to 1.2e-11. |
@@ -65,11 +71,14 @@ or is simply absent) · — not meaningful for this backend/method combo.
 
 | Capability | v3 | pyitensor | Julia | Notes |
 |---|---|---|---|---|
-| `vev` (operator expectation value) | ✅ | ✅ | ✅ | |
+| `vev` (operator expectation value) | ✅ | ✅ | ✅ | Julia takes `wf=`, `npow=` and `T=` with the semantics of `vev.py`'s `multi_vev` (the last factor an exact `<a|M|b>`, `T>0` raises naming `mode="ED"` and `metts_vev()`). |
+| `gs_energy_fluctuation` / energy variance | ✅ | ✅ | ✅ | All three go through `vev.energy_variance`, `||(H-<H>)|psi>||^2` with the `maxm` cap lifted. |
+| Chain-level MPS algebra (`overlap`, `aMb`, `applyoperator`, `summps`, `random_state(orthogonal=..)`) | ✅ | ✅ | ✅ | Julia states are recognized by `wavefunction_mode` through their `jlmps` attribute; `aMb` is the exact `inner(a',M,b)`. |
+| MPO algebra (`toMPO`: `M*N`, `M+N`, scalars, `get_dagger()`, `trace()`) | ✅ | 🟡 | ✅ | Julia: `mpsjulialive/mpo_ops.jl`, the product cut at `mpomaxm`, `M*N` with `N` acting first as for `MultiOperator` and `mode="ED"`. On pyitensor `M*N` comes out as `N*M` (`pyitensor/chain.py::_mult_mpo`), pinned by a strict xfail in `tests/test_julia_live_mpo_algebra.py`. The commit that found it says v3 builds the product the same way; that test does not cover v3. |
 | Two-point static correlators | ✅ | ✅ | ✅ | |
-| All-pairs correlation matrix (native accelerated) | ✅ | ✅ | 🟡 | Julia's `MPS` class doesn't expose a dedicated accelerated method the way `pyitensor.chain.Chain.correlation_matrix`/v3's `Chain::correlation_matrix` do — falls back to the generic per-pair loop. |
+| All-pairs correlation matrix (native accelerated) | ✅ | ✅ | 🟡 | Julia's `dmmode="full"` is ITensorMPS's `correlation_matrix(psi,"Cdag","C")` (`mpsjulialive/correlations.jl`), on chains of spinless fermions only; other site types use the generic per-pair loop. |
 | Four-point correlator, `ctmode="explicit"` (backend-agnostic loop) | ✅ | ✅ | ✅ | Always correct, always available, slowest — the universal fallback. |
-| Four-point correlator, `ctmode="full"` (native AutoMPO per-tuple, incl. spinful-native sites) | ✅ | ✅ | ❌ | v2 also has this; Julia does not. |
+| Four-point correlator, `ctmode="full"` (native AutoMPO per-tuple, incl. spinful-native sites) | ✅ | ✅ | 🟡 | v2 also has this. Julia (`gs_extra.jl::four_correlation_tensor`, one exact MPO per tuple) is the default there on chains of spinless fermions only; other site types raise and use `ctmode="explicit"`. |
 | Four-point correlator, `ctmode="sweep"` (single-sweep, environment-reuse, ITensorCorrelators.jl-style) | ✅ | ✅ | ❌ | The fastest mode when it applies; no native-spinful-site counterpart yet even on v3/pyitensor. |
 | Bond entanglement entropy / reduced density matrix | ✅ | ✅ | ✅ | Backend-agnostic dispatch (`entanglement.py` has no `itensor_version` branching at all — every backend's session exposes the same primitive). |
 | Topological invariants (Berry phase, etc.) | ✅ | ✅ | ✅ | Built purely on `get_gs()` + MPS overlap — generic across every backend. |
@@ -78,7 +87,7 @@ or is simply absent) · — not meaningful for this backend/method combo.
 
 | Capability | v3 | pyitensor | Julia | Notes |
 |---|---|---|---|---|
-| Real-time evolution, TDVP (two-site) | ✅ | ✅ | ✅ | Julia has its own implementation (`mpsjulialive/timedependent.py` + `tdvp.jl`), and now honors `self.tevol_method` rather than ignoring it — see the TDVP_GSE row; anything outside `("TDVP","TDVP_GSE")` raises there instead of silently running plain TDVP. |
+| Real-time evolution, TDVP (two-site) | ✅ | ✅ | ✅ | Julia has its own implementation (`mpsjulialive/timedependent.py` + `tdvp.jl`), and now honors `self.tevol_method` rather than ignoring it — see the TDVP_GSE row; anything outside `("TDVP","TDVP_GSE")` raises there instead of silently running plain TDVP. The local exponentiator is chosen by `chain.is_hermitian(h)`: Lanczos for a Hermitian H, Arnoldi otherwise. |
 | Real-time evolution, TDVP + global subspace expansion (`tevol_method="TDVP_GSE"`) | ✅ | ✅ | ✅ | Julia needs no port: ITensorMPS.jl ships both pieces (`expand(psi,H; alg="global_krylov")`, citing the same Yang-White paper, and `tdvp(...; nsite=1)`), so `mpsjulialive/tdvp.jl` only wires them into the same expand-then-step structure. It handles a bond-dimension-1 (product-state) start fine — see `examples/time_evolution/tdvp_gse_julia_VS_ED_time_evolution` — and so does v3 since the 2026-09-24 third pass fixed its edge truncation (`docs/audit_2026_09_24c_hole_hunt.md`, finding 14). |
 | Real-time evolution, TEBD (2nd-order Trotter gates) | ✅ | ✅ | ✅ | v2 has no TDVP module at all so was never a candidate. Julia's `mpsjulialive/tebd.jl` builds each bond's gate from ITensor outer products (`op(name,s)`, no dense-matrix kron/reshape) and exponentiates via ITensors.jl's own tensor `exp()` (the same ITensor-native mechanism as `mpscpp3/tebd.h`'s `BondGate`, unlike pyitensor's manual `scipy.linalg.expm`). Unlike the other two backends, it resolves Jordan-Wigner from scratch off the *raw* `"C"/"Cdag"` term list (`mpo.py`'s `text_mpo()`), not `MultiOperator.to_terms()`'s pre-dressed `"A"/"Adag"/"F"` form — real ITensors.jl's builtin `"Fermion"` site type only defines `op("C",..)`/`op("Cdag",..)`/`op("F",..)`, not dmrgpy's own `"A"/"Adag"` names. |
 | Real-time evolution, MPO-Taylor (`tevol_method="MPO"`, the pre-TDVP legacy path) | ✅ | — | — | The only option for v2; still selectable on v3 by explicitly setting `tevol_method="MPO"`. |
@@ -88,15 +97,18 @@ or is simply absent) · — not meaningful for this backend/method combo.
 
 | submode | v3 | pyitensor | Julia | Notes |
 |---|---|---|---|---|
-| `KPM` (Kernel Polynomial Method, Chebyshev) | ✅ | ✅ | ✅ | Julia's is a separate implementation (`mpsjulialive/dynamics.py`), Hermitian-only. |
-| `KPM` energy truncation (Holzner Sec. III-B) | ✅ | ✅ | ❌ | Net *slower* on both backends where it's measured, kept for regimes/paper-fidelity, not a default. |
-| Non-Hermitian KPM (NHKPM.jl-ported coupled recursion) | ✅ | ✅ | ❌ | Auto-selected instead of plain KPM whenever the Hamiltonian is non-Hermitian, for backends that support it; ED also has this path. |
+| `KPM` (Kernel Polynomial Method, Chebyshev) | ✅ | ✅ | ✅ | Julia takes the shared dispatch of `dynamics.py`/`kpmdmrg.py`; only its moments are its own (`mpsjulialive/dynamics.py::kpm_moments` + `kpm.jl`), so `get_dynamical_correlator_moments`, `get_gr` and `get_distribution` work there too. |
+| `KPM` energy truncation (Holzner Sec. III-B) | ✅ | ✅ | ❌ | Net *slower* on both backends where it's measured, kept for regimes/paper-fidelity, not a default. Julia raises `NotImplementedError` naming the backends that have it. |
+| Non-Hermitian KPM (NHKPM.jl-ported coupled recursion) | ✅ | ✅ | 🟡 | Auto-selected instead of plain KPM whenever the Hamiltonian is non-Hermitian, for backends that support it; ED also has this path. Julia's recursion is `mpsjulialive/nhkpm.jl`, on the left state the NH solve keeps (`nh_left_wf`), and `nonhermitian/kpm.py` accepts the backend, but `get_dynamical_correlator` still refuses it on julia_live (a leftover guard in `dynamics.py`). |
 | `CVM` (correction-vector / conjugate-gradient resolvent) | ✅ | ✅ | ✅ | Julia's CVM needed no new primitive beyond `set_sweep_params`-equivalent bookkeeping — already backend-agnostic MPS/MPO algebra. |
 | `CVM` variational solver (`cvm_solver="variational"`, Jeckelmann dynamical DMRG, A=B^dagger) | ✅ | ✅ | ❌ | Two-site sweep minimizing `<x|M|x>-2Re<b|x>` with `M=(H-E0-omega)^2+eta^2` as a squared MPO: `pyitensor/ddmrg.py` and, on v3, `Chain::ddmrg_correction_vector` (`mpscpp3/chain_session.h`, local CG on the two-site block, solver scale `hscale_up_` applied to H, omega, eta and b alike). v2 and Julia use the global CG. Cross-checked against `"python"` and ED in `tests/test_ddmrg_v3.py`. |
-| `CVM_explicit`, `CVMimag` (analytic continuation variant) | ✅ | ✅ | ❌ | Only plain `CVM` is wired for Julia so far. |
+| `CVM_explicit`, `CVMimag` (analytic continuation variant) | ✅ | ✅ | 🟡 | Julia has the `applyinverse` they need (`bicgstab.jl`), but `get_dynamical_correlator` still refuses them on julia_live, and the non-Hermitian `CVM` with them (a leftover guard in `dynamics.py`). |
 | `TDZ` (complex-time evolution correlator) | ✅ | ✅ | ✅ | |
 | `TD` (real-time evolution correlator) | ✅ | ✅ | ✅ | Dispatches through `timedependent.py`, which has its own Julia branch. |
-| `ROOTN` (root-N Krylov correction-vector) | ✅ | ✅ | ❌ | Per-bond-sweep shortcut confirmed impossible on both C++ and pyitensor (needs real multi-target state-averaging) — not attempted for Julia. |
+| `ROOTN` (root-N Krylov correction-vector) | ✅ | ✅ | ✅ | Backend-agnostic MPS algebra (`rootndmrg.py`), reached on Julia through the shared dispatch. The per-bond-sweep shortcut is confirmed impossible on both C++ and pyitensor (needs real multi-target state-averaging). |
+| `SECTOR` (Lehmann sum over per-sector eigenstates, `get_spectral_function`, `get_spin_spectral_function`) | ✅ | ✅ | ✅ | Julia solves the sectors on a clone that shares the caller's dense site set, and assembles the poles with the Julia MPS's own `dot`/`aMb`. Checked against the restricted ED Lehmann sum and the spin sum rules in `tests/test_sector_spectral_function.py`. |
+| `TASK` (tangent-space Krylov poles, arXiv:2510.07279) | ✅ | ✅ | ✅ | Julia exports the ground-state MPS and the MPO site tensors as arrays (`mpsjulialive/arrays.jl`) and runs `pyitensor/task.py` on them, as v3 does; `pad_bonds`, `expand_bonds` and `missing_weight` are the same code. |
+| Third-order Kondo spectrum, DMRG route (`get_kondo_spectrum(order=3, mode="DMRG")`) | ✅ | ✅ | ✅ | Julia's two-time construction calls `tdvp.jl`'s `tdvp_step`; the default `submode` is `"TASK"` on all three. Checked against ED in `tests/test_kondo_spectrum_dmrgtwotime.py` and `tests/test_kondo_spectrum_task.py`. |
 | `EX` (exact spectral decomposition over excited states) | ✅ | ✅ | ✅ | Non-Hermitian-capable; entirely backend-agnostic (`self.get_excited_states()` + generic MPS algebra). |
 | `maxent` (max-entropy positive-definite reconstruction) | ✅ | ✅ | ✅ | Same — backend-agnostic post-processing over `power_vev` moments. |
 
@@ -115,30 +127,49 @@ Model coverage is largely backend-independent — `spinchain.py`,
 `fermionchain.py`, `spinfermionchain.py`, `bosonchain.py`,
 `parafermionchain.py` all build their operators as backend-agnostic
 `MultiOperator`s, so any new model works with any backend that supports
-the *method* being called on it (per the tables above). The one
-model-specific exception:
+the *method* being called on it (per the tables above). The
+model-specific rows:
 
 | Capability | v3 | pyitensor | Julia | Notes |
 |---|---|---|---|---|
-| Native spinful-fermion sites (`Spinful_Fermionic_Chain_Native`, real `ElectronSite`) | ✅ | ❌ | ❌ | Only v3 wires up a genuine per-site `Cup/Cdn/Cdagup/Cdagdn` site type; the other backends only offer the two-sites-per-orbital ("interleaved") representation. Slower for iterative GS/TDVP/KPM, faster for the 4-point tensor — a real perf tradeoff, not a strict upgrade, so both representations stay available where implemented. |
+| Native spinful-fermion sites (`Spinful_Fermionic_Chain_Native`, real `ElectronSite`) | ✅ | ✅ | ✅ | A genuine per-site `Cup/Cdn/Cdagup/Cdagdn` site type: v3's `HubbardSite`, pyitensor's `ElectronSite` (`pyitensor/sites/fermion.py`) and ITensors.jl's `"Electron"` site, basis `Emp, Up, Dn, UpDn`. Julia gets the raw names and ITensorMPS threads the Jordan-Wigner strings, up before down on a site. Slower for iterative GS/TDVP/KPM than the interleaved `Spinful_Fermionic_Chain`, faster for the 4-point tensor — a real perf tradeoff, not a strict upgrade, so both representations stay available. |
+| Higher spins (S=3/2, 2, 5/2), Z2/Z3/Z4 parafermions, bosons of any `maxnb` | ✅ | ✅ | ✅ | Julia builds every site code of `pyitensor/sites/siteset.py`; `mpsjulialive/sites_custom.jl` defines what ITensors.jl does not ship (the higher spins, the clock `Sig`/`Tau`, the boson projectors, `Sp/Sm/ISy`). An unknown code raises naming it. See `tests/test_julia_live_site_types.py`, `tests/test_boson_chain.py`, `tests/test_parafermion_chain.py`. |
+| Mixed spin-fermion chain (`Mixed_Spin_Fermion_Chain`) | ✅ | ✅ | ✅ | v2 is refused (it aborts on a string crossing a spin site). On Julia ITensorMPS puts an `F` on every site a fermionic term crosses, and `sites_custom.jl` makes `F` the identity on spin sites. A conserved sector on a chain with both kinds is ED only on every backend. |
+| Parity-odd fermion operators as MPOs (a bare `C_i`, Green's functions) | ✅ | ✅ | ✅ | Julia's OpSum refuses parity-odd fermionic terms, so `mpsjulialive/mpo.py::get_MPO` sends them in the Jordan-Wigner form of `MultiOperator.to_terms()`, with `A/Adag/F` defined as plain local matrices in `fermion_ops.jl`. Parity-even operators keep the raw names. |
 
 ## What's missing, roughly ranked by how load-bearing it'd be
 
-1. **Julia: iDMRG.** No port at all (`infinitechain.py` rejects
-   `itensor_version="julia_live"` outright). Given how much iDMRG
-   machinery (excitation ansatz, window dynamics, warm-start correlators)
-   has landed on pyitensor+v3 recently, a from-scratch Julia port is a
-   large undertaking, not a quick win — likely not worth it unless a
-   concrete use case needs Julia specifically for infinite systems.
-2. **Julia: TEBD.** Now implemented — see `mpsjulialive/tebd.jl` (from-
-   scratch Jordan-Wigner threading off the raw `"C"/"Cdag"` term list,
-   ITensor-native gate exponentiation via ITensors.jl's own `exp()`). The
-   real-time-evolution group (Sec. 3 above) is now fully covered on all
-   three backends except TEBD on v2 (never a candidate — v2 has no TDVP
-   module at all). METTS (both the static thermal average `metts_vev` and
-   its real-time dynamical-correlator generalization
-   `metts_dynamical_correlator`, Sec. 5) is likewise fully implemented —
-   see `mpsjulialive/metts.jl`.
+1. **Julia: what is still missing.** The finite-chain surface of
+   `julia_live` is now close to v3 and pyitensor (the rows above). What
+   it still lacks:
+   - **A leftover guard.** `get_dynamical_correlator` (`dynamics.py`,
+     the `itensor_version=="julia_live"` block before the ground-state
+     solve) still refuses `CVM_explicit`, `CVMimag`, the non-Hermitian
+     `CVM` and the non-Hermitian `KPM`, although `applyinverse`
+     (`bicgstab.jl`) and the NH-KPM recursion (`nhkpm.jl`) are there.
+     Dropping that block is what turns those rows to ✅.
+   - **In progress, not merged yet:** `dmrg_method="CBE"` (maybe also
+     `tevol_method="TDVP_CBE"`), a native Julia VUMPS for the infinite
+     chain (`gs_method="vumps"`, `n_uc=1` first), `cvm_solver=
+     "variational"` (dynamical DMRG) and four-point `ctmode="sweep"`.
+   - **Deferred:** `get_krylov_spectrum` (CLIK), `Lindblad_Chain`, the
+     Holzner KPM energy truncation (`kpm_energy_truncate`), YSR
+     (`ysr.py`), and the rest of the
+     infinite-chain stack: iDMRG, the excitation ansatz, spectral
+     weights, window dynamics and the iMPS algebra
+     (`infinitechain.py` rejects `julia_live` at construction).
+     iDMRG in particular is a large port, worth it only for a concrete
+     use case that needs Julia on an infinite system.
+   - **Site-type limits:** `dmmode="full"` and `ctmode="full"` cover
+     spinless fermions only, and conserved sectors cover spinless
+     fermions, `Electron`, S=1/2, S=1 and bosons, not the higher spins or
+     the parafermions.
+2. **Julia: real time and finite temperature.** Done. TDVP, TDVP_GSE,
+   TEBD (`mpsjulialive/tebd.jl`, Jordan-Wigner threaded off the raw
+   `"C"/"Cdag"` term list, gates exponentiated by ITensors.jl's own
+   `exp()`), TDZ and METTS (`metts_vev` and `metts_dynamical_correlator`,
+   `mpsjulialive/metts.jl`) all run there. TEBD on v2 was never a
+   candidate, since v2 has no TDVP module at all.
 3. **v3/pyitensor: four-point `ctmode="sweep"` for native-spinful sites.**
    The fast environment-reuse algorithm has no flavor-resolved
    counterpart yet; `ctmode="full"` remains the practical choice for

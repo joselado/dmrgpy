@@ -77,7 +77,8 @@ See `examples/groundstate/cbe_ground_state`.
 ## Starting from a given state
 
 By default a solve starts from a state the backend chooses, a random one
-on `itensor_version=3` and `"python"`. `wf0=` starts the sweeps from a
+on `itensor_version=3`, `"python"` and `"julia_live"`. `wf0=` starts the
+sweeps from a
 state we give, for example the ground state of the previous
 point of a parameter scan:
 
@@ -150,8 +151,5 @@ The bandwidth is the energy scale the kernel polynomial method rescales
 by ([Choosing a correlator method](correlator-methods.md)).
 
 !!! note "Backends"
-    `cutoff`, `noise` and the warm starts work on every backend. The
-    bond ramp runs on `itensor_version=2`, `3` and `"python"`; on
-    `"julia_live"` every sweep runs at `maxm`, from a random start of
-    bond dimension `bond_ramp_start`. `verbose` prints on
-    `itensor_version=2`, `3` and `"python"`.
+    `cutoff`, `noise`, the warm starts and the bond ramp work on every
+    backend. `verbose` prints on `itensor_version=2`, `3` and `"python"`.

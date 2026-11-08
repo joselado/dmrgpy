@@ -62,8 +62,8 @@ limitation, since it also checks numerically on the chain.
 `sc.toMPO(A)` builds the matrix product operator of `A` once. Two such
 operators can be added, subtracted, multiplied by numbers and multiplied
 with each other (`A + 2*B - A`, `A*B`), and `A.trace()` is their trace,
-so `(Sz[0]*Hmpo*Hmpo).trace()` is a moment of the spectrum. Not available
-on `"julia_live"`. To combine Hamiltonians, it is simpler to sum the
+so `(Sz[0]*Hmpo*Hmpo).trace()` is a moment of the spectrum. To combine
+Hamiltonians, it is simpler to sum the
 operator expressions before calling `set_hamiltonian`. On a small chain,
 `sc.get_full_matrix(A)` returns the dense matrix of any operator, to
 check a model against another code.

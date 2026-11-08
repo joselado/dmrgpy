@@ -214,6 +214,6 @@ $Z_i=|\langle\mathrm{GS}_{N-1}|c_i|\mathrm{GS}_N\rangle|^2$
 (see `examples/groundstate/sector_promotion_to_dense`).
 
 !!! note "Backends"
-    Sectors work on `itensor_version=3`, `itensor_version="python"` and
-    `mode="ED"`. They are not available on `itensor_version=2`, on
-    `"julia_live"`, with METTS and for infinite chains; these raise an error.
+    Sectors work on `itensor_version=3`, `"python"`, `"julia_live"` and
+    `mode="ED"`. They are not available on `itensor_version=2`, with METTS
+    and for infinite chains; these raise an error.
