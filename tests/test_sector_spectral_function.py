@@ -487,12 +487,7 @@ JL_NSWEEPS = 20
 
 
 def _skip_parity_odd(f):
-    try:
-        return f()
-    except Exception as e:
-        if "Parity-odd" in str(e):
-            pytest.skip("needs package B parity-odd MPOs")
-        raise
+    return f()
 
 
 @pytest.mark.parametrize("version", JL)

@@ -212,15 +212,8 @@ def test_hermitian_only_submodes_refuse_a_non_hermitian_h():
 
 
 def _applyinverse_available(sc):
-    """Skip only on the refusal mpsalgebra.applyinverse raises while
-    julia_live has no applyinverse; anything else is a failure."""
-    try:
-        sc.applyinverse(sc.hamiltonian + 3.0, sc.get_gs())
-    except NotImplementedError as exc:
-        if "julia_live" not in str(exc) or "applyinverse" not in str(exc):
-            raise
-        pytest.skip("needs applyinverse on julia_live (package A): %s"
-                    % str(exc)[:80])
+    """applyinverse runs on the chain; any failure is a failure."""
+    sc.applyinverse(sc.hamiltonian + 3.0, sc.get_gs())
 
 
 @pytest.mark.parametrize("submode,nh", [("CVM_explicit", False),
@@ -372,15 +365,6 @@ def test_get_gr_against_python():
         fc.set_hamiltonian(h + 0.1 * fc.N[0])
         if version == JULIA:
             from dmrgpy.mpsjulialive.mpo import MPO
-            try:
-                MPO(fc.C[1], MBO=fc) * fc.get_gs()
-            except Exception as exc:
-                # only the refusal of a parity-odd OpSum skips; any other
-                # failure of the MPO application is a failure
-                if "Parity-odd" not in str(exc):
-                    raise
-                pytest.skip("needs parity-odd MPOs on julia_live "
-                            "(package B): %s" % str(exc)[:80])
         x, y = fc.get_gr(delta=0.1, es=es, i=1, j=1)
         out[version] = np.asarray(y)
     peak = np.max(np.abs(out["python"]))

@@ -134,9 +134,6 @@ def test_amb_is_exact_at_small_maxm(version):
 
 
 @pytest.mark.parametrize("version", JULIA)
-@pytest.mark.xfail(strict=True, reason="C_k|psi> on a julia_live fermion "
-        "state needs parity-odd fermion MPOs (package B); until then "
-        "OpSum to MPO raises 'Parity-odd fermionic terms not yet supported'")
 def test_fermion_dm_and_correlation_matrix(version):
     cj, hj = _fermions(6, version)
     cp, hp = _fermions(6, "python")

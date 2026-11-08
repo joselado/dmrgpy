@@ -373,12 +373,7 @@ def _jl_vev(op, wf):
 def _jl_or_skip_parity_odd(f):
     """f(), skipped when it needs a parity-odd fermion MPO (a bare C) on
     dense julia_live sites, which ITensorMPS's OpSum does not build yet"""
-    try:
-        return f()
-    except Exception as e:
-        if "Parity-odd" in str(e):
-            pytest.skip("needs package B parity-odd MPOs")
-        raise
+    return f()
 
 
 def _jl_solved_in_sector(n=8, nf=3):
