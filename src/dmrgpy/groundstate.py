@@ -844,9 +844,21 @@ def _gs_energy_julia(self,ishermitian=True,wf0=None,reconverge=None,
     none was recorded here, and gs_is_current() reads a missing key as
     "nothing to hand it to", so a convergence ramp over maxm on one chain
     returned the first energy every time (-3.194321 at maxm 2, 4 and 16 on
-    an 8-site Heisenberg chain; 2026-09-25 open items, "Left open"). A
-    Hermitian solve also marks its energy as H's lower band edge
-    (mark_lower_edge()), which the julia_live KPM window reads."""
+    an 8-site Heisenberg chain; 2026-09-25 open items, "Left open").
+
+    A call that reaches here on a current chain with nothing to sweep from
+    (maxde= alone, or with reconverge=False) keeps the stored state and
+    energy, as skip_dmrg_gs does on the session backends, so that maxde=
+    refines the stored state and a fluctuation already below maxde hands
+    it back unchanged; it solved again from a random MPS before.
+
+    Only a cold Hermitian solve, from the random start, marks its energy
+    as H's lower band edge (mark_lower_edge()), which the julia_live KPM
+    window reads. A warm start (wf0=, reconverge=True, restart=False, a
+    guess) can stay in an eigenstate of an old Hamiltonian that is also
+    one of H, and julia_live has no quantum numbers to keep it out, so the
+    window then solves for its own edge. The maxde= refinement keeps the
+    mark only if the state it refines carried it."""
     if maxde is not None and not ishermitian:
         raise TypeError("gs_energy(maxde=...) on julia_live refines a "
                 "Hermitian ground state by its energy fluctuation; this "
@@ -863,7 +875,12 @@ def _gs_energy_julia(self,ishermitian=True,wf0=None,reconverge=None,
         if mode is None and self.wf0 is not None and (reconverge is True
                 or _warm_start(self) is not None):
             mode = "reconverge" # from the stored state, see above
-    if mode=="skip":
+        elif mode is None and gs_is_current(self):
+            mode = "stored" # keep it, as skip_dmrg_gs does, see above
+    cold = mode is None # a solve from the random start, see above
+    if mode=="stored":
+        out = self.e0
+    elif mode=="skip":
         out = _take_injected_state(self,start,supplied=supplied)
     else:
         from .mpsjulialive.groundstate import get_gs_dmrg
@@ -876,8 +893,9 @@ def _gs_energy_julia(self,ishermitian=True,wf0=None,reconverge=None,
         self._gs_supplied = False
         self._gs_warm = None
         self._gs_solver_key = solver_key(self) # see gs_is_current
-        if ishermitian: mark_lower_edge(self)
+        if ishermitian and cold: mark_lower_edge(self)
     if maxde is not None: # gs_energy_single()'s refinement, see above
+        edge = e0_is_lower_edge(self) # kept only if the state carried it
         from . import vev as _vev
         de = np.sqrt(abs(_vev.energy_variance(self,self.hamiltonian,
                 wf=self.wf0)))/self.ns
@@ -899,7 +917,7 @@ def _gs_energy_julia(self,ishermitian=True,wf0=None,reconverge=None,
                 self.bond_ramp = ramp
             self.computed_gs = True
             self._gs_solver_key = solver_key(self) # ...under these parameters
-            mark_lower_edge(self)
+            if edge: mark_lower_edge(self)
             out = self.e0 # the refined energy, the one left on the chain
     return out
 

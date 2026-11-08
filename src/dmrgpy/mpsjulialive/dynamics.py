@@ -48,7 +48,8 @@ def _min_energy(self,H):
     """H's lower band edge from a solve at the chain's own parameters, for
     the Chebyshev window when the chain's e0 is not marked as that edge
     (groundstate.mark_lower_edge()): a state set with set_gs() or
-    set_initial_wf(), or gs_energy_generalized()'s. Runs in place on `self` like
+    set_initial_wf(), gs_energy_generalized()'s, or one swept from a warm
+    start (wf0=, reconverge=True, restart=False). Runs in place on `self` like
     _max_energy_bound() above, and leaves the same restore to the caller,
     apart from the solver key and the lower-edge mark, put back here."""
     from ..groundstate import solve_marks,restore_solve_marks

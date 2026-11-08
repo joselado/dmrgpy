@@ -543,24 +543,43 @@ def test_julia_vev_takes_wf_and_npow(version):
         assert out[v]["h2"] == pytest.approx(out["ED"]["h2"], abs=1e-6), v
 
 
+def _spy_starts(monkeypatch):
+    """Record the start state every julia_live solve is handed (None for
+    the random start), which no energy can tell apart once both converge."""
+    from dmrgpy.mpsjulialive import groundstate as jgs
+    starts = []
+    orig = jgs.get_gs_dmrg
+    def spy(self, ishermitian=True, wf0=None):
+        starts.append(wf0)
+        return orig(self, ishermitian=ishermitian, wf0=wf0)
+    monkeypatch.setattr(jgs, "get_gs_dmrg", spy)
+    return starts
+
+
 @pytest.mark.parametrize("version", [pytest.param("julia_live", id="julia_live")])
 @pytest.mark.parametrize("seed", [0, 1])
-def test_julia_restart_false_is_a_warm_start(version, seed):
+def test_julia_restart_false_is_a_warm_start(version, seed, monkeypatch):
     """set_hamiltonian(H, restart=False) keeps the stored state as the warm
     start of the next solve; on julia_live, which has no session, the next
     solve started from a random MPS. It sweeps from the stored state now,
-    to the energy a cold solve gives, and restart() stays a cold start."""
+    to the energy a cold solve gives, and restart() stays a cold start.
+    Only the cold solves mark e0 as H's lower band edge: a warm start can
+    stay in an eigenstate of the old H that is also one of the new."""
     _require_julia()
     from dmrgpy import groundstate
+    starts = _spy_starts(monkeypatch)
     np.random.seed(seed)
     sc = _chain("julia_live", n=8, maxm=30, nsweeps=10)
     _quiet(sc.gs_energy)
+    assert starts == [None] and groundstate.e0_is_lower_edge(sc)
     old = sc.wf0
     stag = sum(((-1)**i)*0.4*sc.Sz[i] for i in range(sc.ns))
     h2 = _heis(sc) + stag
     sc.set_hamiltonian(h2, restart=False)
     assert groundstate._warm_start(sc) is old
     e_warm = np.real(_quiet(sc.gs_energy))
+    assert len(starts) == 2 and starts[1] is old # swept from the old state
+    assert not groundstate.e0_is_lower_edge(sc)
     assert groundstate._warm_start(sc) is None # retired by the solve
     ed = _chain("ED", n=8)
     ed.set_hamiltonian(_heis(ed) + sum(((-1)**i)*0.4*ed.Sz[i]
@@ -569,23 +588,60 @@ def test_julia_restart_false_is_a_warm_start(version, seed):
     assert e_warm == pytest.approx(e_ed, abs=1e-6)
     sc.set_hamiltonian(_heis(sc)) # restart=True: cold
     assert groundstate._warm_start(sc) is None
+    _quiet(sc.gs_energy)
+    assert len(starts) == 3 and starts[2] is None
+    assert groundstate.e0_is_lower_edge(sc)
 
 
 @pytest.mark.parametrize("version", [pytest.param("julia_live", id="julia_live")])
-def test_julia_reconverge_and_stored_answer(version):
+@pytest.mark.parametrize("seed", [0, 1])
+def test_julia_maxde_on_a_current_chain_refines_the_stored_state(version,
+        seed, monkeypatch):
+    """gs_energy(maxde=...) on a current julia_live chain solved again from
+    a random MPS before refining, so a fluctuation already below maxde gave
+    back a new state instead of the stored one. It keeps the stored state
+    now, as skip_dmrg_gs does on the session backends, and refines from
+    it; the refinement keeps the lower-edge mark of the cold solve."""
+    _require_julia()
+    from dmrgpy import groundstate
+    np.random.seed(seed)
+    sc = _chain("julia_live", n=10, maxm=4, nsweeps=10)
+    e0 = _quiet(sc.gs_energy)
+    w0 = sc.wf0
+    starts = _spy_starts(monkeypatch)
+    assert _quiet(lambda: sc.gs_energy(maxde=1.0)) == e0
+    assert _quiet(lambda: sc.gs_energy(maxde=1.0, reconverge=False)) == e0
+    assert starts == [] and sc.wf0 is w0
+    assert groundstate.e0_is_lower_edge(sc)
+    e = _quiet(lambda: sc.gs_energy(maxde=1e-5))
+    assert len(starts) >= 1 and starts[0] is w0 # refined from the stored state
+    assert sc.maxm == 4 and sc.nsweeps == 10
+    assert groundstate.e0_is_lower_edge(sc)
+    ed = _chain("ED", n=10)
+    e_ed = np.real(_quiet(lambda: ed.gs_energy(mode="ED")))
+    assert np.real(e) == pytest.approx(e_ed, abs=1e-6)
+    assert np.real(e0) > e_ed + 1e-4 # maxm=4 alone is far from it
+
+
+@pytest.mark.parametrize("version", [pytest.param("julia_live", id="julia_live")])
+def test_julia_reconverge_and_stored_answer(version, monkeypatch):
     """stored_answer_holds() follows the session backends' rule on
     julia_live: reconverge=False and maxdepth= alone get the stored answer,
     reconverge=True sweeps from the stored state (and stays at its
     energy), and a typo still raises."""
     _require_julia()
+    from dmrgpy import groundstate
     np.random.seed(7)
     sc = _chain("julia_live", n=6, maxm=30, nsweeps=10)
     e0 = _quiet(sc.gs_energy)
     w0 = sc.wf0
+    starts = _spy_starts(monkeypatch)
     assert sc.gs_energy(reconverge=False) == e0
     assert sc.gs_energy(maxdepth=3) == e0
-    assert sc.wf0 is w0
+    assert sc.wf0 is w0 and starts == []
     e1 = _quiet(lambda: sc.gs_energy(reconverge=True))
+    assert len(starts) == 1 and starts[0] is w0 # swept from the stored state
+    assert not groundstate.e0_is_lower_edge(sc) # a warm solve marks no edge
     assert sc.wf0 is not w0 # a new solve...
     assert np.real(e1) == pytest.approx(np.real(e0), abs=1e-8) # ...from it
     with pytest.raises(TypeError):
