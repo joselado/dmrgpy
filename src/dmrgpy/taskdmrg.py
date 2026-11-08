@@ -7,22 +7,82 @@ the result is a set of discrete poles w_alpha with weights M_alpha, broadened
 here with the house Lorentzian (dynamics.py's module docstring). The method
 itself is in pyitensor/task.py, together with its one approximation, the
 projection of H onto the tangent space, and the two-site variance that
-measures it pole by pole. On itensor_version="python" and 3; v3 hands its
-ground-state MPS and MPO site tensors over as numpy arrays and the same
-Python code runs on them.
+measures it pole by pole. On itensor_version="python", 3 and
+"julia_live"; v3 and julia_live hand their ground-state MPS and MPO site
+tensors over as numpy arrays (julia_live through mpsjulialive/arrays.jl)
+and the same Python code runs on them.
 """
 import numpy as np
 from . import operatornames
 
 
-BACKENDS = ("python",3)
+BACKENDS = ("python",3,"julia_live")
 
 def _check_backend(self,what="get_dynamical_correlator"):
     if self.itensor_version not in BACKENDS:
         raise NotImplementedError(
             "%s: submode=\"TASK\" is implemented on itensor_version="
-            "\"python\" and 3 only (got itensor_version=%r)"
+            "\"python\", 3 and \"julia_live\" only (got itensor_version=%r)"
             %(what,self.itensor_version))
+
+
+def ground_state(self):
+    """Make sure the chain's current ground state is the one the arrays
+    are exported from: groundstate.ground_state_on_session on the session
+    backends, get_gs() on julia_live, which has no session."""
+    if self.itensor_version=="julia_live":
+        self.get_gs()
+        return
+    from .groundstate import ground_state_on_session
+    ground_state_on_session(self)
+
+
+def _julia_mpo(self,op):
+    """The Julia MPO of a MultiOperator (mpsjulialive/mpo.py's get_MPO, the
+    route of every julia_live operator), or of a term list from
+    to_terms(), whose names are already Jordan-Wigner transformed and are
+    passed to the same AutoMPO reader as they are."""
+    from .multioperator import MultiOperator
+    from .mpsjulialive.juliasession import Main, to_julia_strvec
+    if isinstance(op,MultiOperator):
+        from .mpsjulialive.mpo import get_MPO
+        return get_MPO(op,self)
+    if len(op)==0: raise ValueError("submode=\"TASK\": an operator with "
+            "no terms")
+    ls = [str(len(op))]
+    for c,factors in op:
+        c = complex(c)
+        ls.append(str(len(factors)))
+        ls.append("  ".join([repr(c.real),repr(c.imag)]
+                  +["%s  %d"%(name,int(i)) for name,i in factors])+"  ")
+    return Main.toMPO(to_julia_strvec(ls),self.jlsites)
+
+
+def _julia_arrays(jlarrays):
+    return [np.ascontiguousarray(np.asarray(a),dtype=complex)
+            for a in jlarrays]
+
+
+def _julia_state(self):
+    """The julia_live ground state, and its site arrays
+    (mpsjulialive/arrays.jl), exported as they are, as on v3."""
+    from .mpsjulialive.juliasession import Main
+    wf = self.wf0
+    if wf is None or getattr(wf,"jlmps",None) is None:
+        raise RuntimeError("submode=\"TASK\" called before gs_energy")
+    return _julia_arrays(Main.mps_site_arrays(wf.jlmps)),wf
+
+
+def _julia_vev(self,op,wf):
+    """<wf|O|wf>/<wf|wf> on julia_live."""
+    from .mpsjulialive.juliasession import Main
+    num = complex(Main.mps_mpo_mps(wf.jlmps,_julia_mpo(self,op),wf.jlmps))
+    return num/complex(Main.inner(wf.jlmps,wf.jlmps)).real
+
+
+def _julia_mpo_arrays(self,op):
+    from .mpsjulialive.juliasession import Main
+    return _julia_arrays(Main.mpo_site_arrays(_julia_mpo(self,op)))
 
 
 def _v3_arrays(session,terms):
@@ -51,10 +111,25 @@ def session_poles(self,terms_i,terms_j,terms_idag,nkry,variance=False,
 
     Both backends call task.correlator_poles here with their exported
     arrays: on "python" the arrays of the chain's state
-    (chain._mps_arrays_lpr), on 3 those of the session's own export."""
+    (chain._mps_arrays_lpr), on 3 those of the session's own export, on
+    julia_live those of mpsjulialive/arrays.jl. On julia_live the operator
+    arguments may be MultiOperators instead of terms (_julia_mpo)."""
     s = self._session
     from .pyitensor import task
     task.check_expansion_keywords(pad_bonds,expand_bonds,expand_rounds)
+    if self.itensor_version=="julia_live":
+        Ms,wf = _julia_state(self)
+        Ws = _julia_mpo_arrays(self,self.hamiltonian)
+        Wb = _julia_mpo_arrays(self,terms_j)
+        Wadag = (None if terms_idag is None
+                 else _julia_mpo_arrays(self,terms_idag))
+        ws,wt,var,dim = task.correlator_poles(Ms,Ws,Wb,Wadag,nkry,variance,
+                pad_bonds=pad_bonds,expand_bonds=expand_bonds,
+                expand_rounds=expand_rounds)
+        elastic = _julia_vev(self,terms_i,wf)*_julia_vev(self,terms_j,wf)
+        if terms_ij is None: return ws,wt,complex(elastic),var,dim
+        return (ws,wt,complex(elastic),var,dim,
+                complex(_julia_vev(self,terms_ij,wf)))
     if self.itensor_version=="python":
         Ms,wf = _python_state(s)
         Ws = task.mpo_arrays(s.H)
@@ -83,6 +158,14 @@ def session_spectrum(self,ops_terms,nkry,pad_bonds=None,expand_bonds=None,
     s = self._session
     from .pyitensor import task
     task.check_expansion_keywords(pad_bonds,expand_bonds,expand_rounds)
+    if self.itensor_version=="julia_live":
+        Ms,_ = _julia_state(self)
+        ops = [(_julia_mpo_arrays(self,t),_julia_mpo_arrays(self,td))
+               for t,td in ops_terms]
+        return task.spectrum_from_arrays(Ms,
+                _julia_mpo_arrays(self,self.hamiltonian),ops,nkry,
+                pad_bonds=pad_bonds,expand_bonds=expand_bonds,
+                expand_rounds=expand_rounds)
     if self.itensor_version=="python":
         Ms,_ = _python_state(s)
         ops = [(task.mpo_arrays(s._mpo(t)),task.mpo_arrays(s._mpo(td)))
@@ -148,16 +231,18 @@ def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False,pad_bonds=None,
     from .pyitensor.task import check_expansion_keywords
     check_expansion_keywords(pad_bonds,expand_bonds,expand_rounds)
     from .multioperatortk import canonical
-    from .groundstate import ground_state_on_session
     A,B = operatornames.str2MO(self,name,i=i,j=j,
             require_symbolic_for="submode=\"TASK\"")
     if (isinstance(nkry,bool) or not isinstance(nkry,(int,np.integer))
             or nkry<1):
         raise ValueError("nkry must be a positive integer, got %r"%(nkry,))
-    ground_state_on_session(self)
-    Adag = None if canonical.is_dagger_pair(A,B) else A.get_dagger().to_terms()
-    ws,wt,el,var,dim,ab = session_poles(self,A.to_terms(),B.to_terms(),Adag,
-            int(nkry),variance=variance,terms_ij=(A*B).to_terms(),
+    ground_state(self)
+    if self.itensor_version=="julia_live": # MultiOperators, see _julia_mpo
+        terms = lambda m: m
+    else: terms = lambda m: m.to_terms()
+    Adag = None if canonical.is_dagger_pair(A,B) else terms(A.get_dagger())
+    ws,wt,el,var,dim,ab = session_poles(self,terms(A),terms(B),Adag,
+            int(nkry),variance=variance,terms_ij=terms(A*B),
             pad_bonds=pad_bonds,expand_bonds=expand_bonds,
             expand_rounds=expand_rounds)
     missing = ab-el-complex(np.sum(wt))

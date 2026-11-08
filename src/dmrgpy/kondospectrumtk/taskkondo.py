@@ -36,12 +36,11 @@ class TaskKondoSpectrum():
         taskdmrg._check_backend(chain, "get_kondo_spectrum(mode=\"DMRG\")")
         if isinstance(nkry, bool) or not isinstance(nkry, (int, np.integer)) or nkry < 1:
             raise ValueError("nkry must be a positive integer, got %r" % (nkry,))
-        from ..groundstate import ground_state_on_session
         self.chain = chain
         self.site = site
         self.T = 0.
         self.kB = kB
-        ground_state_on_session(chain)
+        taskdmrg.ground_state(chain) # no session on julia_live
         ops = []
         for name in ("Sx", "Sy", "Sz"):
             op = getattr(chain, name)[site]

@@ -10,13 +10,17 @@ can drop a Schmidt state (measured on a 10-site Heisenberg chain, 31 of 32
 on the middle bond), and the tangent space then misses a direction.
 
 Every test runs on itensor_version="python" and 3; v3 exports its site
-tensors to the same Python implementation (taskdmrg.session_poles).
+tensors to the same Python implementation (taskdmrg.session_poles),
+and so does julia_live (mpsjulialive/arrays.jl), tested at the end of
+this file through taskdmrg directly.
 """
 
 import numpy as np
 import pytest
 
 from dmrgpy import cppext, fermionchain, spinchain
+
+from _helpers import julia_live_param
 
 VERSIONS = ["python", pytest.param(3, marks=pytest.mark.skipif(
     not cppext.available(3), reason="v3 extension not compiled"))]
@@ -124,14 +128,95 @@ def test_v3_conserved_sector_matches_the_dense_chain():
     assert np.max(np.abs(ys - yd)) < 1e-8 * np.max(np.abs(yd))
 
 
-@pytest.mark.parametrize("version", [2, "julia_live"])
+@pytest.mark.parametrize("version", [2])
 def test_other_backends_raise_before_solving(version):
     if version == 2 and not cppext.available(2):
         pytest.skip("extension not compiled")
-    if version == "julia_live":
-        pytest.importorskip("juliacall")
     sc = spinchain.Spin_Chain(["S=1/2"] * 4, itensor_version=version)
     sc.set_hamiltonian(sc.Sz[0] * sc.Sz[1])
     with pytest.raises(NotImplementedError, match="python"):
         sc.get_dynamical_correlator(submode="TASK", name="ZZ")
     assert not sc.computed_gs
+
+
+# ------------------------------------------------------------ julia_live
+
+JULIA = [julia_live_param()]
+
+
+def _pole_curve(p, es, delta):
+    ws = np.concatenate([p["omega"], [0.]])
+    wt = np.concatenate([p["weight"], [p["elastic"]]])
+    return (delta / (np.pi * ((es[:, None] - ws[None, :]) ** 2 + delta ** 2))) @ wt
+
+
+@pytest.mark.parametrize("version", JULIA)
+def test_julia_saturated_poles_match_python_and_lehmann(version):
+    """A saturated 6-site chain: the tangent space is the whole orthogonal
+    complement on both backends, so the julia_live poles are the python
+    ones and the Lehmann ones, for a Hermitian pair, for (S+, S-) and for
+    an off-diagonal pair, with the sum rule closed."""
+    from dmrgpy import taskdmrg
+    jl = heisenberg(version=version)
+    py = heisenberg(version="python")
+    for pair in (lambda c: (c.Sz[0], c.Sz[0]), lambda c: (c.Sx[0] + 1j * c.Sy[0], c.Sx[0] - 1j * c.Sy[0]),
+                 lambda c: (c.Sz[1], c.Sz[4])):
+        pj = taskdmrg.get_poles(jl, name=pair(jl), variance=True)
+        pp = taskdmrg.get_poles(py, name=pair(py))
+        assert pj["dimension"] == 2 ** 6 - 1
+        assert abs(pj["missing_weight"]) < 1e-6
+        assert np.max(pj["variance"]) < 1e-16
+        yj, yp = _pole_curve(pj, ES, 0.05), _pole_curve(pp, ES, 0.05)
+        ref = lehmann_curve(py, *pair(py), ES, 0.05)
+        assert np.max(np.abs(yj - yp)) < 1e-8
+        assert np.max(np.abs(yj - ref)) < 1e-8
+        wj = np.sort(pj["omega"][np.abs(pj["weight"]) > 1e-6])
+        wp = np.sort(pp["omega"][np.abs(pp["weight"]) > 1e-6])
+        assert len(wj) == len(wp) and np.allclose(wj, wp, atol=1e-8)
+    _, y = taskdmrg.dynamical_correlator(jl, name=(jl.Sz[2], jl.Sz[2]),
+                                         es=ES, delta=0.05)
+    ref = lehmann_curve(py, py.Sz[2], py.Sz[2], ES, 0.05)
+    assert np.max(np.abs(y - ref)) < 1e-8
+
+
+@pytest.mark.parametrize("version", JULIA)
+def test_julia_fermion_pair_matches_lehmann(version):
+    """A pair of hoppings with complex amplitudes on a saturated chain:
+    the Jordan-Wigner strings of the Julia MPOs of B and A^dagger, and a
+    complex M_n. Parity-even, since julia_live builds no MPO of a single
+    C yet."""
+    from dmrgpy import taskdmrg
+    fc = complex_hopping_chain(version=version)
+    A, B = fc.Cdag[0] * fc.C[3], fc.Cdag[1] * fc.C[4]
+    _, y = taskdmrg.dynamical_correlator(fc, name=(A, B), es=ES, delta=0.1)
+    ref = lehmann_curve(fc, A, B, ES, 0.1)
+    assert np.max(np.abs(ref.imag)) > 1e-2
+    assert np.max(np.abs(y - ref)) < 1e-8
+
+
+@pytest.mark.parametrize("version", JULIA)
+def test_julia_padding_and_expansion(version):
+    """Below saturation (maxm=2 on 6 sites) pad_bonds="full" closes the
+    sum rule of the state and expand_bonds grows the tangent space, as on
+    python."""
+    from dmrgpy import taskdmrg
+    sc = heisenberg(maxm=2, version=version)
+    A = sc.Sz[0]
+    p0 = taskdmrg.get_poles(sc, name=(A, A))
+    pf = taskdmrg.get_poles(sc, name=(A, A), pad_bonds="full")
+    pe = taskdmrg.get_poles(sc, name=(A, A), expand_bonds=2)
+    assert pf["dimension"] == 2 ** 6 - 1
+    assert pe["dimension"] > p0["dimension"]
+    assert abs(pf["missing_weight"]) < 1e-8
+    assert abs(np.sum(pf["weight"]) + pf["elastic"] - 0.25) < 1e-8
+
+
+@pytest.mark.parametrize("version", JULIA)
+def test_julia_kondo_task_spectrum_matches_python(version):
+    """The TASK Kondo spectrum (taskdmrg.session_spectrum, fed with terms)
+    on julia_live against python on a saturated chain."""
+    from dmrgpy.kondospectrumtk.taskkondo import TaskKondoSpectrum
+    sj = TaskKondoSpectrum(heisenberg(version=version), 0)
+    sp = TaskKondoSpectrum(heisenberg(version="python"), 0)
+    assert len(sj.e) == len(sp.e)
+    assert np.allclose(np.sort(sj.e), np.sort(sp.e), atol=1e-8)
