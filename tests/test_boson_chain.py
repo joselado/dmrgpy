@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 
 from dmrgpy import bosonchain
+from _helpers import julia_live_param
+from _julia_site_helpers import check_julia_live_against_ed
 
 from _helpers import energy_ed_v2_v3, vev_ed_v2_v3, setup_backend
 
@@ -138,3 +140,25 @@ def test_boson_chain_nondefault_maxnb_matches_ed_on_v3_and_python():
     setup_backend(bc, "python")
     e_py = bc.gs_energy(mode="DMRG")
     assert e_py == pytest.approx(e_ed, abs=1e-6)
+
+
+@pytest.mark.parametrize("maxnb,t", [(2, 1.0), (3, 1.0), (5, 0.2)])
+@pytest.mark.parametrize("v", [julia_live_param()])
+def test_bose_hubbard_julia_live_matches_ed(maxnb, t, v):
+    """julia_live builds an ITensors.jl Boson site of dimension maxnb
+    (site-type code 100+maxnb), with the occupation projectors N0, N1, ...
+    of sites_custom.jl: 4-site Bose-Hubbard chain against ED. The maxnb=5
+    case has a weak hopping: at t=1 the julia_live solver, not the site,
+    stays 1e-5 to 1e-2 above the ED energy from a random start."""
+    n = 4
+    bc = bosonchain.Bosonic_Chain(n, maxnb=[maxnb]*n)
+    h = 0
+    for i in range(n - 1):
+        h = h + bc.Adag[i]*bc.A[i + 1]
+    h = -t*(h + h.get_dagger())
+    mu = [0.5, 0.6, 0.4, 0.55]
+    for i in range(n):
+        h = h + 1.0*bc.N[i]*(bc.N[i] - 1.0) - mu[i]*bc.N[i]
+    obs = [bc.N[0], bc.Adag[0]*bc.A[2], bc.D[1][0], bc.D[2][maxnb - 1],
+           bc.N[1]*bc.N[3]]
+    check_julia_live_against_ed(bc, h, obs, maxm=40, nsweeps=30)
