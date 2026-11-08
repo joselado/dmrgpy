@@ -292,3 +292,16 @@ def test_non_hermitian_cvm(version):
         out[v] = np.array(d)
     peak = np.max(np.abs(out["ED"]))
     assert np.max(np.abs(out[version]-out["ED"])) < 1e-5*peak
+
+
+@pytest.mark.parametrize("version", JULIA)
+def test_cvm_explicit_of_a_vanishing_pair(version):
+    """(Sx0,Sy1) on the Heisenberg singlet is exactly zero. At the default
+    cutoff, sums by the density-matrix algorithm inside BiCGSTAB broke the
+    recursion down and this came back as about 5e9 at omega=1.8"""
+    c, h = _heisenberg(6, version, maxm=64)
+    c.cutoff = 1e-12 # the default
+    c.cvm_tol = 1e-9
+    es, d = nhdynamics.dynamical_correlator_cvm_explicit(c,
+            name=(c.Sx[0], c.Sy[1]), delta=0.1, es=ES)
+    assert np.max(np.abs(d)) < 1e-6
