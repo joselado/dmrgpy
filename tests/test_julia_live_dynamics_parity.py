@@ -167,15 +167,20 @@ def test_distribution_matches_ed(scale):
 def test_distribution_moments_against_python():
     """The same moments on julia_live and "python", at a fixed scale; the
     6-site ground state is nondegenerate and converged on both."""
-    out = []
+    out, outab = [], []
     for version in (JULIA, "python"):
         sc = heisenberg(6, version)
         X = sc.Sz[0] + sc.Sz[1]
         mus, _shift, _scale = sc.get_distribution_moments(X=X, delta=0.1,
                                                           scale=2.0)
         out.append(np.asarray(mus))
+        # and between A|GS> and B|GS>, applied as A*wf on julia_live
+        mus, _shift, _scale = sc.get_distribution_moments(
+            X=X, A=sc.Sz[2], B=sc.Sx[2] + sc.Sz[3], delta=0.1, scale=2.0)
+        outab.append(np.asarray(mus))
     assert len(out[0]) == len(out[1])
     assert np.max(np.abs(out[0] - out[1])) < 1e-6
+    assert np.max(np.abs(outab[0] - outab[1])) < 1e-6
 
 
 # --------------------------------------------- refusals and dispatch
