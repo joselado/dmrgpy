@@ -956,7 +956,9 @@ class Infinite_Many_Body_Chain:
         is accepted purely so callers can write whichever reads most
         naturally (SxL/SxC/SxR all describe the same infinite chain).
 
-        All four (backend, gs_method) combinations are supported:
+        On itensor_version="julia_live" only gs_method="vumps" is
+        supported (mpsjulialive/vumps.jl, the same AC formula). On "python"
+        and 3, all four (backend, gs_method) combinations are supported:
         gs_method="idmrg" dispatches to pyitensor.idmrg.onsite_expectation
         for itensor_version="python" and to
         Chain::idmrg_onsite_expectation for itensor_version=3;
@@ -1029,6 +1031,7 @@ class Infinite_Many_Body_Chain:
         convention.
 
         Same backend/gs_method support matrix as vev's own docstring
+        (julia_live: gs_method="vumps" only)
         (all four combinations of itensor_version in ("python", 3) with
         gs_method in ("idmrg", "vumps")), including its note on which
         tensors gs_method="idmrg" actually tiles.
