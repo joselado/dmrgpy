@@ -1,10 +1,12 @@
-"""julia_live MPOs: parity-odd fermion operators (a single C or Cdag).
+"""julia_live MPOs: parity-odd fermion operators (a single C or Cdag),
+and the algebra of already-built MPOs (product, sum, scalar, dagger,
+trace, <a|M|b>).
 
 ITensorMPS's OpSum refuses a parity-odd fermionic term, so
 mpsjulialive/mpo.py sends such an operator in the Jordan-Wigner-dressed
 form MultiOperator.to_terms() gives (A/Adag/F names, bosonic for OpSum,
 see mpsjulialive/fermion_ops.jl). Everything is checked against
-mode="ED".
+mode="ED", and the MPO algebra also against itensor_version="python".
 """
 import numpy as np
 import pytest
@@ -64,6 +66,33 @@ def test_single_fermion_operators_reproduce_ed(itensor_version):
         assert fc.vev(fc.Cdag[i]*fc.C[j]) == pytest.approx(ref, abs=1e-6)
         ov = (fc.C[i]*gs).dot(fc.C[j]*gs)
         assert ov == pytest.approx(ref, abs=1e-6)
+        assert fc.toMPO(fc.Cdag[i]*fc.C[j]).aMb(gs, gs) == pytest.approx(
+                ref, abs=1e-6)
+
+
+# On itensor_version="python" (and v3, which shares the same
+# nmultMPO(A,prime(B)) construction) toMPO(A)*toMPO(B) comes out as the
+# operator B*A, with A acting first, so the two tests below fail there.
+REVERSED = pytest.mark.xfail(strict=True, reason="python's MPO product "
+        "is B*A (pyitensor/chain.py::_mult_mpo), not A*B as for "
+        "MultiOperator and mode=\"ED\"")
+ORDER_BACKENDS = [julia_live_param(),
+                  pytest.param("python", id="python", marks=REVERSED)]
+
+
+@pytest.mark.parametrize("itensor_version", ORDER_BACKENDS)
+def test_product_of_odd_mpos_is_ordered(itensor_version):
+    """toMPO(Cdag_i)*toMPO(C_j) is Cdag_i C_j. In the reversed order the
+    two odd operators anticommute and the sign flips"""
+    fc = _fermion_chain(itensor_version)
+    gs = fc.get_gs()
+    for (i, j) in [(0, 2), (2, 0), (1, 2), (0, 3)]:
+        ref = fc.vev(fc.Cdag[i]*fc.C[j], mode="ED")
+        M = fc.toMPO(fc.Cdag[i])*fc.toMPO(fc.C[j])
+        assert M.aMb(gs, gs) == pytest.approx(ref, abs=1e-6)
+    ref = fc.vev(fc.C[0]*fc.C[1], mode="ED")
+    M = fc.toMPO(fc.C[0])*fc.toMPO(fc.C[1])
+    assert M.aMb(gs, gs) == pytest.approx(ref, abs=1e-6)
 
 
 @pytest.mark.parametrize("submode", ["KPM", "CVM"])
@@ -103,3 +132,62 @@ def test_fermion_evolution_aba_julia_matches_ed():
     _t, y = timedependent.evolution_ABA(fc, mode="DMRG", **kw)
     _te, ye = timedependent.evolution_ABA(fc, mode="ED", **kw)
     assert np.max(np.abs(np.array(y) - np.array(ye))) < 1e-5
+
+
+@pytest.mark.parametrize("itensor_version", ORDER_BACKENDS)
+def test_mpo_product_is_operator_product(itensor_version):
+    """toMPO(A)*toMPO(B) is the operator A*B, B acting first: Sp and Sz
+    on the same site do not commute, so the order shows"""
+    sc = _spin_chain(itensor_version)
+    gs = sc.get_gs()
+    for (A, B) in [(_sp(sc, 0), sc.Sz[0]), (sc.Sz[0], _sp(sc, 0)),
+                   (sc.Sx[1], sc.Sz[2]*sc.Sy[3])]:
+        ref = sc.vev(A*B, mode="ED")
+        M = sc.toMPO(A)*sc.toMPO(B)
+        assert M.aMb(gs, gs) == pytest.approx(ref, abs=1e-6)
+        assert (sc.toMPO(A)*B).aMb(gs, gs) == pytest.approx(ref, abs=1e-6)
+        assert (A*sc.toMPO(B)).aMb(gs, gs) == pytest.approx(ref, abs=1e-6)
+    assert abs(sc.vev(_sp(sc, 0)*sc.Sz[0], mode="ED")
+               - sc.vev(sc.Sz[0]*_sp(sc, 0), mode="ED")) > 1e-2
+
+
+@pytest.mark.parametrize("itensor_version", BACKENDS)
+def test_mpo_dagger_sum_and_scalars(itensor_version):
+    sc = _spin_chain(itensor_version)
+    gs = sc.get_gs()
+    w = (sc.Sx[0] + 0.5*sc.Sz[1])*gs # a second state, not the ground state
+    A = _sp(sc, 0)*sc.Sz[1]
+    B = sc.Sx[2] + 0.3j*sc.Sy[3]
+    M, N = sc.toMPO(A), sc.toMPO(B)
+    assert abs(M.aMb(gs, w)) > 1e-2
+    # dagger: <a|M^dagger|b> = conj(<b|M|a>)
+    assert M.get_dagger().aMb(gs, w) == pytest.approx(
+            np.conj(M.aMb(w, gs)), abs=1e-6)
+    assert M.get_dagger().aMb(gs, gs) == pytest.approx(
+            np.conj(M.aMb(gs, gs)), abs=1e-6)
+    assert M.get_dagger().aMb(gs, w) == pytest.approx(
+            sc.toMPO(A.get_dagger()).aMb(gs, w), abs=1e-6)
+    # sums, differences and scalars against the MultiOperator algebra
+    for (got, op) in [(M + N, A + B), (M - N, A - B), (2*M, 2*A),
+                      (M*(1j), 1j*A), (M/2, A/2), (-M, -A)]:
+        assert got.aMb(gs, w) == pytest.approx(
+                sc.toMPO(op).aMb(gs, w), abs=1e-6)
+    # aMb is the overlap with the applied state
+    assert M.aMb(gs, w) == pytest.approx(gs.dot(M*w), abs=1e-6)
+
+
+@pytest.mark.parametrize("itensor_version", BACKENDS)
+def test_mpo_trace(itensor_version):
+    """Full traces: Tr(Sz_0 Sz_0) = 2^L/4 on S=1/2, and Tr(H) against the
+    ED matrix, on a spin chain and on a fermion chain"""
+    L = 4
+    sc = _spin_chain(itensor_version, n=L)
+    assert sc.trace(sc.Sz[0]*sc.Sz[0]) == pytest.approx(2**(L-2), abs=1e-10)
+    for chain in (sc, _fermion_chain(itensor_version, n=L)):
+        H = chain.hamiltonian + 0.7*chain.hamiltonian*chain.hamiltonian
+        ref = np.trace(chain.toMPO(H, mode="ED").SO.toarray()
+                       if hasattr(chain.toMPO(H, mode="ED").SO, "toarray")
+                       else chain.toMPO(H, mode="ED").SO)
+        assert chain.trace(H) == pytest.approx(ref, abs=1e-8)
+        assert chain.toMPO(H).get_dagger().trace() == pytest.approx(
+                np.conj(ref), abs=1e-8)
