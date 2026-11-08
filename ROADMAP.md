@@ -99,10 +99,10 @@ or is simply absent) · — not meaningful for this backend/method combo.
 |---|---|---|---|---|
 | `KPM` (Kernel Polynomial Method, Chebyshev) | ✅ | ✅ | ✅ | Julia takes the shared dispatch of `dynamics.py`/`kpmdmrg.py`; only its moments are its own (`mpsjulialive/dynamics.py::kpm_moments` + `kpm.jl`), so `get_dynamical_correlator_moments`, `get_gr` and `get_distribution` work there too. |
 | `KPM` energy truncation (Holzner Sec. III-B) | ✅ | ✅ | ❌ | Net *slower* on both backends where it's measured, kept for regimes/paper-fidelity, not a default. Julia raises `NotImplementedError` naming the backends that have it. |
-| Non-Hermitian KPM (NHKPM.jl-ported coupled recursion) | ✅ | ✅ | 🟡 | Auto-selected instead of plain KPM whenever the Hamiltonian is non-Hermitian, for backends that support it; ED also has this path. Julia's recursion is `mpsjulialive/nhkpm.jl`, on the left state the NH solve keeps (`nh_left_wf`), and `nonhermitian/kpm.py` accepts the backend, but `get_dynamical_correlator` still refuses it on julia_live (a leftover guard in `dynamics.py`). |
+| Non-Hermitian KPM (NHKPM.jl-ported coupled recursion) | ✅ | ✅ | ✅ | Auto-selected instead of plain KPM whenever the Hamiltonian is non-Hermitian, for backends that support it; ED also has this path. Julia's recursion is `mpsjulialive/nhkpm.jl`, on the left state the NH solve keeps (`nh_left_wf`). |
 | `CVM` (correction-vector / conjugate-gradient resolvent) | ✅ | ✅ | ✅ | Julia's CVM needed no new primitive beyond `set_sweep_params`-equivalent bookkeeping — already backend-agnostic MPS/MPO algebra. |
 | `CVM` variational solver (`cvm_solver="variational"`, Jeckelmann dynamical DMRG, A=B^dagger) | ✅ | ✅ | ❌ | Two-site sweep minimizing `<x|M|x>-2Re<b|x>` with `M=(H-E0-omega)^2+eta^2` as a squared MPO: `pyitensor/ddmrg.py` and, on v3, `Chain::ddmrg_correction_vector` (`mpscpp3/chain_session.h`, local CG on the two-site block, solver scale `hscale_up_` applied to H, omega, eta and b alike). v2 and Julia use the global CG. Cross-checked against `"python"` and ED in `tests/test_ddmrg_v3.py`. |
-| `CVM_explicit`, `CVMimag` (analytic continuation variant) | ✅ | ✅ | 🟡 | Julia has the `applyinverse` they need (`bicgstab.jl`), but `get_dynamical_correlator` still refuses them on julia_live, and the non-Hermitian `CVM` with them (a leftover guard in `dynamics.py`). |
+| `CVM_explicit`, `CVMimag` (analytic continuation variant) | ✅ | ✅ | ✅ | Julia through the `applyinverse` of `bicgstab.jl`, which also gives the non-Hermitian `CVM`. `CVMimag`'s continuation to the real axis is ill-conditioned on every MPS backend (about 0.1 of the peak); its resolvent grid matches ED. |
 | `TDZ` (complex-time evolution correlator) | ✅ | ✅ | ✅ | |
 | `TD` (real-time evolution correlator) | ✅ | ✅ | ✅ | Dispatches through `timedependent.py`, which has its own Julia branch. |
 | `ROOTN` (root-N Krylov correction-vector) | ✅ | ✅ | ✅ | Backend-agnostic MPS algebra (`rootndmrg.py`), reached on Julia through the shared dispatch. The per-bond-sweep shortcut is confirmed impossible on both C++ and pyitensor (needs real multi-target state-averaging). |
@@ -142,12 +142,6 @@ model-specific rows:
 1. **Julia: what is still missing.** The finite-chain surface of
    `julia_live` is now close to v3 and pyitensor (the rows above). What
    it still lacks:
-   - **A leftover guard.** `get_dynamical_correlator` (`dynamics.py`,
-     the `itensor_version=="julia_live"` block before the ground-state
-     solve) still refuses `CVM_explicit`, `CVMimag`, the non-Hermitian
-     `CVM` and the non-Hermitian `KPM`, although `applyinverse`
-     (`bicgstab.jl`) and the NH-KPM recursion (`nhkpm.jl`) are there.
-     Dropping that block is what turns those rows to ✅.
    - **In progress, not merged yet:** `dmrg_method="CBE"` (maybe also
      `tevol_method="TDVP_CBE"`), a native Julia VUMPS for the infinite
      chain (`gs_method="vumps"`, `n_uc=1` first), `cvm_solver=

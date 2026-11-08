@@ -206,5 +206,5 @@ non-Hermitian KPM of [PRL 130, 100401](https://doi.org/10.1103/PhysRevLett.130.1
 and needs `E_max`, an upper bound on the spectral radius of $H$. It
 recomputes the moments at every frequency, so it is much slower. `"CVM"`,
 `"CVM_explicit"` and `"EX"` also work; the other submodes raise an error.
-Non-Hermitian KPM works with `mode="ED"`, `itensor_version=3` and
-`"python"`. See `examples/non_hermitian/nhkpm_v3_VS_ED`.
+Non-Hermitian KPM works with `mode="ED"`, `itensor_version=3`,
+`"python"` and `"julia_live"`. See `examples/non_hermitian/nhkpm_v3_VS_ED`.
