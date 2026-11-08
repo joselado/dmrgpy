@@ -19,17 +19,15 @@ def get_orbital_cotunneling(fc,es=[0.],mode="ED",
                             submode="ED",delta=1e-3,
                             iorb=0,
                             **kwargs):
-    """Get the orbital cotunneling component of the IETS"""
-    es = np.array(es) ; es = es[es>0.] # only positive energies
-    ne = len(es) # number of energies
-    
-    wf = fc.get_gs(mode=mode)
+    """Get the orbital cotunneling component of the IETS.
 
-    # create fast operators
-    Cdagup = [fc.toMPO(A,mode=mode) for A in fc.Cdagup] # create fast operator
-    Cup = [fc.toMPO(A,mode=mode) for A in fc.Cup] # create fast operator
-    Cdagdn = [fc.toMPO(A,mode=mode) for A in fc.Cdagdn] # create fast operator
-    Cdn = [fc.toMPO(A,mode=mode) for A in fc.Cdn] # create fast operator
+    The operators are MultiOperators, which every backend and every
+    submode accept. They used to be built with toMPO(), and then
+    `A01 - <A01>` raised TypeError on every DMRG backend, since an MPO
+    minus a number is not defined there."""
+    es = np.array(es) ; es = es[es>0.] # only positive energies
+
+    Cdagup, Cup, Cdagdn, Cdn = fc.Cdagup, fc.Cup, fc.Cdagdn, fc.Cdn
 
     y_neg, y_pos = 0.,0. # initialize
 
@@ -40,7 +38,7 @@ def get_orbital_cotunneling(fc,es=[0.],mode="ED",
         for Op1 in [Cdagup[iorb],Cdagdn[iorb]]: # loop over input orbital
             for Op2 in [Cup[iorbj],Cdn[iorbj]]: # loop over output orbital
                 A01 = Op1*Op2 # in and out
-                A01 = A01 - wf.dot(A01*wf) # minus the average 
+                A01 = A01 - fc.vev(A01,mode=mode) # minus the average
                 T01 = (A01,A01.get_dagger()) # positive bias operator
                 T10 = (A01.get_dagger(),A01) # negative bias operator
                 x_pos,ypt = fc.get_dynamical_correlator(name=T01,

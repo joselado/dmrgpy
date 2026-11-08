@@ -1448,3 +1448,9 @@ H, S^2, parity strings), with one exception. `multioperatortk/longoperator.py`
 chains the pieces of a long term; at the default `maxp=4` they act on
 disjoint sites and nothing moves, while at `maxp=1` the old order was wrong
 (off by 0.15 on a Jordan-Wigner string) and the new one is right.
+
+`atom.get_orbital_cotunneling(mode="DMRG")` raised `TypeError` on every
+DMRG backend, at the subtraction of the expectation value from an MPO. It
+now builds its operators as MultiOperators and runs, matching `mode="ED"`.
+The `mode="ED"` spectra do not change (to 6e-17 on the trigonal d-shell
+atom of `tests/test_atom_iets.py`).

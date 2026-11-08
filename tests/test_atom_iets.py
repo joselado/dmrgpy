@@ -128,14 +128,12 @@ def cotunneling(fc):
     above call it only with an out-of-range iorb (which raises inside
     check_iorb, before a single operator is built) and read its source
     text. That is exactly how a regression reached a release with a green
-    suite -- get_orbital_cotunneling is the one IETS entry point that
-    builds its operators with toMPO() and passes them to
-    get_dynamical_correlator's name=, and when name= resolution stopped
-    accepting already-built operators the function raised ValueError on
-    every call. get_spinflip passes MultiOperators and kept working, so
-    the numeric tests above stayed green throughout. See
-    tests/test_tompo_correlator_operators.py for the underlying contract;
-    this covers the caller that depends on it.
+    suite: get_orbital_cotunneling then built its operators with toMPO()
+    and passed them to get_dynamical_correlator's name=, and when name=
+    resolution stopped accepting already-built operators the function
+    raised ValueError on every call. It now passes MultiOperators, like
+    get_spinflip; the toMPO contract itself is pinned in
+    tests/test_tompo_correlator_operators.py.
     """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
@@ -205,3 +203,39 @@ def test_finite_T_reproduces_the_degenerate_dex_average(fc):
         _, y_T = fc.get_dynamical_correlator(name=name, es=es, mode="ED",
                                              submode="ED", delta=1e-3, T=1e-6)
     assert y_T == pytest.approx(y_dex, abs=1e-8)
+
+
+@pytest.mark.parametrize("itensor_version", ["python", 3])
+def test_orbital_cotunneling_dmrg_matches_ed(itensor_version):
+    """mode="DMRG" runs and gives the ED spectrum. It used to raise
+    TypeError at A01 - <A01>, since the operators were MPOs. Two
+    interacting orbitals with a nondegenerate ground state, so the DMRG
+    and ED ground states are the same state; CVM gives the same Lorentzian
+    as the ED Lehmann sum."""
+    from dmrgpy import cppext, fermionchain
+    if itensor_version == 3 and not cppext.available(3):
+        pytest.skip("the v3 extension is not compiled")
+    fc = fermionchain.Spinful_Fermionic_Chain(2)
+    tij = [[0.5, 1.0], [1.0, -0.5]]
+    h = 0
+    for i in range(2):
+        for j in range(2):
+            h = h + tij[i][j]*(fc.Cdagup[i]*fc.Cup[j] + fc.Cdagdn[i]*fc.Cdn[j])
+        h = h + 2.0*fc.Nup[i]*fc.Ndn[i]
+    fc.set_hamiltonian(h)
+    if itensor_version == "python":
+        fc.setup_python()
+    else:
+        fc.setup_cpp(version=3)
+    fc.maxm, fc.nsweeps = 16, 20
+    es = np.linspace(0.05, 4.0, 40)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        xe, ye = atom.get_orbital_cotunneling(fc, es=es, iorb=0, mode="ED",
+                                              submode="ED", delta=0.1)
+        xd, yd = atom.get_orbital_cotunneling(fc, es=es, iorb=0,
+                                              mode="DMRG", submode="CVM",
+                                              delta=0.1)
+    assert np.allclose(xd, xe)
+    assert np.max(np.abs(ye)) > 1e-2
+    assert np.max(np.abs(np.asarray(yd) - np.asarray(ye))) < 1e-5*np.max(np.abs(ye)) + 1e-8
