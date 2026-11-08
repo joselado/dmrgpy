@@ -250,8 +250,9 @@ class Spinful_Fermionic_Chain_Native(KondoSpectrumMixin,KondoScreeningMixin,
     backend does not rely on ITensor AutoMPO's own automatic fermionic
     sign insertion (autompo.cc's isFermionic()/fermionicTerm()), even
     though it exists and would also work here; keeping the Jordan-Wigner
-    transform in Python keeps every backend (ED, the C++ extensions, the
-    pure-Python engine, Julia) fed from the exact same term list.
+    transform in Python keeps ED, the C++ extensions and the pure-Python
+    engine fed from the exact same term list (julia_live is the
+    exception, see below).
 
     Every DMRG backend wires up a native spinful site: the HubbardSite
     of mpscpp2/ and mpscpp3/get_sites.h, pyitensor/sites/fermion.py's
