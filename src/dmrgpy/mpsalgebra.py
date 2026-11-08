@@ -20,6 +20,9 @@ def wavefunction_mode(wf,mode=None):
     reraise". applyinverse, in the same file, already tested State."""
     from .edtk.edchain import State
     if isinstance(wf,mps.MPS): actual = "DMRG"
+    # a julia_live state (mpsjulialive.mps.MPS), told by duck typing:
+    # importing that class here would start a Julia session
+    elif _is_julia(wf): actual = "DMRG"
     elif isinstance(wf,State): actual = "ED"
     else:
         raise TypeError("unsupported wavefunction type "
@@ -31,6 +34,26 @@ def wavefunction_mode(wf,mode=None):
                 +actual+" backend can consume. Rebuild the wavefunction "
                 "with that backend (e.g. get_gs(mode="+repr(mode)+")).")
     return actual
+
+
+def _is_julia(wf):
+    """True for a julia_live wavefunction (mpsjulialive.mps.MPS)"""
+    return hasattr(wf,"jlmps")
+
+
+def _julia_mps(self,jlmps):
+    """Wrap a Julia MPS as a julia_live wavefunction of this chain"""
+    from .mpsjulialive.mps import MPS as JMPS
+    return JMPS(jlmps,MBO=self)
+
+
+def _julia_mpo(self,A):
+    """The Julia MPO of an operator: a julia_live MPO object is used as it
+    is, anything else is converted to a MultiOperator and built"""
+    if hasattr(A,"jlmpo"): return A.jlmpo
+    from .multioperator import obj2MO
+    from .mpsjulialive.mpo import get_MPO
+    return get_MPO(obj2MO(A),self)
 
 
 def exponential(self,h,wf,mode=None,**kwargs):
@@ -153,6 +176,9 @@ def overlap_aMb(self,wf1,A,wf2,mode=None):
 
 def overlap_dmrg(self,wf1,wf2):
     """Compute the overlap between wavefunctions"""
+    if _is_julia(wf1):
+        from .mpsjulialive.juliasession import Main
+        return Main.overlap(wf1.jlmps,wf2.jlmps)
     return self._session.overlap(wf1.cpp_handle,wf2.cpp_handle)
 
 
@@ -160,6 +186,9 @@ def overlap_aMb_dmrg(self,wf1,A,wf2):
     """Compute the overlap between wavefunctions"""
     from .multioperator import MultiOperator
     from .multioperatortk.staticoperator import StaticOperator
+    if _is_julia(wf1): # exact <wf1|A|wf2>, mpsjulialive/mpsalgebra.jl's aMb
+        from .mpsjulialive.juliasession import Main
+        return Main.aMb(wf1.jlmps,_julia_mpo(self,A),wf2.jlmps)
     if type(A)==StaticOperator:
         return A.aMb(wf1,wf2)
 #        return wf1.dot(A*wf2) # workaround
@@ -209,8 +238,8 @@ def scale_mps(self,wf,x,mode=None):
     original formulation, "apply the operator x*Id", which is a full
     truncating MPO sweep over the whole chain just to multiply a
     wavefunction by a number; it is kept only for backends without the
-    binding (mpsjulialive's session has no scale_mps, and cvm.py does run
-    on julia_live).
+    binding. A julia_live state is scaled by mpsalgebra.jl's
+    mpstimesscalar, also a single-tensor scale.
 
     Why this matters enough to have its own primitive: measured with
     cProfile on a 16-site Heisenberg CVM run (cvm.py at cvm_maxm=40,
@@ -228,6 +257,9 @@ def scale_mps(self,wf,x,mode=None):
         # all. Without this branch the State fell straight through to
         # wf.cpp_handle below and died with an AttributeError.
         return x*wf
+    if _is_julia(wf): # single-tensor scale on julia_live too
+        from .mpsjulialive.juliasession import Main
+        return _julia_mps(self,Main.mpstimesscalar(complex(x),wf.jlmps))
     session = getattr(self,"_session",None)
     if session is not None and hasattr(session,"scale_mps"):
         handle = session.scale_mps(wf.cpp_handle,complex(x))
@@ -238,6 +270,10 @@ def scale_mps(self,wf,x,mode=None):
 
 def summps_dmrg(self,wf1,wf2):
     """Apply operator to a many body wavefunction"""
+    if _is_julia(wf1):
+        from .mpsjulialive.juliasession import Main
+        return _julia_mps(self,Main.summps(wf1.jlmps,wf2.jlmps,
+            int(self.maxm),float(self.cutoff)))
     handle = self._session.sum_mps(wf1.cpp_handle,wf2.cpp_handle)
     return mps.MPS(self,cpp_handle=handle).copy()
 
@@ -245,6 +281,10 @@ def summps_dmrg(self,wf1,wf2):
 def applyoperator_dmrg(self,A,wf):
     """Apply operator via the in-process pybind11 extension
     (mpscpp2/chain_session.h's Chain::apply_operator)."""
+    if _is_julia(wf): # the same route as A*wf on a julia_live state
+        from .mpsjulialive.juliasession import Main
+        return _julia_mps(self,Main.applyoperator(self.jlsites,
+            _julia_mpo(self,A),wf.jlmps,int(self.maxm),float(self.cutoff)))
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
@@ -456,7 +496,10 @@ def toMPO(self,H,mode="DMRG"):
 
 
 def conjugate_mps(self,wf):
-    """Apply operator to a many body wavefunction"""
+    """Return the complex conjugate of a wavefunction"""
+    if _is_julia(wf):
+        from .mpsjulialive.juliasession import Main
+        return _julia_mps(self,Main.conj_mps(wf.jlmps))
     handle = self._session.conjugate(wf.cpp_handle)
     return mps.MPS(self,cpp_handle=handle).copy()
 

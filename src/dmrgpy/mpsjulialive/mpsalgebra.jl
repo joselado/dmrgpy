@@ -1,7 +1,18 @@
 
-function aMb(a,M,b,maxdim,cutoff; alg = "densitymatrix")
-	iden_op = identity_mpo(sites) # identity operator
-	return contract(a,M,b)
+# <a|M|b>, contracted exactly: no MPO-MPS product is formed and nothing
+# is truncated. inner() conjugates its first argument. The primed bra is
+# the form ITensorMPS asks for, with M carrying primes 0 (in) and 1 (out).
+function aMb(a,M,b)
+	return inner(a',M,b)
+end
+
+
+# The complex conjugate of every site tensor. With dense indices dag is
+# conj; with QN indices it also flips the arrows, which is what a bra
+# needs. inner(conj_mps(x),y) is then the bilinear sum_i x_i y_i, the
+# product pyitensor's and mpscpp3's BiCGSTAB use.
+function conj_mps(psi)
+	return dag(psi)
 end
 
 function applyoperator(sites,A,psi0,maxdim,cutoff; alg = "densitymatrix")
