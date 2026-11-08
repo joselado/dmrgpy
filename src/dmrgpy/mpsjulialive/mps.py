@@ -113,7 +113,12 @@ class MPS():
 
 
 def random_mps(self):
-    jlmps = Mainjl.random_state(self.jlsites)
+    # inside a conserved sector ITensors draws a random QN MPS only around
+    # an in-sector product state (sector.py), at a small link dimension so
+    # that it is not that product state itself
+    from . import sector
+    jlmps = sector.start_state(self,max(1,min(int(self.maxm),4)))
+    if jlmps is None: jlmps = Mainjl.random_state(self.jlsites)
     return MPS(jlmps,MBO=self)
 
 

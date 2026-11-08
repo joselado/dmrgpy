@@ -433,6 +433,22 @@ def test_julia_live_conserving_observables_work_and_others_raise(version):
 
 
 @pytest.mark.parametrize("version", JL)
+def test_julia_live_random_state_is_inside_the_sector(version):
+    """random_state() is the witness of is_hermitian()'s probe, so it has to
+    work on the QN site set, where ITensors needs an in-sector state"""
+    sc, h, sz = heisenberg_chain(6)
+    _jl(sc)
+    sc.set_hamiltonian(h)
+    sc.set_conserved_sector(Sz=2)
+    for _ in range(2):
+        wf = sc.random_state()
+        assert wf.dot(wf).real == pytest.approx(1.0, abs=1e-8)
+        assert wf.dot(sz * wf).real == pytest.approx(1.0, abs=1e-8)
+    assert sc.is_hermitian(h)
+    assert not sc.is_hermitian(h + 1j * sc.Sz[0])
+
+
+@pytest.mark.parametrize("version", JL)
 def test_julia_live_non_conserving_hamiltonian_is_rejected(version):
     n = 6
     sc = _jl(spinchain.Spin_Chain([2] * n))
