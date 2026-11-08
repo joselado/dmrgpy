@@ -253,15 +253,15 @@ class Spinful_Fermionic_Chain_Native(KondoSpectrumMixin,KondoScreeningMixin,
     transform in Python keeps every backend (ED, the C++ extensions, the
     pure-Python engine, Julia) fed from the exact same term list.
 
-    itensor_version=2, 3 and "python" wire up a native spinful site on
-    the DMRG side (the HubbardSite of mpscpp2/ and mpscpp3/get_sites.h,
-    pyitensor/sites/fermion.py's ElectronSite);
-    mpsjulialive (itensor_version="julia_live") does not implement
-    one. A DMRG
-    call with julia_live simply is not available for this
-    class -- unlike an uncompiled C++ extension, there is no automatic
-    ED fallback for a site type mode.py doesn't know how to build, so
-    such calls raise from mpsjulialive's own site-type dispatch. Cross-checking against mode="ED" always works (see
+    Every DMRG backend wires up a native spinful site: the HubbardSite
+    of mpscpp2/ and mpscpp3/get_sites.h, pyitensor/sites/fermion.py's
+    ElectronSite, and ITensors.jl's own "Electron" site on
+    itensor_version="julia_live" (mpsjulialive/sites.jl, same basis
+    order Emp, Up, Dn, UpDn). The Julia backend receives the raw
+    Cup/Cdagup/Cdn/Cdagdn names (mpsjulialive/mpo.py sends MO2list
+    without the Jordan-Wigner transform), and ITensorMPS threads the
+    strings itself, with the same mode ordering (up before down on a
+    site). Cross-checking against mode="ED" always works (see
     get_ED_obj() below): ED never builds tensor-network sites at all, it
     diagonalizes a plain occupation-number Fock space directly.
 
