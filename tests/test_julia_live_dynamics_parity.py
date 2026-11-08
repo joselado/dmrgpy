@@ -312,3 +312,31 @@ def test_clone_bandwidth_and_thermal_state():
         wf = tc.get_gs()
         out[mode] = (wf.dot(h * wf) / wf.dot(wf)).real
     assert out[None] == pytest.approx(out["ED"], abs=1e-4)
+
+
+# ---------------------------------------------- fermion Green's function
+
+def test_get_gr_against_python():
+    """fermionchain.get_gr calls kpmdmrg.get_dynamical_correlator
+    directly, with name="cdc"/"ccd"; it needs a parity-odd MPO for a
+    single C on julia_live."""
+    from dmrgpy import fermionchain
+    out = {}
+    es = np.linspace(-2.0, 2.0, 41)
+    for version in (JULIA, "python"):
+        fc = fermionchain.Fermionic_Chain(4, itensor_version=version)
+        fc.maxm = 30
+        h = sum(fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i]
+                for i in range(3))
+        fc.set_hamiltonian(h + 0.1 * fc.N[0])
+        if version == JULIA:
+            from dmrgpy.mpsjulialive.mpo import MPO
+            try:
+                MPO(fc.C[1], MBO=fc) * fc.get_gs()
+            except Exception as exc:
+                pytest.skip("needs parity-odd MPOs on julia_live "
+                            "(package B): %s" % str(exc)[:80])
+        x, y = fc.get_gr(delta=0.1, es=es, i=1, j=1)
+        out[version] = np.asarray(y)
+    peak = np.max(np.abs(out["python"]))
+    assert np.max(np.abs(out[JULIA] - out["python"])) < 5e-2 * peak
