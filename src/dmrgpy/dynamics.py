@@ -99,17 +99,15 @@ and "maxent" are DMRG-only, and "TASK" (taskdmrg.py, the tangent-space
 Krylov poles of arXiv:2510.07279) is on itensor_version="python" and 3
 only.
 
-itensor_version="julia_live" is a third case and is only partly covered
-by the statement above. Its CVM/TDZ/EX/maxent go through the very same
-shared modules as every other backend (cvm.py, tdz.py, dcex.py,
-distribution.py -- so they inherit whatever those return, the 2026-09
-fixes included), but its KPM is its own implementation
-(mpsjulialive/dynamics.py::_kpm_dynamical_correlator plus kpm.jl). Its
-moment count is the shared one and, since the 2026-09-24 audit's finding
-4, cut to exactly n like every other DMRG route; on the band-centre pole
-of two decoupled dimers it matches mode="ED" to better than 1e-6 at the
-reconstruction's own grid points (tests/test_audit_2026_09_24_kpm.py).
-Nothing wider than that has been measured on it.
+itensor_version="julia_live" takes the same dispatch as the session
+backends, and so the same shared submode modules (timedependent.py,
+rootndmrg.py, cvm.py, tdz.py, dcex.py, distribution.py, taskdmrg.py,
+sectordc.py, nonhermitian/), each of which refuses on its own a backend
+it does not support yet. Only its KPM moments are its own
+(mpsjulialive/dynamics.py::kpm_moments plus kpm.jl), reached through
+kpmdmrg.dynamical_correlator_moments, so the moment count, the cut to
+exactly n and kpm_extrapolate are the shared ones; the window's band
+edges come from solves on a clone, as on the other backends.
 
 THE TWO REAL-TIME ROUTES: submode="TD" and submode="TDZ"
 --------------------------------------------------------
@@ -195,132 +193,96 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
         raise ValueError(
             "get_dynamical_correlator: unrecognized submode "+repr(submode)
             +"; expected one of "+", ".join(SUBMODES))
-    if self.itensor_version in (2,3,"python"): # C++ or pure-Python
-        # the chain's current ground state, on the Python side and on the
-        # session alike, and the Hamiltonian on the session: free on a
-        # solved chain, the hand-off of a state set_gs()/set_initial_wf()
-        # injected, a solve otherwise (groundstate.ground_state_on_session)
-        from .groundstate import ground_state_on_session
-        if submode=="TASK": # before any solve, see taskdmrg._check_backend
-            from . import taskdmrg
-            taskdmrg._check_backend(self)
-        hermitian = self.is_hermitian(self.hamiltonian)
-        # The KPM route's own argument checks go ahead of the ground state,
-        # and SECTOR, which solves both its sectors on a clone and never
-        # reads the caller's state, makes no solve here at all: with the
-        # solve first, a malformed KPM call paid a full ground-state solve
-        # before raising, and the first SECTOR call one it never read
-        # (2026-09-24c audit, finding 11).
-        if submode=="KPM" and hermitian: kpmdmrg.check_kpm_call(self,**kwargs)
-        if submode!="SECTOR": ground_state_on_session(self)
-        if not hermitian: # non Hermitian Hamiltonian
-            # Per-submode, not wholesale. This check used to run before the
-            # dispatch below and return the explicit resolvent for
-            # *everything* except "KPM", so on a non-Hermitian Hamiltonian
-            # the caller's submode= was a no-op: "EX", "maxent", "ROOTN",
-            # "TD", "CVM" and "CVM_explicit" all returned the same curve
-            # (bit-identical on the ED path). The same substitution reached
-            # mode="ED", submode="ED" -- i.e. the exact Lehmann reference a
-            # user would cross-validate against quietly became the
-            # approximate resolvent and agreed with itself. The julia_live
-            # branch below already fixed this shape for its own backend;
-            # this is the same fix for (2,3,"python"), see also
-            # edtk/dynamics.py.
-            if submode=="KPM": # non-Hermitian KPM
-                from .nonhermitian.kpm import dynamical_correlator_nhkpm
-                return dynamical_correlator_nhkpm(self,**kwargs)
-            elif submode in ("CVM","CVM_explicit"):
-                # not a substitution: this *is* the non-Hermitian
-                # implementation of the correction-vector resolvent both
-                # of these compute
-                from .nonhermitian.dynamics import dynamical_correlator_non_hermitian
-                return dynamical_correlator_non_hermitian(self,**kwargs)
-            elif submode in ("EX","maxent"):
-                pass # backend-agnostic, non-Hermitian-capable: fall through
-            else:
-                raise NotImplementedError(
-                    "get_dynamical_correlator: submode=%r assumes a "
-                    "Hermitian Hamiltonian and has no non-Hermitian "
-                    "implementation (KPM/CVM/CVM_explicit do, and EX/maxent "
-                    "are non-Hermitian-capable already). It used to return "
-                    "the CVM_explicit resolvent instead, silently."%submode)
-        if submode=="KPM": # KPM method
-            return kpmdmrg.get_dynamical_correlator(self,**kwargs)
-        elif submode=="TD": # time dependent
-            return timedependent.dynamical_correlator(self,**kwargs)
-        elif submode=="TDZ": # complex-time evolution (arXiv:2311.10909)
-            return tdz.dynamical_correlator_tdz(self,**kwargs)
-        elif submode=="CVM_explicit": # CVM mode
-            return cvm.dynamical_correlator_cvm_explicit(self,**kwargs)
-        elif submode=="CVM": # CVM mode
-            return cvm.dynamical_correlator(self,**kwargs)
-        elif submode=="CVMimag": # CVM mode
-            return cvm.dynamical_correlator_analytic_continuation(self,**kwargs)
-        elif submode=="ROOTN": # root-N Krylov correction-vector
-            return rootndmrg.dynamical_correlator(self,**kwargs)
-        elif submode=="EX": # EX mode
-            return dcex.dynamical_correlator(self,**kwargs)
-        elif submode=="TASK": # tangent-space Krylov (arXiv:2510.07279)
-            from . import taskdmrg
-            return taskdmrg.dynamical_correlator(self,**kwargs)
-        elif submode=="SECTOR": # sector-resolved Lehmann sum
-            # itensor_version=2 reaches here (this branch admits 2, 3 and
-            # "python") but has no quantum numbers at all; sectordc's own
-            # _check_backend says so, naming the two backends that do.
-            from . import sectordc
-            return sectordc.dynamical_correlator(self,**kwargs)
-        elif submode=="maxent": # Max ent mode
-            from .distribution import dynamical_correlator_positive_defined
-            return dynamical_correlator_positive_defined(self,**kwargs)
+    if self.itensor_version not in (2,3,"python","julia_live"):
+        raise ValueError("get_dynamical_correlator: unknown itensor_version %r" % self.itensor_version)
+    # the chain's current ground state, on the Python side and on the
+    # session alike, and the Hamiltonian on the session: free on a
+    # solved chain, the hand-off of a state set_gs()/set_initial_wf()
+    # injected, a solve otherwise (groundstate.ground_state_on_session).
+    # julia_live has no session to hand anything to, so there it is the
+    # chain's own get_gs(), which takes an injected state as it is.
+    from .groundstate import ground_state_on_session
+    if submode=="TASK": # before any solve, see taskdmrg._check_backend
+        from . import taskdmrg
+        taskdmrg._check_backend(self)
+    hermitian = self.is_hermitian(self.hamiltonian)
+    # The KPM route's own argument checks go ahead of the ground state,
+    # and SECTOR, which solves both its sectors on a clone and never
+    # reads the caller's state, makes no solve here at all: with the
+    # solve first, a malformed KPM call paid a full ground-state solve
+    # before raising, and the first SECTOR call one it never read
+    # (2026-09-24c audit, finding 11).
+    if submode=="KPM" and hermitian: kpmdmrg.check_kpm_call(self,**kwargs)
+    if submode!="SECTOR":
+        if self.itensor_version=="julia_live": self.get_gs()
+        else: ground_state_on_session(self)
+    if not hermitian: # non Hermitian Hamiltonian
+        # Per-submode, not wholesale. This check used to run before the
+        # dispatch below and return the explicit resolvent for
+        # *everything* except "KPM", so on a non-Hermitian Hamiltonian
+        # the caller's submode= was a no-op: "EX", "maxent", "ROOTN",
+        # "TD", "CVM" and "CVM_explicit" all returned the same curve
+        # (bit-identical on the ED path). The same substitution reached
+        # mode="ED", submode="ED" -- i.e. the exact Lehmann reference a
+        # user would cross-validate against quietly became the
+        # approximate resolvent and agreed with itself. See also
+        # edtk/dynamics.py. On julia_live the two non-Hermitian
+        # functions below refuse on their own while that backend lacks
+        # what they need (NH-KPM moments, applyinverse).
+        if submode=="KPM": # non-Hermitian KPM
+            from .nonhermitian.kpm import dynamical_correlator_nhkpm
+            return dynamical_correlator_nhkpm(self,**kwargs)
+        elif submode in ("CVM","CVM_explicit"):
+            # not a substitution: this *is* the non-Hermitian
+            # implementation of the correction-vector resolvent both
+            # of these compute
+            from .nonhermitian.dynamics import dynamical_correlator_non_hermitian
+            return dynamical_correlator_non_hermitian(self,**kwargs)
+        elif submode in ("EX","maxent"):
+            pass # backend-agnostic, non-Hermitian-capable: fall through
         else:
-            # a bare `raise` here used to surface as the thoroughly
-            # unhelpful "RuntimeError: No active exception to reraise"
-            raise ValueError(
-                "get_dynamical_correlator: unrecognized submode %r; "
-                "expected one of KPM, TD, TDZ, CVM, CVM_explicit, CVMimag, "
-                "ROOTN, EX, SECTOR, TASK, maxent"%submode)
-    elif self.itensor_version=="julia_live": # Julia version
-        # Only KPM/CVM/TDZ assume a Hermitian Hamiltonian (Chebyshev
-        # spectrum-in-[-1,1], resolvent CG solve, and the TDZ damping
-        # mechanism respectively) -- EX and maxent are already
-        # backend-agnostic MultiOperator/MPS algebra with their own
-        # working non-Hermitian path (dcex.py -> excited.py's
-        # excited_states_non_hermitian, not itensor_version-gated) and
-        # must not be blocked here. This check used to run before submode
-        # dispatch entirely, which also rejected EX/maxent even though
-        # they work fine -- confirmed directly, this was blocking a
-        # working code path.
-        if submode=="TASK":
-            from . import taskdmrg
-            taskdmrg._check_backend(self)
-        if submode=="SECTOR":
-            # No quantum numbers on this backend at all, so no sectors:
-            # say that, rather than letting mpsjulialive fail on an
-            # unrecognized submode several frames deeper.
             raise NotImplementedError(
-                "get_dynamical_correlator: submode=\"SECTOR\" needs "
-                "conserved-sector support, which itensor_version="
-                "'julia_live' does not have -- use itensor_version=3 or "
-                "itensor_version=\"python\"")
-        if submode in ("KPM","CVM","TDZ") and not self.is_hermitian(self.hamiltonian):
-            # unlike the (2,3,"python") branch above, there is no
-            # non-Hermitian route to fall back to here for these
-            # submodes: dynamical_correlator_non_hermitian ultimately
-            # needs applyinverse_dmrg(), which is self._session-only
-            # (mpsalgebra.py) and also dispatches on type(wf)==mps.MPS --
-            # the *top-level* MPS class, not mpsjulialive.mps.MPS -- so it
-            # would fail regardless. Silently running the Hermitian-only
-            # KPM/CVM/TDZ math on a non-Hermitian Hamiltonian produces
-            # numerically wrong output with no error; raise instead.
-            raise NotImplementedError(
-                "get_dynamical_correlator: itensor_version='julia_live' "
-                "does not implement non-Hermitian Hamiltonians for "
-                "submode=%r (KPM/CVM/TDZ all assume a Hermitian one); use "
-                "submode='EX'/'maxent', or itensor_version in "
-                "(2,3,'python') instead"%submode)
-        from .mpsjulialive import dynamics as dynamicsjl
-        return dynamicsjl.get_dynamical_correlator(self,submode=submode,**kwargs)
-    else: raise ValueError("get_dynamical_correlator: unknown itensor_version %r" % self.itensor_version)
+                "get_dynamical_correlator: submode=%r assumes a "
+                "Hermitian Hamiltonian and has no non-Hermitian "
+                "implementation (KPM/CVM/CVM_explicit do, and EX/maxent "
+                "are non-Hermitian-capable already). It used to return "
+                "the CVM_explicit resolvent instead, silently."%submode)
+    if submode=="KPM": # KPM method
+        return kpmdmrg.get_dynamical_correlator(self,**kwargs)
+    elif submode=="TD": # time dependent
+        return timedependent.dynamical_correlator(self,**kwargs)
+    elif submode=="TDZ": # complex-time evolution (arXiv:2311.10909)
+        return tdz.dynamical_correlator_tdz(self,**kwargs)
+    elif submode=="CVM_explicit": # CVM mode
+        return cvm.dynamical_correlator_cvm_explicit(self,**kwargs)
+    elif submode=="CVM": # CVM mode
+        return cvm.dynamical_correlator(self,**kwargs)
+    elif submode=="CVMimag": # CVM mode
+        return cvm.dynamical_correlator_analytic_continuation(self,**kwargs)
+    elif submode=="ROOTN": # root-N Krylov correction-vector
+        return rootndmrg.dynamical_correlator(self,**kwargs)
+    elif submode=="EX": # EX mode
+        return dcex.dynamical_correlator(self,**kwargs)
+    elif submode=="TASK": # tangent-space Krylov (arXiv:2510.07279)
+        from . import taskdmrg
+        return taskdmrg.dynamical_correlator(self,**kwargs)
+    elif submode=="SECTOR": # sector-resolved Lehmann sum
+        # itensor_version=2 (no quantum numbers at all) and any backend
+        # without sector support reach here; sectordc's own
+        # _check_backend says so, naming the backends that do.
+        from . import sectordc
+        return sectordc.dynamical_correlator(self,**kwargs)
+    elif submode=="maxent": # Max ent mode
+        from .distribution import dynamical_correlator_positive_defined
+        return dynamical_correlator_positive_defined(self,**kwargs)
+    else:
+        # a bare `raise` here used to surface as the thoroughly
+        # unhelpful "RuntimeError: No active exception to reraise"
+        raise ValueError(
+            "get_dynamical_correlator: unrecognized submode %r; "
+            "expected one of KPM, TD, TDZ, CVM, CVM_explicit, CVMimag, "
+            "ROOTN, EX, SECTOR, TASK, maxent"%submode)
+
 
 
 

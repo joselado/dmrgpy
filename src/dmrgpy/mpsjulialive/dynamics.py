@@ -9,58 +9,29 @@ def _max_energy_bound(self,H):
     """Variational upper bound on H's spectrum, from a reduced-effort
     ground-state search on -H (mirrors pyitensor.chain.Chain's own
     _maximum_energy: a Chebyshev-window bound, never a physical result).
-    Runs in place on `self` and restores its Hamiltonian/ground-state
-    cache afterward -- julia_live has no deepcopy-safe clone() for its
-    live Julia session handles (self.jlsites/self.wf0.jlmps aren't part
-    of Python's copy protocol, see manybodychain.py's __deepcopy__), so
-    this can't go through bandwidth()/lowest_eigenvalue() the way the
-    C++/pure-Python backends do.
 
-    The restore runs in a finally block: without it, a self.gs_energy()
-    failure on the negated Hamiltonian (a real possibility for a live
-    juliacall session -- e.g. a JuliaError from the DMRG call) would
-    propagate with self.hamiltonian still pointing at -H and
-    self.maxm/self.nsweeps still clamped down, corrupting every later
-    call on this chain object, not just this one.
-
-    The solver key and the lower-edge mark are put back here too
-    (groundstate.solve_marks()): the -H solve records its own, under the
-    clamped maxm/nsweeps, and the caller's restore of wf0/e0 would
-    otherwise leave the state looking stale at the chain's parameters."""
-    from ..groundstate import solve_marks,restore_solve_marks
-    marks = solve_marks(self)
-    maxm0,nsweeps0 = self.maxm,self.nsweeps
-    self.maxm = min(self.maxm,20)
-    self.nsweeps = min(self.nsweeps,5)
-    self.restart()
-    self.set_hamiltonian(-1*H,restart=False)
-    try:
-        emax = -self.gs_energy()
-    finally:
-        self.maxm,self.nsweeps = maxm0,nsweeps0
-        self.restart()
-        self.set_hamiltonian(H,restart=False)
-        restore_solve_marks(self,marks)
-    return emax
+    Runs on a clone, the bandwidth()/lowest_eigenvalue() path of the other
+    backends, so the chain's own state, Hamiltonian and solve marks are
+    never touched: a Julia deepcopy keeps the ITensor Index ids, so the
+    clone's sites are the chain's. It used to run in place on the chain
+    and put everything back afterwards; the solve is the same one (a cold
+    start at min(maxm,20) and min(nsweeps,5)), so the bound is unchanged."""
+    mbc = self.clone()
+    mbc.maxm = min(self.maxm,20)
+    mbc.nsweeps = min(self.nsweeps,5)
+    mbc.set_hamiltonian(-1*H) # restart=True: a cold start
+    return -mbc.gs_energy()
 
 
 def _min_energy(self,H):
     """H's lower band edge from a solve at the chain's own parameters, for
     the Chebyshev window when the chain's e0 is not marked as that edge
     (groundstate.mark_lower_edge()): a state set with set_gs() or
-    set_initial_wf(), or gs_energy_generalized()'s. Runs in place on `self` like
-    _max_energy_bound() above, and leaves the same restore to the caller,
-    apart from the solver key and the lower-edge mark, put back here."""
-    from ..groundstate import solve_marks,restore_solve_marks
-    marks = solve_marks(self)
-    self.restart()
-    self.set_hamiltonian(H,restart=False)
-    try:
-        return self.gs_energy()
-    finally:
-        self.restart()
-        self.set_hamiltonian(H,restart=False)
-        restore_solve_marks(self,marks)
+    set_initial_wf(), or gs_energy_generalized()'s. On a clone, like
+    _max_energy_bound() above, so the chain's state stays as it is."""
+    mbc = self.clone()
+    mbc.set_hamiltonian(H) # restart=True: a cold start
+    return mbc.gs_energy()
 
 
 def _same_mps(vi,vj,maxm,cutoff):
@@ -97,101 +68,28 @@ def _kpm_moments_accelerated(jlmpo,vi,n,kpmmaxm,kpmcutoff):
     return list(out)
 
 
-def get_dynamical_correlator(self,submode="KPM",**kwargs):
-    """Dispatch a dynamical correlator computation on the Julia backend.
-    submode="KPM" (see docs/development.md §4.6), submode="CVM" and
-    submode="TDZ" are implemented; other submodes (TD -- use
-    timedependent.dynamical_correlator/evolution_DC instead, which
-    already dispatch to julia_live -- EX, maxent, ...) are only
-    implemented for the C++/pure-Python backends (dynamics.py).
+def kpm_moments(self,mi,mj,delta,n_scale):
+    """The KPM moments <mj|T_k(H_scaled)|mi> of the chain's current state
+    on julia_live, what the session backends' kpm_dynamical_correlator
+    returns: (moments,emin,emax,scale,n), with the moments not yet cut to
+    the calibrated count n (kpmdmrg.dynamical_correlator_moments does the
+    cut and kpm_extrapolate for every backend). mi=B and mj=A^dagger, as
+    kpmdmrg passes them; delta is the effective resolution. The ground
+    state is read, not solved, so the caller has it current already.
 
-    Deliberately takes submode + **kwargs only (mirroring the top-level
-    dynamics.py::get_dynamical_correlator's own signature), not named
-    parameters like name=/es=/delta=: an earlier version of this function
-    declared those as its own named parameters with KPM-flavored
-    defaults, which silently captured the caller's es=/name=/delta=
-    kwargs out of **kwargs before they could reach cvm.dynamical_correlator
-    (whose own, different defaults would then be used unless the caller's
-    values happened to be explicitly re-forwarded) -- confirmed directly,
-    this caused CVM to silently run on a totally different frequency grid
-    than the one requested. Each submode's own function applies its own
-    defaults now, exactly as the C++/pure-Python dispatch already does."""
-    if submode=="CVM":
-        # cvm.py's CG solve is already backend-agnostic MPS/MPO algebra
-        # (self.toMPO()/MPS +,-,scalar-*,.dot()), which already works for
-        # julia_live -- the only thing that needed fixing was its own
-        # self._session.set_sweep_params(...) calls, see
-        # cvm.py::_set_cvm_sweep_params.
-        from .. import cvm
-        return cvm.dynamical_correlator(self,**kwargs)
-    if submode=="TDZ":
-        # tdz.py is already backend-agnostic MPS/MPO algebra too, apart
-        # from one primitive (a single complex-time TDVP step); see
-        # tdz.py::_advance_complex_time_step's julia_live branch and
-        # mpsjulialive/timedependent.py::advance_complex_time_step.
-        from .. import tdz
-        return tdz.dynamical_correlator_tdz(self,**kwargs)
-    if submode=="EX":
-        # dcex.py needs no julia_live-specific code at all: it only calls
-        # self.get_excited_states() (already fixed, see excited.py) and
-        # generic MultiOperator/MPS algebra (.dot(), A*wf) plus plain
-        # numpy/scipy (eigh) from there on.
-        from .. import dcex
-        return dcex.dynamical_correlator(self,**kwargs)
-    if submode=="maxent":
-        # distribution.py's maxent path is also already backend-agnostic
-        # (vev.py::power_vev only uses MultiOperator*MPS/.dot(), then
-        # pure numpy/scipy maxent reconstruction) -- needs no
-        # julia_live-specific code either.
-        from ..distribution import dynamical_correlator_positive_defined
-        return dynamical_correlator_positive_defined(self,**kwargs)
-    if submode!="KPM":
-        raise NotImplementedError(
-            "itensor_version='julia_live' only implements submode='KPM'/"
-            "'CVM'/'TDZ'/'EX'/'maxent' for get_dynamical_correlator, "
-            "got submode=%r"%submode)
-    return _kpm_dynamical_correlator(self,**kwargs)
-
-
-def _kpm_dynamical_correlator(self,n=1000,
-             name=None,delta=1e-1,kernel="jackson",
-             es=np.linspace(-1.,10,500),deconvolve=None,
-             hodc_order=6,hodc_eta=None,
-             **kwargs):
-    """The submode="KPM" implementation, factored out of
-    get_dynamical_correlator so its own named-parameter defaults can't
-    shadow another submode's kwargs (see that function's docstring).
-    Mirrors kpmdmrg.py::get_dynamical_correlator (the C++/pure-Python KPM
-    entry point) and its Chebyshev-moment post-processing exactly, but
-    computes the moments with the mpsjulialive Julia MPS/MPO primitives
-    instead of self._session.kpm_dynamical_correlator (julia_live has no
-    such session object)."""
-    if delta<0.0: raise ValueError("delta must be >= 0, got "+repr(delta))
-    # validated before the ground state and the band-edge search, the
-    # same check kpmdmrg.py makes ahead of its session calls: this route
-    # used to round a non-integer down silently through int() (finding 5
-    # of docs/audit_2026_09_24_hole_hunt.md)
-    n_scale = kpm.validate_kpm_n_scale(self.kpm_n_scale)
-    if self.kpm_extrapolate: delta = delta*self.kpm_extrapolate_factor
-    if type(name[0])!=multioperator.MultiOperator: raise ValueError("name must be a pair of MultiOperators, got "+repr(type(name[0])))
-    mi = name[1] # first operator
-    mj = name[0].get_dagger() # second operator
+    The moments are computed with kpm.jl's native recursions
+    (kpm_moments_full, or kpm_moments_accelerated when B|GS> and
+    A^dagger|GS> are the same vector and kpm_accelerate is on)."""
     H = self.hamiltonian
-    e0 = self.gs_energy() # compute ground state (also sets self.e0/self.wf0)
+    e0 = self.e0
     wf0 = self.wf0
     # The state is measured from its own energy e0, and the window takes
     # its lower edge from e0 only when a plain solve marked e0 as H's lower
     # edge (groundstate.mark_lower_edge), and from a solve of its own
     # otherwise, as the session backends do (2026-09-24c audit, finding 1).
-    # The test used to be the other way round, e0 unless the state was
-    # supplied, so after gs_energy_generalized() the edge was lambda, and
-    # a metric putting lambda above E0 raised (2026-09-25b, finding 10).
-    from ..groundstate import state_supplied,e0_is_lower_edge
-    supplied = state_supplied(self)
+    from ..groundstate import e0_is_lower_edge
     emin = e0 if e0_is_lower_edge(self) else _min_energy(self,H)
     emax = _max_energy_bound(self,H)
-    self.wf0,self.e0,self.computed_gs = wf0,e0,True # restore GS cache
-    self._gs_supplied = supplied # restart() above cleared it
     shift = -(emin+emax)/2.0
     scale = 1.0/((emax-emin)*self.kpm_scale)
     # the shared calibrated moment count, see
@@ -212,18 +110,40 @@ def _kpm_dynamical_correlator(self,n=1000,
     else:
         moments = _kpm_moments_full(Hscaled.jlmpo,psi1,psi2,
                 n,self.kpmmaxm,self.kpmcutoff)
-    # exactly the calibrated n: kpm.jl's loops return 2+n (2+2*(n//2)
-    # accelerated), and the Jackson kernel takes its N from len(mus), so
-    # the extra moments made the line narrower than ED's by about 2/n.
-    # Cut before kpm_extrapolate, as in kpmdmrg.dynamical_correlator_
-    # moments (finding 4 of docs/audit_2026_09_24_hole_hunt.md)
-    mus = np.array(moments)[:n]
-    if self.kpm_extrapolate:
-        mus = kpm.extrapolate_moments(mus,fac=self.kpm_extrapolate_factor,
-                extrapolation_mode=self.kpm_extrapolate_mode)
-    # the reconstruction is backend-independent (it only ever sees the
-    # moments), so it is shared with kpmdmrg.py rather than duplicated --
-    # which is also what gives julia_live kernel="hodc" for free
+    return np.array(moments),emin,emax,scale,n
+
+
+def general_kpm_moments(self,X,wfa,wfb,num_p,accelerate):
+    """Chebyshev moments <wfb|T_k(X)|wfa> of an already rescaled operator
+    X, the julia_live counterpart of the sessions' general_kpm: the same
+    kpm.jl recursions, at the chain's maxm and cutoff, the accelerated
+    one when accelerate is on and the two states are the same vector."""
+    from .mpo import MPO
+    from .juliasession import Main as Mainjl
+    Xop = MPO(X,MBO=self)
+    vi,vj = wfa.jlmps,wfb.jlmps
+    if accelerate and _same_mps(vi,vj,self.maxm,self.cutoff):
+        out = _kpm_moments_accelerated(Xop.jlmpo,vi,int(num_p),
+                self.maxm,self.cutoff)
+    else:
+        out = _kpm_moments_full(Xop.jlmpo,vi,vj,int(num_p),
+                self.maxm,self.cutoff)
+    return np.array(out)
+
+
+def kpm_dynamical_correlator(self,name=None,delta=1e-1,kernel="jackson",
+        es=np.linspace(-1.,10,500),hodc_order=6,hodc_eta=None,**kwargs):
+    """submode="KPM" on julia_live: kpmdmrg.dynamical_correlator_moments,
+    whose julia_live branch calls kpm_moments() above, then the shared
+    reconstruction. **kwargs goes to dynamical_correlator_moments, which
+    takes i=/j= and raises TypeError on anything else. Kept here, rather
+    than in kpmdmrg.get_dynamical_correlator, so that the reconstruction
+    stays this module's dynamical_correlator_from_moments."""
+    from ..kpmdmrg import dynamical_correlator_moments
+    mus,emin,emax,scale,n,delta = dynamical_correlator_moments(self,
+            name=name,delta=delta,**kwargs)
+    # the frequency origin is the measured state's own energy, as on the
+    # session backends (2026-09-24c audit, finding 1)
     return dynamical_correlator_from_moments(mus,emin,emax,scale,n,es,
             kernel=kernel,delta=delta,
-            hodc_order=hodc_order,hodc_eta=hodc_eta,origin=e0)
+            hodc_order=hodc_order,hodc_eta=hodc_eta,origin=self.e0)
