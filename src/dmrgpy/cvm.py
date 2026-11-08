@@ -95,11 +95,16 @@ def dynamical_correlator_ddmrg(self,A,B,es=None,delta=1e-1):
     variational sweep is non-increasing in W from *any* start -- a closer
     start can only reduce the number of sweeps needed.
     """
-    self.get_gs() # ensure the ground state (and self.e0) exist
+    wf0 = self.get_gs() # ensure the ground state (and self.e0) exist
     if self.itensor_version=="julia_live": # no session: ddmrg.jl
+        # No _cvm_sweep_params here: on julia_live it sets self.maxm, which
+        # is part of the solved state's solver key, so any get_gs() inside
+        # would re-solve at cvm_maxm and overwrite wf0/e0. Nothing in this
+        # route reads self.maxm (cvm_maxm, cutoff and mpomaxm go to
+        # ddmrg.jl explicitly), so the state is taken once, here.
         from .mpsjulialive import ddmrg as ddmrgjl
-        with _cvm_sweep_params(self):
-            return ddmrgjl.dynamical_correlator_ddmrg(self,A,B,es,delta)
+        return ddmrgjl.dynamical_correlator_ddmrg(self,A,B,es,delta,
+                                                  wf0=wf0,e0=self.e0)
     out,x = [],None
     with _cvm_sweep_params(self):
         for e in es:

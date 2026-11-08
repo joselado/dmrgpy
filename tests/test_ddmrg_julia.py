@@ -53,11 +53,12 @@ def julia_calls(monkeypatch):
     Julia route from the CG one (no backend substitution)."""
     from dmrgpy.mpsjulialive import ddmrg as ddmrgjl
     calls = []
-    real = ddmrgjl.Mainjl.ddmrg_correction_vector
+    main = ddmrgjl.Mainjl # the real Julia Main, captured before the patch
+    real = main.ddmrg_correction_vector
 
     class _Spy:
         def __getattr__(self, name):
-            return getattr(ddmrgjl.Mainjl, name)
+            return getattr(main, name)
 
         def ddmrg_correction_vector(self, *args):
             calls.append(args[3])
@@ -115,3 +116,27 @@ def test_julia_non_adjoint_pair_goes_to_cg(julia_calls, version):
     assert np.max(np.abs(y - ref)) < 1e-4*np.max(np.abs(ref))
     chain.cvm_solver = "cg"
     assert not cvm._use_ddmrg(chain, A, A)
+
+
+@JL
+def test_julia_keeps_ground_state_when_cvm_maxm_differs(julia_calls, version):
+    """maxm != cvm_maxm: the variational route must use the chain's own
+    ground state and leave it in place, not re-solve it at cvm_maxm."""
+    chain = _spin(version, L=8)
+    chain.maxm, chain.nsweeps = 40, 12
+    chain.gs_energy()
+    wf0, e0 = chain.get_gs(), chain.e0
+    chain.cvm_maxm, chain.cvm_nsweeps = 60, 8
+    chain.cvm_solver = "variational"
+    with contextlib.redirect_stdout(io.StringIO()):
+        _x, y = chain.get_dynamical_correlator(name=(chain.Sz[1], chain.Sz[1]),
+                    es=ES, delta=0.3, mode="DMRG", submode="CVM")
+    y = np.real(np.asarray(y))
+    assert len(julia_calls) == len(ES)
+    assert chain.wf0 is wf0
+    assert chain.e0 == e0
+    assert chain.maxm == 40
+    assert chain.get_gs() is wf0 # still current at the restored maxm
+    pc = _spin("python", L=8)
+    ref = _corr(pc, pc.Sz[1], pc.Sz[1], 0.3, "ED", "INV")
+    assert np.max(np.abs(y - ref)) < TOL*np.max(np.abs(ref))
