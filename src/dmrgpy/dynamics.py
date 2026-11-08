@@ -102,8 +102,11 @@ only.
 itensor_version="julia_live" takes the same dispatch as the session
 backends, and so the same shared submode modules (timedependent.py,
 rootndmrg.py, cvm.py, tdz.py, dcex.py, distribution.py, taskdmrg.py,
-sectordc.py, nonhermitian/), each of which refuses on its own a backend
-it does not support yet. Only its KPM moments are its own
+sectordc.py, nonhermitian/). TASK and SECTOR refuse julia_live in
+their own _check_backend; CVM_explicit, CVMimag and the non-Hermitian
+CVM and KPM, which need applyinverse or non-Hermitian KPM moments that
+julia_live does not have yet, are refused in get_dynamical_correlator
+itself, before any solve. Only its KPM moments are its own
 (mpsjulialive/dynamics.py::kpm_moments plus kpm.jl), reached through
 kpmdmrg.dynamical_correlator_moments, so the moment count, the cut to
 exactly n and kpm_extrapolate are the shared ones; the window's band
@@ -213,22 +216,46 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
     # before raising, and the first SECTOR call one it never read
     # (2026-09-24c audit, finding 11).
     if submode=="KPM" and hermitian: kpmdmrg.check_kpm_call(self,**kwargs)
+    if not hermitian and submode not in ("KPM","CVM","CVM_explicit","EX","maxent"):
+        # Per-submode, not wholesale, and before the solve below, which
+        # on a non-Hermitian H is a full NH-DMRG solve. This check used
+        # to return the explicit resolvent for *everything* except
+        # "KPM", so on a non-Hermitian Hamiltonian the caller's submode=
+        # was a no-op: "EX", "maxent", "ROOTN", "TD", "CVM" and
+        # "CVM_explicit" all returned the same curve (bit-identical on
+        # the ED path). The same substitution reached mode="ED",
+        # submode="ED" -- i.e. the exact Lehmann reference a user would
+        # cross-validate against quietly became the approximate
+        # resolvent and agreed with itself. See also edtk/dynamics.py.
+        raise NotImplementedError(
+            "get_dynamical_correlator: submode=%r assumes a "
+            "Hermitian Hamiltonian and has no non-Hermitian "
+            "implementation (KPM/CVM/CVM_explicit do, and EX/maxent "
+            "are non-Hermitian-capable already). It used to return "
+            "the CVM_explicit resolvent instead, silently."%submode)
+    if self.itensor_version=="julia_live":
+        # refused here, before the solve below, rather than inside the
+        # shared modules after it: the explicit resolvents need
+        # applyinverse, and the non-Hermitian KPM its own moments, and
+        # julia_live has neither yet
+        if submode in ("CVM_explicit","CVMimag") or (
+                not hermitian and submode=="CVM"):
+            raise NotImplementedError(
+                "get_dynamical_correlator: submode=%r%s needs "
+                "applyinverse, which is not implemented on "
+                "itensor_version='julia_live' yet; use itensor_version=3 "
+                "or \"python\""%(submode,
+                    "" if hermitian else " on a non-Hermitian Hamiltonian"))
+        if not hermitian and submode=="KPM":
+            raise NotImplementedError(
+                "get_dynamical_correlator: the non-Hermitian KPM "
+                "correlator is not implemented on itensor_version="
+                "'julia_live' yet; use itensor_version=3 or \"python\"")
     if submode!="SECTOR":
         if self.itensor_version=="julia_live": self.get_gs()
         else: ground_state_on_session(self)
-    if not hermitian: # non Hermitian Hamiltonian
-        # Per-submode, not wholesale. This check used to run before the
-        # dispatch below and return the explicit resolvent for
-        # *everything* except "KPM", so on a non-Hermitian Hamiltonian
-        # the caller's submode= was a no-op: "EX", "maxent", "ROOTN",
-        # "TD", "CVM" and "CVM_explicit" all returned the same curve
-        # (bit-identical on the ED path). The same substitution reached
-        # mode="ED", submode="ED" -- i.e. the exact Lehmann reference a
-        # user would cross-validate against quietly became the
-        # approximate resolvent and agreed with itself. See also
-        # edtk/dynamics.py. On julia_live the two non-Hermitian
-        # functions below refuse on their own while that backend lacks
-        # what they need (NH-KPM moments, applyinverse).
+    if not hermitian: # non Hermitian Hamiltonian, the submodes that
+        # remain after the refusal above
         if submode=="KPM": # non-Hermitian KPM
             from .nonhermitian.kpm import dynamical_correlator_nhkpm
             return dynamical_correlator_nhkpm(self,**kwargs)
@@ -238,15 +265,8 @@ def get_dynamical_correlator(self,submode="KPM",**kwargs):
             # of these compute
             from .nonhermitian.dynamics import dynamical_correlator_non_hermitian
             return dynamical_correlator_non_hermitian(self,**kwargs)
-        elif submode in ("EX","maxent"):
-            pass # backend-agnostic, non-Hermitian-capable: fall through
-        else:
-            raise NotImplementedError(
-                "get_dynamical_correlator: submode=%r assumes a "
-                "Hermitian Hamiltonian and has no non-Hermitian "
-                "implementation (KPM/CVM/CVM_explicit do, and EX/maxent "
-                "are non-Hermitian-capable already). It used to return "
-                "the CVM_explicit resolvent instead, silently."%submode)
+        # EX and maxent are backend-agnostic, non-Hermitian-capable:
+        # fall through
     if submode=="KPM": # KPM method
         return kpmdmrg.get_dynamical_correlator(self,**kwargs)
     elif submode=="TD": # time dependent
