@@ -1503,7 +1503,11 @@ class Many_Body_Chain():
              else: return mps.orthogonal_random_mps(self,orthogonal)
          elif self.itensor_version=="julia_live": # Julia version
              from .mpsjulialive import mps
-             return mps.random_mps(self)
+             if orthogonal is None: return mps.random_mps(self)
+             # Gram-Schmidt against the list, which needs only dot, sums
+             # and scalars, all of them on a julia_live state
+             from .randommps import orthogonal_random_mps
+             return orthogonal_random_mps(self,orthogonal)
       elif mode=="ED":
           return self.get_ED_obj().random_state()
       else: raise ValueError("Unrecognized mode "+repr(mode))

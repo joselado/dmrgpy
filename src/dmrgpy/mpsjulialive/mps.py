@@ -23,8 +23,15 @@ class MPS():
     def overlap(self,x):
         return Mainjl.overlap(self.jlmps,x.jlmps)
     def aMb(self,M,b):
-#        return Mainjl.aMb(self.jlmps,M.jlmpo,b.jlmps) # efficient function
-        return self.dot(M*b) # workaround
+        """<self|M|b>, contracted exactly (mpsalgebra.jl's aMb), with no
+        truncated M|b> in between"""
+        if hasattr(M,"jlmpo"): jlmpo = M.jlmpo # a julia_live MPO
+        elif type(M)==multioperator.MultiOperator:
+            if self.MBO is None: raise RuntimeError("aMb needs a chain attached to the MPS (MBO is None)")
+            from .mpo import get_MPO
+            jlmpo = get_MPO(M,self.MBO)
+        else: return self.dot(M*b) # anything else that acts on an MPS
+        return Mainjl.aMb(self.jlmps,jlmpo,b.jlmps)
     def __radd__(self,x): return self + x
     def __add__(self,x):
         if x==0: return self # do nothing
@@ -63,13 +70,12 @@ class MPS():
         return entanglement.get_four_correlation_tensor(self,**kwargs)
     def get_correlation_entropy(self,**kwargs):
         from .. import entanglement
-        return entanglement.get_correlation_entropy_from_wf(self,
-                 dmmode = "explicit", # only working one
-                 **kwargs)
+        kwargs.setdefault("dmmode","explicit") # the default that works here
+        return entanglement.get_correlation_entropy_from_wf(self,**kwargs)
     def get_correlation_entropy_density(self,**kwargs):
         from .. import entanglement
+        kwargs.setdefault("dmmode","explicit") # the default that works here
         return entanglement.get_correlation_entropy_density(self.MBO,
-                 dmmode = "explicit", # only working one
                  wf=self,**kwargs)
     def rename(self,name): return # dummy method
     def execute(self,f): return # dummy method
@@ -109,7 +115,34 @@ class MPS():
     def get_dm(self,**kwargs):
         """Compute the density matrix"""
         from ..dmtk.densitymatrix import dm
-        return dm(self,dmmode="explicit",**kwargs)
+        # no dmmode=: dm_fermionic takes inds= only, so the
+        # dmmode="explicit" this used to pass was a TypeError
+        return dm(self,**kwargs)
+    # The thin delegating methods of mps.MPS, so that a julia_live state
+    # answers the same calls
+    def get_entropy(self,b=None):
+        """Entanglement entropy in bond b, or its mean over all bonds"""
+        if b is None:
+            return np.mean([self.get_entropy(i) for i in range(0,self.MBO.ns-1)])
+        return self.get_bond_entropy(b)
+    def get_correlation_matrix(self,**kwargs):
+        from .. import entanglement
+        return entanglement.get_correlation_matrix(self.MBO,
+                wf=self,**kwargs)
+    def get_CFT_central_charge(self):
+        return entropy.central_charge(self)
+    def get_pair_entropy(self,i,j):
+        if self.MBO is not None: return self.MBO.get_pair_entropy(self,i,j)
+        else: raise RuntimeError("get_pair_entropy needs a chain attached to the MPS (MBO is None)")
+    def get_mutual_information(self,i,j):
+        if self.MBO is not None:
+            return self.MBO.get_mutual_information(self,i,j)
+        else: raise RuntimeError("get_mutual_information needs a chain attached to the MPS (MBO is None)")
+    def get_conjugate(self):
+        """Return the complex conjugate wavefunction"""
+        if self.MBO is None: raise RuntimeError("get_conjugate needs a chain attached to the MPS (MBO is None)")
+        from ..mpsalgebra import conjugate_mps
+        return conjugate_mps(self.MBO,self)
 
 
 def random_mps(self):

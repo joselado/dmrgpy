@@ -61,6 +61,8 @@ def initialize():
     files += ["fermion_ops.jl"] # bare A/Adag on Fermion sites, for the
                                 # Jordan-Wigner-dressed parity-odd MPOs
     files += ["mpo_ops.jl"] # MPO product, sum, dagger, trace, <a|A|b>
+    files += ["bicgstab.jl"] # MPS BiCGSTAB for applyinverse; uses
+                              # mpsalgebra.jl's apply_op/summps/conj_mps
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 
