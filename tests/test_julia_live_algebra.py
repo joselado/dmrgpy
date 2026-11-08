@@ -149,6 +149,61 @@ def test_wrapper_methods_against_python(version):
     assert cc[version] == pytest.approx(cc["python"], abs=1e-4)
 
 
+def _evolved_sz(c, h, neel, tau, mode=None, nt0=None):
+    """<Sz0> and <H> in exp(tau*h)|neel>/norm"""
+    kw = {}
+    if nt0 is not None: kw["nt0"] = nt0
+    if mode is not None: kw["mode"] = mode
+    w = c.exponential(tau*h, neel, **kw)
+    nrm = c.overlap(w, w).real
+    return (c.aMb(w, c.Sz[0], w)/nrm).real, (c.aMb(w, h, w)/nrm).real
+
+
+def _taylor_dense(c, h, v, tau, nt0):
+    """The same nt0 Taylor steps 1 + zH + z^2/2 H^2, z = tau/nt0, on the
+    dense ED vector: what the MPS routes compute up to truncation"""
+    ed = c.get_ED_obj()
+    H = ed.MO2matrix(h)
+    Sz = ed.MO2matrix(c.Sz[0])
+    z = tau/nt0
+    w = v.copy()
+    for i in range(nt0):
+        hw = H@w
+        w = w + z*hw + 0.5*z*z*(H@hw)
+    nrm = np.vdot(w, w).real
+    return np.vdot(w, Sz@w).real/nrm, np.vdot(w, H@w).real/nrm
+
+
+@pytest.mark.parametrize("version", JULIA)
+def test_exponential_against_ed_and_python(version):
+    n = 8
+    cases = ((-0.5j, 200), (-1j, 200), (0.3, 200)) # exp(-iHt) and exp(+0.3H)
+    res = {}
+    for v in (version, "python"):
+        c, h = _heisenberg(n, v)
+        c.set_hamiltonian(sum((-1)**i*c.Sz[i] for i in range(n)))
+        neel = c.get_gs() # the Neel state
+        for tau, nt0 in cases:
+            res[v, tau] = _evolved_sz(c, h, neel, tau, nt0=nt0)
+        if v == version:
+            neel_ed = c.get_gs(mode="ED")
+            for tau, nt0 in cases:
+                res["taylor", tau] = _taylor_dense(c, h, neel_ed.v, tau, nt0)
+                res["ed", tau] = _evolved_sz(c, h, neel_ed, tau, mode="ED")
+                res["big", tau] = _evolved_sz(c, h, neel, tau, nt0=20*nt0)
+    for tau, nt0 in cases:
+        for k in (0, 1):
+            # the Taylor steps themselves, exactly
+            assert res[version, tau][k] == pytest.approx(res["taylor", tau][k], abs=1e-6)
+            # python truncates its step operator at the chain's cutoff, so
+            # it sits about 1e-6 away from the exact Taylor steps
+            assert res[version, tau][k] == pytest.approx(res["python", tau][k], abs=1e-5)
+            # and the exact exponential once the steps are small
+            assert res["big", tau][k] == pytest.approx(res["ed", tau][k], abs=1e-5)
+    # exp(+0.3 H) raises <H> from the Neel value -(n-1)/4: the sign is +
+    assert res[version, 0.3][1] > -0.25*(n-1) + 0.5
+
+
 def _inverse_numbers(c, h, eps, mode=None):
     kw = {} if mode is None else {"mode": mode}
     gs = c.get_gs(**kw)

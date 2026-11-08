@@ -128,6 +128,12 @@ def exponential_dmrg(self,h,wfa,dt=1.0,nt=1000,nt0=None):
     # in examples/time_evolution/exponential_EV, whose sum(Sx) has the
     # same expectation value under either sign in a Z-polarized state.
     tau = complex(dt)
+    if _is_julia(wfa): # julia_live, mpsjulialive/mpsalgebra.jl's exponential
+        from .mpsjulialive.juliasession import Main
+        jlmps = Main.exponential(_julia_mpo(self,h),wfa.jlmps,tau,int(nt0),
+                int(self.maxm),int(max(self.maxm,self.mpomaxm)),
+                float(self.cutoff),self.jlsites)
+        return _julia_mps(self,jlmps)
     handle = self._session.exponential_apply(h.to_terms(),wfa.cpp_handle,
             tau,int(nt0))
     return mps.MPS(self,cpp_handle=handle).copy()

@@ -58,19 +58,26 @@ end
 
 
 
-function exponential(H,psi1,dtr,dti,maxdim,cutoff,nt0)
-	tau = dtr + im*dti # evolution time
-	taui = tau/nt0 # small time step
-	iden_op = identity_mpo() # identity operator
-        for i=1:nt0
-          	psi2 = taui*contract(H,psi1;maxdim=maxdim,cutoff=cutoff,
-				     method = "densitymatrix") # sum
-          	psi2 = contract(iden_op,psi2;maxdim=maxdim,cutoff=cutoff,
-				method = "densitymatrix") # fix
-          	psi1 = add(psi1,psi2;maxdim=maxdim,cutoff=cutoff,
-			   method = "densitymatrix") # sum
+# exp(tau*H)|psi>, as nt0 steps of the second-order Taylor operator
+# E = 1 + z H + z^2/2 H^2 with z = tau/nt0. The same construction as
+# pyitensor/chain.py::_custom_exp and mpscpp3's custom_exp, so that the
+# three backends agree at equal nt0. E is built exactly (direct sums) and
+# then compressed at a relative cutoff of 1e-28, which drops only
+# roundoff: the identity dominates the weight of E, and at the chain's
+# own cutoff the z^2/2 H^2 term, about z^2 of it, is discarded once nt0
+# is large (measured on 8 sites at nt0=4000 and cutoff 1e-16: <H> drifted
+# by 1.9e-4 over t=1). Every MPS application is truncated at maxdim and
+# the chain's cutoff.
+function exponential(H,psi,tau,nt0,maxdim,mpomaxdim,cutoff,sites)
+	z = tau/nt0 # small step
+	iden = identity_mpo(sites) # identity operator
+	H2 = apply(H,H;maxdim=mpomaxdim,cutoff=1e-28) # H^2
+	E = add(iden,z*H,(0.5*z*z)*H2;alg="directsum")
+	E = truncate(E;maxdim=mpomaxdim,cutoff=1e-28)
+	for i=1:nt0
+		psi = apply_op(E,psi,maxdim,cutoff)
 	end
-	return psi1
+	return psi
 end
 
 
