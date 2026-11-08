@@ -424,12 +424,67 @@ def test_julia_live_conserving_observables_work_and_others_raise(version):
         sc.vev(sc.Sz[6] * sc.Sz[7]).real, abs=1e-6)
     with pytest.raises(ValueError, match="Sz=2|Sz=-2|definite charge"):
         sc.vev(sc.Sx[0])
-    _, spectrum = sc.get_dynamical_correlator(name=(sc.Sz[0], sc.Sz[0]),
-                                              es=np.linspace(-1.0, 3.0, 20))
-    assert np.all(np.isfinite(spectrum))
     with pytest.raises(ValueError):
         sc.get_dynamical_correlator(name=(sc.Sx[0], sc.Sx[0]),
                                     es=np.linspace(-1.0, 3.0, 20))
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_sector_kpm_correlator_matches_ed(version):
+    """The in-sector KPM correlator runs on QN sites (the naive MPO
+    application of sites_qn.jl) and on the sector's own band window. For
+    even n the Sz=0 sector holds the global ground state, and its highest
+    state is the Sz=0 member of the ferromagnetic multiplet, so the curve
+    is the ED KPM curve of the same chain with no sector, at the same es
+    and delta. Its integral is <Sz_0^2> = 1/4."""
+    n, delta = 8, 0.1
+    es = np.linspace(-1.0, 7.0, 801)
+    sc, h, _ = heisenberg_chain(n)
+    _jl(sc)
+    sc.set_hamiltonian(h)
+    sc.set_conserved_sector(Sz=0)
+    ref = spinchain.Spin_Chain([2] * n)
+    ref.set_hamiltonian(h)
+    _, ye = ref.get_dynamical_correlator(mode="ED", submode="KPM",
+                                         name=(ref.Sz[0], ref.Sz[0]),
+                                         es=es, delta=delta)
+    ye = np.asarray(ye).real
+    for _ in range(2):  # two random starts
+        sc.restart()
+        _, y = sc.get_dynamical_correlator(name=(sc.Sz[0], sc.Sz[0]),
+                                           es=es, delta=delta)
+        y = np.asarray(y)
+        assert np.max(np.abs(y.imag)) < 1e-8
+        assert np.max(np.abs(y.real - ye)) < 1e-3 * np.max(np.abs(ye))
+        assert np.trapezoid(y.real, es) == pytest.approx(0.25, abs=2e-3)
+
+
+@pytest.mark.parametrize("version", JL)
+def test_julia_live_long_chain_witness_is_not_a_basis_state(version):
+    """Past 24 sites is_hermitian() probes with maxm=1. In a sector the
+    witness has to stay a random in-sector state and not become the
+    in-sector product state, on which an exchange between two equal spins
+    reads 0, and a non-Hermitian H would then go to Hermitian DMRG."""
+    from dmrgpy.operatornames import name2MO
+    n = 26
+    sc, h, sz = heisenberg_chain(n)
+    _jl(sc)
+    sc.set_hamiltonian(h)
+    sc.set_conserved_sector(Sz=0)
+    plan = sc._jl_sector_plan
+    Sp, Sm = name2MO("Sp", sc), name2MO("Sm", sc)
+    same = [j for j in range(1, n) if plan[j] == plan[0]]
+    for j in (same[0], same[-1]):  # the nearest and the farthest equal spin
+        assert not sc.is_hermitian(h + 1j * (Sp[0] * Sm[j] + Sm[0] * Sp[j]))
+    assert sc.is_hermitian(h)
+    sc.maxm = 1
+    wf = sc.random_state()
+    sc.maxm = 30
+    assert wf.dot(wf).real == pytest.approx(1.0, abs=1e-8)
+    assert wf.dot(sz * wf).real == pytest.approx(0.0, abs=1e-8)
+    # every <Sz_k> is +-1/2 on a basis state
+    szk2 = sum(abs(wf.dot(sc.Sz[k] * wf)) ** 2 for k in range(n))
+    assert szk2 < 0.99 * n / 4
 
 
 @pytest.mark.parametrize("version", JL)

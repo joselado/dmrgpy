@@ -147,10 +147,15 @@ class MPS():
 
 def random_mps(self):
     # inside a conserved sector ITensors draws a random QN MPS only around
-    # an in-sector product state (sector.py), at a small link dimension so
-    # that it is not that product state itself
+    # an in-sector product state (sector.py), and at linkdims=1 it returns
+    # that product state itself, with no randomization. So the link
+    # dimension has a floor of 2, whatever self.maxm is: is_hermitian()
+    # sets maxm=1 on a chain longer than 24 sites, and a basis-state
+    # witness reads 0 for many anti-Hermitian terms (an exchange between
+    # two equal spins, a loss on an empty site). The maxm=1 rule is for the
+    # session backends' truncated-sum witness, which this is not.
     from . import sector
-    jlmps = sector.start_state(self,max(1,min(int(self.maxm),4)))
+    jlmps = sector.start_state(self,max(2,min(int(self.maxm),4)))
     if jlmps is None: jlmps = Mainjl.random_state(self.jlsites)
     return MPS(jlmps,MBO=self)
 
