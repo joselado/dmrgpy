@@ -140,6 +140,30 @@ def test_matrix_free_branch_matches_dense_branch(itv):
 
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
 @pytest.mark.parametrize("itv", [julia_live_param()])
+def test_matrix_free_branch_on_a_gapless_chain(itv):
+    """Gapless Heisenberg on n_uc=2 at D=8, matrix-free everywhere: the
+    energy must agree with the dense branch. Then GMRES is starved (Krylov
+    dimension 2, one restart), so the environment solves miss and must
+    fall back to the dense solve; the energy must still agree. At D=8 the
+    state does not converge on any backend and a run lands on one of two
+    nearby fixed points (-0.4429138 or -0.4429417, python included), so the
+    tolerance is 1e-4 and not the solver precision."""
+    from dmrgpy.mpsjulialive.juliasession import Main
+    e_dense = _heisenberg(itv, 8).gs_energy()
+    old = Main.DmrgpyVumps.set_dense_thresholds(0, 0)
+    try:
+        assert _heisenberg(itv, 8).gs_energy() == pytest.approx(e_dense, abs=1e-4)
+        Main.seval("DmrgpyVumps.LINSOLVE_LIMITS[] = (2, 1)")
+        Main.seval("DmrgpyVumps.LINSOLVE_FALLBACKS[] = 0")
+        assert _heisenberg(itv, 8).gs_energy() == pytest.approx(e_dense, abs=1e-4)
+        assert int(Main.seval("DmrgpyVumps.LINSOLVE_FALLBACKS[]")) > 0
+    finally:
+        Main.seval("DmrgpyVumps.LINSOLVE_LIMITS[] = (60, 200)")
+        Main.DmrgpyVumps.set_dense_thresholds(old[0], old[1])
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+@pytest.mark.parametrize("itv", [julia_live_param()])
 def test_redundant_bond_dimension_polarized_chain(itv):
     """The exact state is a product state, so at maxm=4 three directions
     carry no weight and the transfer matrix has a degenerate dominant

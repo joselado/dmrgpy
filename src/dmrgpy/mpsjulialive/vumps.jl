@@ -3,7 +3,7 @@
 #
 # A dense-array port of pyitensor/vumps.py's grouped (n_uc in {1,2},
 # nearest-cell) path, on plain Julia arrays with LinearAlgebra and the
-# KrylovKit that ITensorMPS already loads. The Hamiltonian arrives as the
+# KrylovKit. The Hamiltonian arrives as the
 # grouped automaton W[a,i,o,b] of pyitensor/idmrg.py's _build_periodic_mpo
 # (channel 1 = "S", the identity start, channel 2 = "F", the accumulator,
 # channels 3.. = one pending channel per open bond); everything else (the
@@ -20,8 +20,18 @@ module DmrgpyVumps
 
 using LinearAlgebra
 using Random
-import ITensorMPS
-const KK = ITensorMPS.KrylovKit
+# KrylovKit is declared in juliapkg.json. It is loaded by its UUID, which
+# also finds it when an environment holds it only as a dependency of
+# ITensorMPS. If it cannot be loaded, the module still loads: the dense
+# branches work and only a matrix-free branch raises, when it is reached.
+const KK = try
+    Base.require(Base.PkgId(Base.UUID("0b1a1467-8014-51b9-945f-bf0ae24f4b77"), "KrylovKit"))
+catch
+    nothing
+end
+krylovkit() = KK === nothing ?
+    error("DmrgpyVumps: KrylovKit could not be loaded; the matrix-free " *
+          "branch (bond dimension above the dense thresholds) needs it") : KK
 
 const CT = ComplexF64
 
@@ -142,9 +152,16 @@ function dominant_eigvec(apply, matrix_builder, D::Int)
         end
         v = reshape(F.vectors[:, idx[1]], D, D)
     else
-        vals, vecs, _ = KK.eigsolve(x -> vec(apply(reshape(x, D, D))),
+        vals, vecs, info = krylovkit().eigsolve(x -> vec(apply(reshape(x, D, D))),
                                     vec(Matrix{CT}(I, D, D)) .+ 0.0im, 2, :LM;
                                     tol=1e-13, krylovdim=min(D * D, 40), maxiter=200)
+        if info.converged < 1
+            # an unconverged dominant vector is refused like a degenerate
+            # one, so fixed_point falls back to the bond candidate, as
+            # pyitensor/vumps.py does on ArpackError
+            error("DmrgpyVumps: degenerate dominant transfer eigenvalue " *
+                  "(the Krylov eigensolver did not converge)")
+        end
         if length(vals) > 1 && abs(vals[2]) > (1 - 1e-9) * abs(vals[1])
             error("DmrgpyVumps: degenerate dominant transfer eigenvalue")
         end
@@ -184,6 +201,11 @@ function w_blocks(W::Array{CT,4})
     return blocks
 end
 
+# GMRES Krylov dimension and restarts; a Ref so that a test can starve it
+# and check the dense fallback. LINSOLVE_FALLBACKS counts the fallbacks.
+const LINSOLVE_LIMITS = Ref((60, 200))
+const LINSOLVE_FALLBACKS = Ref(0)
+
 # solve X - T(X) + I*<X|fp> = rhs
 function regularized_solve(rhs::Matrix{CT}, apply, matrix_builder, fp, D::Int)
     Id = Matrix{CT}(I, D, D)
@@ -196,8 +218,18 @@ function regularized_solve(rhs::Matrix{CT}, apply, matrix_builder, fp, D::Int)
         X = reshape(x, D, D)
         vec(X - apply(X) + Id * pair(X, fp))
     end
-    sol, info = KK.linsolve(f, vec(rhs), vec(rhs); tol=1e-14 * max(norm(rhs), 1e-300),
-                            krylovdim=min(D * D, 60), maxiter=200)
+    kdim, kiter = LINSOLVE_LIMITS[]
+    sol, info = krylovkit().linsolve(f, vec(rhs), vec(rhs); tol=1e-14 * max(norm(rhs), 1e-300),
+                            krylovdim=min(D * D, kdim), maxiter=kiter)
+    LINSOLVE_FALLBACKS[] += info.converged < 1
+    if info.converged < 1
+        # GMRES did not converge: solve the same system densely, as
+        # idmrg_excitations._solve_linear_map does, rather than use a
+        # wrong environment
+        T = matrix_builder()
+        A = Matrix{CT}(I, D * D, D * D) - T + vec(Id) * transpose(vec(fp))
+        return reshape(A \ vec(rhs), D, D)
+    end
     return reshape(sol, D, D)
 end
 
@@ -281,7 +313,7 @@ function lowest_eigvec(apply, x0::Array{CT}, rtol::Float64, niter::Int)
         return F.values[1], reshape(F.vectors[:, 1], shp)
     end
     v0 = vec(x0) / norm(x0)
-    vals, vecs, _ = KK.eigsolve(x -> vec(apply(reshape(x, shp))), v0, 1, :SR;
+    vals, vecs, _ = krylovkit().eigsolve(x -> vec(apply(reshape(x, shp))), v0, 1, :SR;
                                 ishermitian=true, tol=rtol,
                                 krylovdim=min(n, max(niter, 20)), maxiter=100)
     return real(vals[1]), reshape(vecs[1] / norm(vecs[1]), shp)
