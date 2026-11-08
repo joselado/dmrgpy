@@ -66,7 +66,14 @@ def energy_variance(self,h,wf=None):
     small residual itself, so the relative cutoff acts on its own norm, and
     the application runs uncapped, so maxm does not act at all. Building
     H^2 as one MPO instead is exact too but O(L^3) to construct on
-    "python" (302 s against 1.8 s at 80 sites)."""
+    "python" (302 s against 1.8 s at 80 sites).
+
+    julia_live has no session, so its own energy_variance (mpsjulialive/
+    vev.py) computes the same quantity and only the chain's maxm is put
+    back afterwards."""
+    if self.itensor_version=="julia_live":
+        from .mpsjulialive.vev import energy_variance as ev_jl
+        return ev_jl(self,h,wf=wf)
     if wf is None: wf = self.get_gs()
     e = multi_vev(self,h,wf=wf)
     dh = h - e*multioperator.identity()

@@ -468,6 +468,15 @@ def get_four_correlation_tensor_cpp(wf,accelerate=True,**kwargs):
     specialized function"""
     self = wf.MBO
     from .. import fermionchain
+    if getattr(self,"itensor_version",None)=="julia_live":
+        # one exact MPO per tuple and inner(psi',M,psi), in Julia
+        # (mpsjulialive/gs_extra.jl), on spinless "Fermion" sites only
+        if not _julia_spinless_fermions(self):
+            raise NotImplementedError("ctmode=\"full\" on julia_live needs "
+                    "a chain of spinless fermions; use ctmode=\"explicit\"")
+        from ..mpsjulialive.juliasession import Main as Mainjl
+        return np.array(Mainjl.four_correlation_tensor(self.jlsites,
+                wf.jlmps,bool(accelerate)),dtype=complex)
     if type(self)==fermionchain.Spinful_Fermionic_Chain_Native:
         # Native (Electron/Hubbard) sites: ITensor's ElectronSite has no
         # plain "Cdag"/"C" operator (only Cup/Cdn/Cdagup/Cdagdn), so the
@@ -478,6 +487,17 @@ def get_four_correlation_tensor_cpp(wf,accelerate=True,**kwargs):
         # native sites represent.
         return self._session.four_correlation_tensor_spinful(wf.cpp_handle,accelerate)
     return self._session.four_correlation_tensor(wf.cpp_handle,accelerate)
+
+
+def _julia_spinless_fermions(self):
+    """True for a julia_live chain whose every site is a spinless fermion
+    (site code 0, ITensor's "Fermion" site, whose "C"/"Cdag" the Julia
+    four-point tensor names)."""
+    from .. import fermionchain
+    if type(self)==fermionchain.Spinful_Fermionic_Chain_Native: return False
+    sites = getattr(self,"sites",None)
+    return sites is not None and len(sites)>0 and all(
+            str(s)=="0" for s in sites)
 
 
 def get_four_correlation_tensor_sweep(wf,accelerate=True,**kwargs):
@@ -582,5 +602,7 @@ def _four_correlation_tensor_default_ctmode(wf):
             return "full"
         return "explicit"
     if itensor_version in (2,3,"python") and hasattr(session,"four_correlation_tensor"):
+        return "full"
+    if itensor_version=="julia_live" and _julia_spinless_fermions(self):
         return "full"
     return "explicit"

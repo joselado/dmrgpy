@@ -386,9 +386,10 @@ def test_a_typo_raises_on_a_current_chain_as_on_a_fresh_one(version, kw):
 
 @pytest.mark.parametrize("version", [pytest.param("julia_live", id="julia_live")])
 def test_julia_live_raises_on_a_current_chain_as_on_a_fresh_one(version):
-    """_gs_energy_julia() takes no maxde= and raises on reconverge= without
-    a state; on a solved julia_live chain both came back with the stored
-    energy, so the stored answer there now holds for no keyword but wf0="""
+    """on a solved julia_live chain a typo came back with the stored
+    energy; it raises there as on a fresh chain. _gs_energy_julia() takes
+    reconverge= and maxde= now, as gs_energy_single() does (see
+    test_audit_2026_09_25b_session.py's julia_live tests)"""
     from _helpers import julia_available
     ok, reason = julia_available()
     if not ok:
@@ -400,7 +401,7 @@ def test_julia_live_raises_on_a_current_chain_as_on_a_fresh_one(version):
         if current:
             e0 = _quiet(sc.gs_energy)
             assert sc.gs_energy() == e0 and sc.gs_energy(wf0=None) == e0
-        for kw in ({"reconverge": True}, {"maxde": 1e-3}, {"reconverg": False}):
+        for kw in ({"reconverg": False}, {"maxd": 1e-3}):
             for f in (sc.gs_energy, sc.get_gs):
                 with pytest.raises(TypeError):
                     _quiet(f, **kw)

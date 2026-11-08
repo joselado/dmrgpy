@@ -55,12 +55,79 @@ function run_quiet(f)
 end
 
 
+# The bond-dimension ramp of the ground-state solve
+# (Many_Body_Chain.bond_ramp), the exact counterpart of pyitensor/chain.py's
+# _make_sweeps_ramped and of mpscppN/chain_session.h's make_sweeps_ramped:
+# the first fraction of the sweeps grow maxdim geometrically from start to
+# maxm, m_i = floor(start*(maxm/start)^(i/nr)+0.5) for the 0-based sweep
+# i < nr, with the noise decayed by `decay` per ramping sweep, and the rest
+# run at maxm without noise. floor_dim is the largest link dimension of a
+# warm start (0 for a fresh one), below which the ramp never starts, so a
+# converged warm state is not truncated. Returns (maxdims, noises), or
+# nothing when the schedule is the flat one of make_sweeps.
+function ramped_schedule(nsweeps,maxm,noise,start,fraction,decay,floor_dim)
+  if nsweeps < 2 || maxm <= 1
+    return nothing
+  end
+  start = start > 0 ? start : 10
+  start = max(start,floor_dim)
+  if start >= maxm
+    return nothing
+  end
+  nr = trunc(Int,nsweeps*fraction)
+  nr = min(max(nr,1),nsweeps-1) # always ends at full maxm
+  ms = zeros(Int,nsweeps)
+  nz = zeros(Float64,nsweeps)
+  for i in 0:(nsweeps-1)
+    if i < nr
+      m = Int(floor(start*(maxm/start)^(i/nr)+0.5))
+      ms[i+1] = min(max(m,1),maxm)
+      nz[i+1] = noise*decay^i
+    else
+      ms[i+1] = maxm
+      nz[i+1] = 0.0
+    end
+  end
+  return ms,nz
+end
+
+function make_sweeps_ramped(nsweeps,maxm,cutoff,noise,start,fraction,decay,
+                            floor_dim)
+  sched = ramped_schedule(nsweeps,maxm,noise,start,fraction,decay,floor_dim)
+  if sched === nothing
+    return make_sweeps(nsweeps,maxm,cutoff; noise=noise)
+  end
+  ms,nz = sched
+  sweeps = Sweeps(nsweeps)
+  maxdim!(sweeps, ms...)
+  cutoff!(sweeps, cutoff)
+  noise!(sweeps, nz...)
+  return sweeps
+end
+
+# The maxdim and noise of every sweep of a schedule, as vectors (for the
+# tests, which compare them with pyitensor's).
+function sweep_schedule(sweeps)
+  n = length(sweeps.maxdim)
+  return [sweeps.maxdim[i] for i in 1:n], [sweeps.noise[i] for i in 1:n]
+end
+
+
 # psi0 is dmrg_start_state's (mpsalgebra.jl) for a fresh solve and the
 # caller's state for a warm start; noise is Many_Body_Chain.noise, see
-# make_sweeps above.
+# make_sweeps above. With ramp=true the schedule is make_sweeps_ramped's,
+# with the largest link dimension of psi0 as the floor of a warm start
+# (warm=true).
 function get_gs_dmrg(H,psi0; nsweeps = 10,cutoff=1e-8,maxm=80,
-	ishermitian=true,noise=0.0)
-  sweeps = make_sweeps(nsweeps,maxm,cutoff; noise=noise)
+	ishermitian=true,noise=0.0,ramp=false,ramp_start=10,
+	ramp_fraction=0.5,ramp_decay=0.1,warm=false)
+  if ramp
+    floor_dim = warm ? maxlinkdim(psi0) : 0
+    sweeps = make_sweeps_ramped(nsweeps,maxm,cutoff,noise,ramp_start,
+                                ramp_fraction,ramp_decay,floor_dim)
+  else
+    sweeps = make_sweeps(nsweeps,maxm,cutoff; noise=noise)
+  end
   run_quiet() do
     dmrg(H,psi0,sweeps,ishermitian=ishermitian)
   end

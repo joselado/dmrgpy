@@ -45,7 +45,16 @@ def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
     require_two_site(self,"The DMRG excited-state search")
     if self.itensor_version=="julia_live":
         from .mpsjulialive import excited as exjl
-        return exjl.get_excited_states_dmrg(self,n=n,noise=noise,scale=scale)
+        energies,wfs = exjl.get_excited_states_dmrg(self,n=n,noise=noise,
+                scale=scale)
+        # the per-state variance the session backends return with their
+        # states, computed here, so a penalized state that did not
+        # converge is flagged on julia_live too
+        from . import vev as _vev
+        fluctuations = [abs(_vev.energy_variance(self,self.hamiltonian,
+                wf=w)) for w in wfs]
+        _warn_unconverged_excited_states(energies,fluctuations)
+        return energies,wfs
     wf0 = self.get_gs()
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)

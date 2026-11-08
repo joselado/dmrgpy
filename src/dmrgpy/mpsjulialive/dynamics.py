@@ -27,7 +27,8 @@ def _min_energy(self,H):
     """H's lower band edge from a solve at the chain's own parameters, for
     the Chebyshev window when the chain's e0 is not marked as that edge
     (groundstate.mark_lower_edge()): a state set with set_gs() or
-    set_initial_wf(), or gs_energy_generalized()'s. On a clone, like
+    set_initial_wf(), gs_energy_generalized()'s, or one swept from a warm
+    start (wf0=, reconverge=True, restart=False). On a clone, like
     _max_energy_bound() above, so the chain's state stays as it is."""
     mbc = self.clone()
     mbc.set_hamiltonian(H) # restart=True: a cold start

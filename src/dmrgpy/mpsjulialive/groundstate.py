@@ -5,6 +5,15 @@ NH_biorthoalg = "fidelity"
 NH_alg="onesided"
 NH_dmrg = True
 
+def ramp_keywords(self,warm=False):
+    """The bond-ramp keywords of get_gs.jl's get_gs_dmrg, read from the
+    chain (Many_Body_Chain.bond_ramp and its three settings)."""
+    return dict(ramp=bool(self.bond_ramp),
+            ramp_start=int(self.bond_ramp_start),
+            ramp_fraction=float(self.bond_ramp_fraction),
+            ramp_decay=float(self.bond_ramp_noise_decay),warm=bool(warm))
+
+
 def get_gs_dmrg(self,ishermitian=True,wf0=None):
     """Compute the ground state using DMRG, from wf0 when given and from a
     random state otherwise. Always solves: whether a stored state answers
@@ -38,9 +47,13 @@ def get_gs_dmrg(self,ishermitian=True,wf0=None):
         # with the chain's noise, on the first half of the schedule, as
         # the session backends run it (get_gs.jl's make_sweeps); it was
         # never passed, so self.noise did nothing on this backend
-        e0,wf0 = Mainjl.get_gs_dmrg(H.jlmpo,psi0,nsweeps=self.nsweeps,
-            cutoff=self.cutoff,maxm=self.maxm,ishermitian=ishermitian,
-            noise=float(self.noise))
+        # with the chain's bond-dimension ramp (get_gs.jl's
+        # make_sweeps_ramped, pyitensor's _make_sweeps_ramped), which was
+        # ignored here, every sweep running at the full maxm
+        e0,wf0 = Mainjl.get_gs_dmrg(H.jlmpo,psi0,nsweeps=int(self.nsweeps),
+            cutoff=float(self.cutoff),maxm=int(self.maxm),
+            ishermitian=ishermitian,noise=float(self.noise),
+            **ramp_keywords(self,warm=wf0 is not None))
     else: # for non-Hermitian, the specialized routine, noise-free on
         # purpose (nhdmrg.jl's note), so only the start above rescues it
         e0,wfl0,wfr0 = Mainjl.get_gs_nhdmrg(H.jlmpo,psi0,

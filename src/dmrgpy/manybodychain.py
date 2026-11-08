@@ -815,9 +815,11 @@ class Many_Body_Chain():
       an exact -1.780099 on a 4-site chain, 2026-09-24c audit, finding 5).
       On v2/v3 the warm start is the session's own state, which stays
       trapped in an eigenstate of the old Hamiltonian that is also one of
-      the new."""
+      the new. julia_live, which has no session, sweeps from the stored
+      state instead (groundstate.mark_warm_start())."""
       if restart: self.restart() # restar the calculation
       else:
+          groundstate.mark_warm_start(self) # the julia_live warm start
           self.computed_gs = False
           self.has_ED_obj = False
           self._gs_supplied = False
@@ -1293,27 +1295,24 @@ class Many_Body_Chain():
                   "power itself")
       h = self.get_hamiltonian()
       mode = self.get_mode(mode=kwargs.get("mode","DMRG"))
-      if mode=="DMRG" and self.itensor_version in (2,3,"python"):
+      if mode=="DMRG" and self.itensor_version in (2,3,"python","julia_live"):
           # <H^2>-<H>^2 through vev(npow=2) truncated H|psi> to maxm and
           # was set by that truncation rather than by the state (2026-09-24c
-          # audit, finding 7); see vev.energy_variance
+          # audit, finding 7); see vev.energy_variance. julia_live went
+          # through vev(dh*dh), an O(L^2)-term square, before its vev took
+          # npow= and wf=
           unknown = set(kwargs)-{"mode","wf"}
           if unknown:
               raise TypeError("gs_energy_fluctuation() got unexpected "
                       "keyword argument(s) "+", ".join(sorted(unknown)))
           return np.sqrt(np.abs(vev.energy_variance(self,h,wf=kwargs.get("wf"))))
-      # the same quantity on ED and julia_live: <(H-<H>)^2> rather than
-      # <H^2>-<H>^2, whose roundoff floor (about 1e-7 on an 8-site chain,
-      # where E0^2 is 11) sits far above the fluctuation of a converged state
+      # the same quantity on ED: <(H-<H>)^2> rather than <H^2>-<H>^2,
+      # whose roundoff floor (about 1e-7 on an 8-site chain, where E0^2 is
+      # 11) sits far above the fluctuation of a converged state
       from . import multioperator
       e = self.vev(h,**kwargs)
       dh = h - e*multioperator.identity()
-      if mode=="DMRG" and self.itensor_version=="julia_live":
-          # julia_live's vev takes no npow (this used to raise TypeError
-          # there): the square as one operator, exact, O(L^2) terms
-          e2 = self.vev(dh*dh,**kwargs)
-      else:
-          e2 = self.vev(dh,npow=2,**kwargs)
+      e2 = self.vev(dh,npow=2,**kwargs)
       return np.sqrt(np.abs(e2))
   def set_initial_wf_guess(self,wf):
       """Use `wf` as the starting state of the next ground-state solve.
