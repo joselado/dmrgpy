@@ -294,11 +294,15 @@ def test_clone_bandwidth_and_thermal_state():
     wc = c.get_gs()
     assert c.gs_energy() == pytest.approx(e0, abs=1e-8)
     assert abs(wc.dot(sc.get_gs())) == pytest.approx(1.0, abs=1e-6)
-    ev = ed_spectrum(sc, "h")
-    # the top of this spectrum is a nearly degenerate ferromagnetic
-    # multiplet, so the -H solve converges to about 1e-5 only
-    assert sc.bandwidth(sc.hamiltonian) == pytest.approx(ev[-1] - ev[0],
-                                                         abs=1e-4)
+    # bandwidth() solves X and -X on clones. X has nondegenerate band
+    # edges: the top of the Heisenberg chain is a ferromagnetic multiplet
+    # split only by the 0.1 field, and a random-start solve of -H there
+    # lands 1e-5 to 1e-4 below its top from run to run
+    X = sc.hamiltonian + sum((0.5 + 0.2 * i) * sc.Sz[i] + 0.3 * sc.Sx[i]
+                             for i in range(4))
+    xm = np.asarray(sc.get_ED_obj().MO2matrix(X).todense())
+    ev = np.linalg.eigvalsh(xm)
+    assert sc.bandwidth(X) == pytest.approx(ev[-1] - ev[0], abs=1e-6)
     # the chain itself was not touched by the clone's solves
     assert sc.gs_energy() == pytest.approx(e0, abs=1e-12)
     from dmrgpy import thermal
