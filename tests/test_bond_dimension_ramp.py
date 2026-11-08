@@ -27,7 +27,9 @@ from dmrgpy import spinchain, fermionchain
 
 TOL = 1e-6
 
-BACKENDS = [2, 3, "python"]
+from _helpers import julia_live_param
+
+BACKENDS = [2, 3, "python", julia_live_param()]
 
 
 def heisenberg(n=8, itensor_version=3, maxm=30, nsweeps=12):
@@ -248,3 +250,44 @@ def test_inhomogeneous_hubbard_ramp_matches_flat():
     d_ramp = np.array(fc_ramp.get_density()).real
     d_flat = np.array(fc_flat.get_density()).real
     assert np.max(np.abs(d_ramp - d_flat)) < 1e-4
+
+
+@pytest.mark.parametrize("version", [julia_live_param()])
+def test_julia_ramp_schedule_is_pyitensors(version):
+    """julia_live built a flat maxdim schedule and ignored bond_ramp.
+    get_gs.jl's make_sweeps_ramped is _make_sweeps_ramped's counterpart:
+    the same maxdim and noise per sweep, the floor of a warm start and the
+    three flat cases included."""
+    from dmrgpy.mpsjulialive.juliasession import Main
+    from dmrgpy.pyitensor.chain import Chain
+    cases = [(16, 120, 10, 0.5, 0.1, 0), (16, 120, 10, 0.25, 0.1, 0),
+             (16, 120, 10, 0.75, 0.3, 0), (16, 120, 10, 0.5, 0.1, 64),
+             (7, 33, 3, 0.5, 0.1, 0), (12, 40, 0, 0.6, 0.5, 0),
+             (1, 40, 10, 0.5, 0.1, 0), (10, 8, 10, 0.5, 0.1, 0),
+             (10, 1, 10, 0.5, 0.1, 0)]
+    for ns, maxm, start, frac, decay, floor_dim in cases:
+        ch = Chain([2] * 8)
+        ch.set_sweep_params(maxm, ns, 1e-12, 1e-7)
+        ch.set_bond_ramp(True, start, frac, decay)
+        sw = ch._make_sweeps_ramped(ns, maxm, floor_dim)
+        dims = [sw.at(i)[0] for i in range(ns)]
+        noise = [sw.at(i)[2] for i in range(ns)]
+        jl = Main.make_sweeps_ramped(ns, maxm, 1e-12, 1e-7, start, frac,
+                                     decay, floor_dim)
+        jd, jn = Main.sweep_schedule(jl)
+        assert [int(d) for d in jd] == dims, (ns, maxm, start, frac)
+        assert np.allclose([float(z) for z in jn], noise, rtol=1e-12,
+                           atol=0.0), (ns, maxm, start, frac)
+
+
+@pytest.mark.parametrize("version", [julia_live_param()])
+def test_julia_ramp_and_flat_agree_on_16_sites(version):
+    """The ramp changes the schedule, not the answer: 16 sites at full
+    convergence, ramped and flat, to 1e-8."""
+    es = []
+    for ramp in (True, False):
+        np.random.seed(3)
+        sc = heisenberg(n=16, itensor_version=version, maxm=80, nsweeps=14)
+        sc.bond_ramp = ramp
+        es.append(np.real(sc.gs_energy()))
+    assert es[0] == pytest.approx(es[1], abs=1e-8)
