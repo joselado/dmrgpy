@@ -16,7 +16,7 @@ os.system("pip install pmdarima")
 # Trigger juliacall/juliapkg to provision Julia (via juliaup, reusing any
 # existing Julia install juliapkg finds; no manual download/tarball dance
 # needed here any more) and resolve+precompile the packages declared in
-# src/dmrgpy/juliapkg.json (ITensors, ITensorMPS, ITensorNHDMRG) into its
+# src/dmrgpy/juliapkg.json (ITensors, ITensorMPS, ITensorNHDMRG, KrylovKit) into its
 # own managed project. This can take several minutes the first time
 # (registry update + precompilation); later imports reuse the same
 # managed project and are fast.

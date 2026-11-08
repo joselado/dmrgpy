@@ -13,6 +13,10 @@
             "uuid": "8eead381-b44f-4c25-a327-91918c5e5257",
             "url": "https://github.com/tipfom/ITensorNHDMRG.jl",
             "rev": "main"
+        },
+        "KrylovKit": {
+            "uuid": "0b1a1467-8014-51b9-945f-bf0ae24f4b77",
+            "version": "0.10"
         }
     }
 }

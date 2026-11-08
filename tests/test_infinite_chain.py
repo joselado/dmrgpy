@@ -254,12 +254,41 @@ def test_n_uc_above_2_is_constructible_and_idmrg_still_rejects_it():
 
 def test_itensor_version_other_than_python_or_3_not_implemented():
     """itensor_version=3 (the ITensor v3 C++ backend) is implemented -- see
-    the itensor_version3_* tests below; 2 (no mpscpp2 iDMRG port) and
-    "julia_live" (no mpsjulialive iDMRG port either) are not."""
+    the itensor_version3_* tests below; 2 (no mpscpp2 iDMRG port) is not.
+    "julia_live" has a native Julia VUMPS ground state with vev/correlator
+    (tests/test_infinite_chain_julia_live.py) and nothing else: every other
+    gs_method, cell or method raises NotImplementedError before any Julia
+    is started, so this part needs no Julia toolchain."""
     with pytest.raises(NotImplementedError):
         infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=2)
-    with pytest.raises(NotImplementedError):
-        infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="julia_live")
+    ic = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="julia_live")
+    ic.set_hamiltonian(ic.SzC[0] * ic.SzR[0] + ic.SxC[0])
+    ic.gs_method = "idmrg"
+    for call in (ic.gs_energy, lambda: ic.vev("Sz", 0),
+                 lambda: ic.correlator("Sz", 0, "Sz", 1)):
+        with pytest.raises(NotImplementedError, match="julia_live"):
+            call()
+    ic.gs_method = "vumps"
+    for call in (lambda: ic.excitation_energies(0.0),
+                 lambda: ic.excitation_gap(),
+                 lambda: ic.spectral_weights("Sz", 0.0),
+                 lambda: ic.local_excitation_gap(),
+                 lambda: ic.kpm_finite("Sz", 0, "Sz", 1, 10),
+                 lambda: ic.td_dynamical_correlator("Sz", 0, "Sz", 10),
+                 lambda: ic.apply_operator(ic.SxC[0]),
+                 lambda: ic.overlap(ic),
+                 lambda: ic.summps(ic)):
+        with pytest.raises(NotImplementedError, match="julia_live"):
+            call()
+    # a three-site cell and a reach-2 coupling need the sequential solver
+    ic3 = infinitechain.Infinite_Spin_Chain(["1/2"] * 3, itensor_version="julia_live")
+    ic3.set_hamiltonian(ic3.SzC[2] * ic3.SzR[0])
+    with pytest.raises(NotImplementedError, match="n_uc=3"):
+        ic3.gs_energy()
+    ic2 = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version="julia_live")
+    ic2.set_hamiltonian(ic2.SzC[0] * ic2.get_operator("Sz", 0, group=2))
+    with pytest.raises(NotImplementedError, match="reach 2"):
+        ic2.gs_energy()
 
 
 @pytest.mark.skipif(not cppext.available(3),
