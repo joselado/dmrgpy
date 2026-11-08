@@ -124,8 +124,18 @@ def _tdvp_trajectory(chain, Hop, wf0, dt, n_half):
         # intended [-3000,...,0,...,3000])
         t, wf, out_t, out_wf = 0.0, wf0_unit, [], []
         for _ in range(n_half):
-            handle = chain._session.tdvp_step(Hop.cpp_handle, wf.cpp_handle, step)
-            wf = mpsmod.MPS(chain, cpp_handle=handle).copy()
+            if chain.itensor_version == "julia_live":
+                # tdvp.jl's tdvp_step, normalize=false; the norm0 rescale
+                # below is then a no-op up to the truncation
+                from ..mpsjulialive.juliasession import Main as Mainjl
+                from ..mpsjulialive.mps import MPS as JLMPS
+                jlmps = Mainjl.tdvp_step(Hop.jlmpo, wf.jlmps, step,
+                                         chain.cutoff, chain.maxm)
+                wf = JLMPS(jlmps, MBO=chain)
+            else:
+                handle = chain._session.tdvp_step(Hop.cpp_handle,
+                                                  wf.cpp_handle, step)
+                wf = mpsmod.MPS(chain, cpp_handle=handle).copy()
             t = t + step
             out_t.append(t); out_wf.append(wf)
         return out_t, out_wf
