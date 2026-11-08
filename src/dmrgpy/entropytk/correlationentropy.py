@@ -260,6 +260,10 @@ def cpp_correlation_matrix(wf):
     """Compute the correlation matrix using the C++
     specialized function"""
     self = wf.MBO
+    if getattr(wf,"jlmps",None) is not None: # julia_live, correlations.jl
+        from ..mpsjulialive.juliasession import Main
+        return np.array(Main.correlation_matrix_cdc(wf.jlmps),
+                dtype=np.complex128)
     return self._session.correlation_matrix(wf.cpp_handle)
 
 
@@ -297,11 +301,22 @@ def _default_dmmode(self,wf,basis):
     explicitly-requested one)."""
     if not getattr(self,"conserved_sector",None):
         return "fast" # no sector: nothing stops the cheapest route
+    if basis!="Nambu" and _julia_spinless(wf):
+        return "full" # julia_live, mpsjulialive/correlations.jl
     session = getattr(getattr(wf,"MBO",None),"_session",None)
     if basis!="Nambu" and getattr(wf,"cpp_handle",None) is not None \
             and hasattr(session,"correlation_matrix"):
         return "full" # a live DMRG session that can answer directly
     return "explicit" # always correct, backend-agnostic
+
+
+def _julia_spinless(wf):
+    """True for a julia_live state on a chain of spinless fermion sites
+    only, the one case mpsjulialive/correlations.jl answers."""
+    if getattr(wf,"jlmps",None) is None: return False
+    from ..mpsjulialive.juliasession import Main
+    return bool(Main.seval("psi -> all(s -> hastags(s,\"Fermion\"), "
+            "siteinds(psi))")(wf.jlmps))
 
 
 def get_four_correlation_tensor(wf,ctmode=None,**kwargs):
