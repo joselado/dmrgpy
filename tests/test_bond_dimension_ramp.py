@@ -291,3 +291,36 @@ def test_julia_ramp_and_flat_agree_on_16_sites(version):
         sc.bond_ramp = ramp
         es.append(np.real(sc.gs_energy()))
     assert es[0] == pytest.approx(es[1], abs=1e-8)
+
+
+@pytest.mark.parametrize("version", [julia_live_param()])
+def test_julia_warm_ramp_keeps_the_start(version):
+    """A warm julia_live solve floors the ramp at the bond dimension of its
+    start (get_gs.jl's get_gs_dmrg, warm=true), so two ramped sweeps from a
+    converged 24-site state leave its energy where it is (5e-14 measured).
+    The same call with warm=false truncates the start to bond_ramp_start
+    on the first sweep, and one sweep at maxm=64 does not quite undo it
+    (1.6e-8 measured; on 12 sites it does, to 3e-12, so a shorter chain
+    could not see a missing floor)."""
+    from dmrgpy.mpsjulialive.juliasession import Main
+    np.random.seed(5)
+    sc = heisenberg(n=24, itensor_version=version, maxm=64, nsweeps=16)
+    e_conv = float(np.real(sc.gs_energy()))
+    psi0 = sc.wf0.jlmps
+    assert int(Main.maxlinkdim(psi0)) > 32
+    H = sc.toMPO(sc.hamiltonian).jlmpo
+    floor = int(Main.maxlinkdim(psi0))
+    cold_dims, _ = Main.sweep_schedule(Main.make_sweeps_ramped(
+        2, 64, 1e-12, 0.0, 10, 0.5, 0.1, 0))
+    warm_dims, _ = Main.sweep_schedule(Main.make_sweeps_ramped(
+        2, 64, 1e-12, 0.0, 10, 0.5, 0.1, floor))
+    assert int(cold_dims[0]) == 10 # the cold first sweep truncates
+    assert int(warm_dims[0]) >= floor # the warm one does not
+    def two_sweeps(warm):
+        e, _ = Main.get_gs_dmrg(H, Main.copy(psi0), nsweeps=2, cutoff=1e-12,
+                                maxm=64, ishermitian=True, noise=0.0,
+                                ramp=True, ramp_start=10, ramp_fraction=0.5,
+                                ramp_decay=0.1, warm=warm)
+        return float(np.real(e))
+    assert two_sweeps(True) <= e_conv + 1e-10
+    assert two_sweeps(False) > e_conv + 1e-9 # the floor is what keeps it
