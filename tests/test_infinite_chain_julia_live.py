@@ -111,3 +111,43 @@ def test_heisenberg_energy_matches_python_and_bethe_ansatz(itv):
     assert (_heisenberg(itv, 4).gs_energy()
             == pytest.approx(_heisenberg("python", 4).gs_energy(), abs=1e-6))
     assert _heisenberg(itv, 16).gs_energy() == pytest.approx(BETHE, abs=1e-4)
+
+
+@pytest.mark.parametrize("itv", [julia_live_param()])
+def test_matrix_free_branch_matches_dense_branch(itv):
+    """Above a bond dimension of 24 (transfer maps) and a dimension of 256
+    (H_AC, H_C) the Julia solver runs KrylovKit matrix-free; forcing that
+    branch on small problems must give the same state as the dense one."""
+    from dmrgpy.mpsjulialive.juliasession import Main
+    dense = {}
+    for name, mk, ops in (("tfim", lambda: _tfim(itv, 4), [("Sz", 0, "Sz"), ("Sx", 0, "Sx")]),
+                          ("ssh", lambda: _ssh(itv, 4), [("Cdag", 0, "C"), ("Cdag", 1, "C")])):
+        c = mk()
+        dense[name] = (c.gs_energy(), [c.correlator(a, p, b, r) for a, p, b in ops for r in range(4)])
+    old = Main.DmrgpyVumps.set_dense_thresholds(0, 0)
+    try:
+        for name, mk, ops in (("tfim", lambda: _tfim(itv, 4), [("Sz", 0, "Sz"), ("Sx", 0, "Sx")]),
+                              ("ssh", lambda: _ssh(itv, 4), [("Cdag", 0, "C"), ("Cdag", 1, "C")])):
+            c = mk()
+            e = c.gs_energy()
+            assert c.converged
+            assert e == pytest.approx(dense[name][0], abs=1e-9)
+            cors = [c.correlator(a, p, b, r) for a, p, b in ops for r in range(4)]
+            assert np.allclose(cors, dense[name][1], atol=1e-6)
+    finally:
+        Main.DmrgpyVumps.set_dense_thresholds(old[0], old[1])
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+@pytest.mark.parametrize("itv", [julia_live_param()])
+def test_redundant_bond_dimension_polarized_chain(itv):
+    """The exact state is a product state, so at maxm=4 three directions
+    carry no weight and the transfer matrix has a degenerate dominant
+    eigenvalue; the bond candidate must take over and every run must land
+    on the exact energy -1/2 - 1/8."""
+    for _ in range(5):
+        c = infinitechain.Infinite_Spin_Chain(["1/2"], itensor_version=itv)
+        c.set_hamiltonian(-1.0 * c.SzC[0] - 0.5 * c.SzC[0] * c.SzR[0])
+        c.maxm, c.maxiter, c.etol = 4, 300, 1e-10
+        assert c.gs_energy() == pytest.approx(-0.625, abs=1e-10)
+        assert c.vev("Sz", 0) == pytest.approx(0.5, abs=1e-8)

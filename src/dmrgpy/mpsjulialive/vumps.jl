@@ -26,9 +26,17 @@ const KK = ITensorMPS.KrylovKit
 const CT = ComplexF64
 
 # Below these sizes a linear map is built densely and solved directly;
-# above them KrylovKit runs matrix-free.
-const DENSE_TRANSFER_MAX = 24      # bond dimension D (transfer maps are D^2 x D^2)
-const DENSE_HEFF_MAX = 256         # dimension of the H_AC / H_C problems
+# above them KrylovKit runs matrix-free. Refs, so that a test can force the
+# matrix-free branch on a small problem and compare the two.
+const DENSE_TRANSFER_MAX = Ref(24)   # bond dimension D (transfer maps are D^2 x D^2)
+const DENSE_HEFF_MAX = Ref(256)      # dimension of the H_AC / H_C problems
+
+function set_dense_thresholds(transfer::Integer, heff::Integer)
+    old = (DENSE_TRANSFER_MAX[], DENSE_HEFF_MAX[])
+    DENSE_TRANSFER_MAX[] = transfer
+    DENSE_HEFF_MAX[] = heff
+    return old
+end
 
 # --- primitives --------------------------------------------------------
 
@@ -125,7 +133,7 @@ function fixed_point(cand::Matrix{CT}, apply, matrix_builder, D::Int)
 end
 
 function dominant_eigvec(apply, matrix_builder, D::Int)
-    if D <= DENSE_TRANSFER_MAX
+    if D <= max(DENSE_TRANSFER_MAX[], 2)
         T = matrix_builder()
         F = eigen(T)
         idx = sortperm(abs.(F.values), rev=true)
@@ -179,7 +187,7 @@ end
 # solve X - T(X) + I*<X|fp> = rhs
 function regularized_solve(rhs::Matrix{CT}, apply, matrix_builder, fp, D::Int)
     Id = Matrix{CT}(I, D, D)
-    if D <= DENSE_TRANSFER_MAX
+    if D <= max(DENSE_TRANSFER_MAX[], 2)
         T = matrix_builder()
         A = Matrix{CT}(I, D * D, D * D) - T + vec(Id) * transpose(vec(fp))
         return reshape(A \ vec(rhs), D, D)
@@ -261,7 +269,7 @@ end
 function lowest_eigvec(apply, x0::Array{CT}, rtol::Float64, niter::Int)
     shp = size(x0)
     n = length(x0)
-    if n <= DENSE_HEFF_MAX
+    if n <= max(DENSE_HEFF_MAX[], 4)
         H = zeros(CT, n, n)
         e = zeros(CT, n)
         for j in 1:n
