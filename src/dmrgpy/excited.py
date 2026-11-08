@@ -100,7 +100,7 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
             "Hilbert space has dimension %d"%(n,dim))
     H = self.hamiltonian # make a check
     if not self.is_hermitian(H): # non-Hermitian Hamiltonians
-        if n==1 and self.itensor_version in (2,3,"python"):
+        if n==1 and self.itensor_version in (2,3,"python","julia_live"):
             # ground state only: use the same NH-DMRG solve gs_energy()
             # routes to (groundstate.py's non-Hermitian branch), so the
             # two entry points cannot return different eigenpair members

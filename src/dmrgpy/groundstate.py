@@ -990,6 +990,13 @@ def gs_energy_generalized(self,A,lam0=None):
             "gs_energy_generalized: pyitensor's two-site DMRG can't handle "
             "a chain this short (n=%d < 2 sites) -- use mode=\"ED\" for the "
             "plain ground state, or a longer chain"%self.ns)
+    if self.itensor_version=="julia_live" and self.ns<2:
+        # ITensorMPS's dmrg() refuses one site with a JuliaError, and the
+        # generalized solve has no ED fallback to take instead
+        raise RuntimeError(
+            "gs_energy_generalized: itensor_version='julia_live' can't "
+            "handle a chain this short (n=%d < 2 sites) -- use mode=\"ED\" "
+            "for the plain ground state, or a longer chain"%self.ns)
     if not self.is_hermitian(self.hamiltonian):
         # Non-Hermitian H: dispatch to the NH-DMRG generalized solver
         # (nhdmrg.py's nhdmrg_generalized()/gs_energy_generalized_nhdmrg())
