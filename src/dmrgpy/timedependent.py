@@ -45,18 +45,19 @@ def check_tevol_method(self):
             +", ".join(repr(m) for m in TEVOL_METHODS)
             +". (An unrecognized method used to run the legacy MPO-Taylor "
             "integrator silently.)")
-    # "TDVP_CBE" exists on itensor_version="python" and 3 only. Every
-    # dispatch below ends in the MPO-Taylor else-branch, which v2 would
-    # reach with this name, and julia_live has no such integrator either,
-    # so the request is refused here, ahead of every branch, rather than
-    # answered by a different integrator.
-    from .groundstate import CBE_BACKENDS
-    if self.tevol_method=="TDVP_CBE" and self.itensor_version not in CBE_BACKENDS:
+    # "TDVP_CBE" exists on itensor_version="python", 3 and julia_live
+    # (mpsjulialive/cbe.jl) only. Every dispatch below ends in the
+    # MPO-Taylor else-branch, which v2 would reach with this name, so the
+    # request is refused here, ahead of every branch, rather than answered
+    # by a different integrator.
+    from .groundstate import TDVP_CBE_BACKENDS
+    if self.tevol_method=="TDVP_CBE" and self.itensor_version not in TDVP_CBE_BACKENDS:
         raise NotImplementedError(
             "tevol_method='TDVP_CBE' (one-site TDVP with controlled bond "
-            "expansion) is implemented on itensor_version=\"python\" and 3 "
-            "only, and this chain uses itensor_version=%r. Switch the chain "
-            "with setup_python() or setup_cpp(version=3), or use "
+            "expansion) is implemented on itensor_version=\"python\", 3 and "
+            "\"julia_live\" only, and this chain uses itensor_version=%r. "
+            "Switch the chain with setup_python() or setup_cpp(version=3), "
+            "or use "
             "tevol_method=\"TDVP\" or \"TDVP_GSE\"."
             %(self.itensor_version,))
     if self.tevol_method=="TDVP_CBE":

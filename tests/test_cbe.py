@@ -14,8 +14,8 @@ arXiv:2208.10972). Both live in pyitensor/cbe.py. What is pinned here:
   state while CBE reaches the ground state;
 - CBE-TDVP follows ED after a quench from a product state, where TDVP_GSE
   stops growing its bonds after tdvp_gse_sweeps steps;
-- v2 and julia_live refuse both settings, naming "python" (v3 has them
-  too, tests/test_cbe_v3.py).
+- v2 refuses both settings, naming "python" (v3 and julia_live have both,
+  tests/test_cbe_v3.py and tests/test_cbe_julia.py).
 
 Every DMRG case pins its sweep schedule and its random seed.
 """
@@ -261,11 +261,10 @@ def test_dmrg_method_is_validated_and_refused_where_it_does_not_exist():
             sc.gs_energy()
         with pytest.raises(NotImplementedError, match='"python"'):
             sc.get_gs()
-    # julia_live: the same check, without starting Julia
+    # julia_live has it too (mpsjulialive/cbe.jl, tests/test_cbe_julia.py)
     stub = types.SimpleNamespace(dmrg_method="CBE", cbe_delta=0.1,
                                  itensor_version="julia_live")
-    with pytest.raises(NotImplementedError, match='"python"'):
-        groundstate.check_dmrg_method(stub)
+    groundstate.check_dmrg_method(stub)
 
 
 def test_excited_states_refuse_cbe():
@@ -342,10 +341,10 @@ def test_tdvp_cbe_is_refused_on_other_backends():
             timedependent.evolve_and_measure(sc, operator=sc.Sz[0], nt=3, dt=0.1)
         with pytest.raises(NotImplementedError, match='"python"'):
             timedependent.evolution_DC(sc, name=(sc.Sz[0], sc.Sz[0]), nt=3, dt=0.1)
+    # julia_live has it too (mpsjulialive/cbe.jl, tests/test_cbe_julia.py)
     stub = types.SimpleNamespace(tevol_method="TDVP_CBE",
                                  itensor_version="julia_live")
-    with pytest.raises(NotImplementedError, match='"python"'):
-        timedependent.check_tevol_method(stub)
+    timedependent.check_tevol_method(stub)
 
 
 # ---------------------------------------------------------------- GPU rule

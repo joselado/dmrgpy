@@ -74,6 +74,8 @@ def initialize():
     files += ["ddmrg.jl"] # cvm_solver="variational" correction vector;
                            # calls mpsalgebra.jl's apply_op
     files += ["fourpoint.jl"] # four-point tensor, environment-reuse walk
+    files += ["cbe.jl"] # one-site DMRG with controlled bond expansion;
+                         # uses only ITensors/ITensorMPS
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 

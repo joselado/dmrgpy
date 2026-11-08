@@ -58,7 +58,7 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,**kwargs):
     timedependent.py::evolution_dmrg_DC's TDVP/TDVP_GSE/TEBD/AUTO
     branches (itensor_version=3/"python"); the legacy MPO-Taylor path has
     no julia_live implementation at all."""
-    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TEBD","AUTO"))
+    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TDVP_CBE","TEBD","AUTO"))
     name = operatornames.str2MO(self,name,
             require_symbolic_for="submode='TD' on julia_live",**kwargs)
     name[0] = name[0].get_dagger()
@@ -97,6 +97,10 @@ def evolution_dmrg_DC(self,name="XX",nt=10000,dt=0.1,**kwargs):
                     A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm,
                     int(self.tdvp_gse_sweeps),int(self.tdvp_gse_krylov_order),
                     self.tdvp_gse_cutoff,herm=herm)
+        elif self.tevol_method=="TDVP_CBE": # cbe.jl
+            correlator,_wf = Mainjl.quench_tdvp_cbe(Hshift.jlmpo,
+                    A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm,
+                    float(self.cbe_delta))
         else:
             correlator,_wf = Mainjl.quench_tdvp(Hshift.jlmpo,
                     A1.jlmpo,A2.jlmpo,wf0.jlmps,int(nt),dt,self.cutoff,self.maxm,
@@ -118,7 +122,7 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
     tebd.jl rejects `h` for not being nearest-neighbor). Mirrors
     timedependent.py::evolve_and_measure_dmrg's TDVP/TDVP_GSE/TEBD/AUTO
     branches."""
-    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TEBD","AUTO"))
+    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TDVP_CBE","TEBD","AUTO"))
     if h is None: h = self.hamiltonian # Hamiltonian
     # the chain's ground state, solved if needed, as on the session
     # backends (timedependent.py); self.wf0 is None on a fresh chain. An
@@ -149,6 +153,10 @@ def evolve_and_measure_dmrg(self,operator=None,nt=1000,h=None,
                     self.maxm,int(self.tdvp_gse_sweeps),
                     int(self.tdvp_gse_krylov_order),self.tdvp_gse_cutoff,
                     herm=herm)
+        elif self.tevol_method=="TDVP_CBE": # cbe.jl
+            correlator,wf_final_jl = Mainjl.evolve_and_measure_tdvp_cbe(
+                    Hop.jlmpo,Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,
+                    self.maxm,float(self.cbe_delta))
         else:
             correlator,wf_final_jl = Mainjl.evolve_and_measure_tdvp(Hop.jlmpo,
                     Aop.jlmpo,wf.jlmps,int(nt),dt,self.cutoff,self.maxm,
@@ -188,10 +196,13 @@ def advance_complex_time_step(self,Hop,wf,dz,do_gse=False):
     and reduces to plain "TDVP" (the else branch below already treats
     anything other than "TDVP_GSE" that way) -- TDZ has no TEBD
     counterpart to try first, see tdz.py's own docstring for why."""
-    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","AUTO"))
+    _check_tevol_method(self,methods=("TDVP","TDVP_GSE","TDVP_CBE","AUTO"))
     from .juliasession import Main as Mainjl
     from .mps import MPS
-    if self.tevol_method=="TDVP_GSE":
+    if self.tevol_method=="TDVP_CBE": # cbe.jl, expanding at every step
+        psi = Mainjl.tdvp_cbe_step(Hop.jlmpo,wf.jlmps,dz,self.cutoff,
+                self.maxm,delta=float(self.cbe_delta))
+    elif self.tevol_method=="TDVP_GSE":
         psi = wf.jlmps
         if do_gse:
             psi = Mainjl.gse_expand(Hop.jlmpo,psi,
