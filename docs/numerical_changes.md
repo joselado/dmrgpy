@@ -1444,6 +1444,7 @@ of two. What changes is a product of operators that do not commute: for
 `toMPO(Cdag[i])*toMPO(C[j])` with i and j different the sign flipped, and
 for `toMPO(Sp[0])*toMPO(Sz[0])` the matrix element came out as that of
 `Sz[0]*Sp[0]`. Inside the library, the products are of commuting operators (powers of
-H, S^2, parity strings), except `atomtk/iets.py`'s `Cdag_i*C_j`. Its sign
-flips, but it enters only through the pair (A, A^dagger), so the IETS
-spectra do not move either.
+H, S^2, parity strings), with one exception. `multioperatortk/longoperator.py`
+chains the pieces of a long term; at the default `maxp=4` they act on
+disjoint sites and nothing moves, while at `maxp=1` the old order was wrong
+(off by 0.15 on a Jordan-Wigner string) and the new one is right.
