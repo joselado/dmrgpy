@@ -253,6 +253,40 @@ def real_if_exact(arrays):
 MAX_PADDED_DIMENSION = 4_000_000
 
 
+def compress_mpo(Ws, tol=1e-13):
+    """The same operator as the MPO arrays Ws with every bond at its exact
+    rank: one SVD sweep from the right and one from the left, dropping the
+    singular values below tol times the largest of their bond, which are
+    the channels that carry nothing (rounding apart, the operator is
+    unchanged).
+
+    AutoMPO writes a one-site operator with bond dimension 2 (the channel
+    "not placed yet" next to "placed"), and it comes out of here with bond
+    dimension 1, so applying it to a tangent vector costs the contractions
+    of a product operator and not half of those of H."""
+    xp = backend.xp()
+    Ws = list(Ws)
+    L = len(Ws)
+
+    def kept(S):
+        top = float(S[0]) if S.shape[0] else 0.0
+        return max(1, int(xp.sum(S > tol * top))) if top > 0.0 else 1
+
+    for l in range(L - 1, 0, -1):
+        wl, t, u, wr = Ws[l].shape
+        U, S, Vh = xp.linalg.svd(Ws[l].reshape(wl, t * u * wr), full_matrices=False)
+        k = kept(S)
+        Ws[l] = Vh[:k].reshape(k, t, u, wr)
+        Ws[l - 1] = xp.tensordot(Ws[l - 1], U[:, :k] * S[:k], axes=(3, 0))
+    for l in range(L - 1):
+        wl, t, u, wr = Ws[l].shape
+        U, S, Vh = xp.linalg.svd(Ws[l].reshape(wl * t * u, wr), full_matrices=False)
+        k = kept(S)
+        Ws[l] = U[:, :k].reshape(wl, t, u, k)
+        Ws[l + 1] = xp.tensordot(S[:k, None] * Vh[:k], Ws[l + 1], axes=(1, 0))
+    return real_if_exact(Ws)
+
+
 def check_pad_bonds(pad_bonds):
     """pad_bonds as given if it is None, "full" or a positive int; a
     ValueError otherwise."""
@@ -334,6 +368,9 @@ def pad_mps_bonds(Ms, pad_bonds):
 # The feeds of expand_bonds: P^{2perp} O|GS> and P^{2perp} H P O|GS>, what
 # the Lanczos from P O|GS> loses at its start and at its first step.
 EXPANSION_FEEDS = ("operator", "krylov")
+# Bytes apply_many may hold for one stack of tangent vectors (the stacked
+# environments and the largest intermediate, counted as complex).
+BATCH_BYTES = 1 << 30
 
 # Singular values of the stacked feeds below this fraction of the largest
 # one over all bonds are not used: a bond whose discarded weight is
@@ -498,6 +535,83 @@ def _open2(Le, W1, W2, K2, Re):
     return xp.tensordot(X, Re, axes=([1, 4], [2, 1]))  # a t u x
 
 
+# The same contractions for a stack of tangent vectors, with one leading
+# batch axis on the tensor that carries the vector (the ket K, or an
+# environment that already holds it) and on the result. One tensordot then
+# does the work of one per vector: at bond dimensions of a few tens the
+# time of the unbatched calls was the call overhead, not the algebra
+# (700 000 tensordot calls for the 1212 applications of a 24-site Kondo
+# spectrum at D=40).
+
+def _ext_left_k(E, bra, W, K):
+    """_ext_left with a batched ket K[n,b,s,z]; returns [n,x,y,z]."""
+    xp = backend.xp()
+    X = xp.tensordot(E, K, axes=(2, 1))  # a w n s z
+    X = xp.tensordot(X, W, axes=([1, 3], [0, 2]))  # a n z t y
+    X = xp.tensordot(bra.conj(), X, axes=([0, 1], [0, 3]))  # x n z y
+    return X.transpose(1, 0, 3, 2)
+
+
+def _ext_left_e(E, bra, W, ket):
+    """_ext_left with a batched environment E[n,a,w,b]."""
+    xp = backend.xp()
+    X = xp.tensordot(E, ket, axes=(3, 0))  # n a w s z
+    X = xp.tensordot(X, W, axes=([2, 3], [0, 2]))  # n a z t y
+    X = xp.tensordot(bra.conj(), X, axes=([0, 1], [1, 3]))  # x n z y
+    return X.transpose(1, 0, 3, 2)
+
+
+def _ext_right_k(E, bra, W, K):
+    """_ext_right with a batched ket K[n,b,s,z]; returns [n,a,w,b]."""
+    xp = backend.xp()
+    X = xp.tensordot(K, E, axes=(3, 2))  # n b s x y
+    X = xp.tensordot(X, W, axes=([2, 4], [2, 3]))  # n b x w t
+    X = xp.tensordot(bra.conj(), X, axes=([1, 2], [4, 2]))  # a n b w
+    return X.transpose(1, 0, 3, 2)
+
+
+def _ext_right_e(E, bra, W, ket):
+    """_ext_right with a batched environment E[n,x,y,z]."""
+    xp = backend.xp()
+    X = xp.tensordot(ket, E, axes=(2, 3))  # b s n x y
+    X = xp.tensordot(X, W, axes=([1, 4], [2, 3]))  # b n x w t
+    X = xp.tensordot(bra.conj(), X, axes=([1, 2], [4, 2]))  # a b n w
+    return X.transpose(2, 0, 3, 1)
+
+
+def _open1_k(Le, W, K, Re):
+    """_open1 with a batched ket K[n,b,s,z]; returns [n,a,t,x]."""
+    xp = backend.xp()
+    X = xp.tensordot(Le, K, axes=(2, 1))  # a w n s z
+    X = xp.tensordot(X, W, axes=([1, 3], [0, 2]))  # a n z t y
+    X = xp.tensordot(X, Re, axes=([2, 4], [2, 1]))  # a n t x
+    return X.transpose(1, 0, 2, 3)
+
+
+def _open1_l(Le, W, K, Re):
+    """_open1 with a batched left environment Le[n,a,w,b]."""
+    xp = backend.xp()
+    X = xp.tensordot(Le, K, axes=(3, 0))  # n a w s z
+    X = xp.tensordot(X, W, axes=([2, 3], [0, 2]))  # n a z t y
+    return xp.tensordot(X, Re, axes=([2, 4], [2, 1]))  # n a t x
+
+
+def _open1_r(Le, W, K, Re):
+    """_open1 with a batched right environment Re[n,x,y,z]."""
+    xp = backend.xp()
+    X = xp.tensordot(Le, K, axes=(2, 0))  # a w s z
+    X = xp.tensordot(X, W, axes=([1, 2], [0, 2]))  # a z t y
+    X = xp.tensordot(X, Re, axes=([1, 3], [3, 2]))  # a t n x
+    return X.transpose(2, 0, 1, 3)
+
+
+def _proj_left_many(X, A):
+    """_proj_left on a stack X[n,a,d,b]."""
+    xp = backend.xp()
+    c = xp.tensordot(X, A.conj(), axes=([1, 2], [0, 1]))  # n b' b
+    return X - xp.tensordot(c, A, axes=(2, 2)).transpose(0, 2, 3, 1)
+
+
 def _proj_left(X, A):
     """Remove from X its component in the kept space of the left isometry
     A, on X's first two legs."""
@@ -652,6 +766,62 @@ class TangentSpace:
                 y = y + _open1(LE[l], Ws[l], As[l], Rc[l + 1])
             out.append(y)
         return self.gauge(out)
+
+    def flat_many(self, X):
+        """A stack of tangent vectors as an (n, N) array, one row each."""
+        n = X[0].shape[0]
+        return backend.xp().concatenate([x.reshape(n, -1) for x in X], axis=1)
+
+    def unflat_many(self, V):
+        """The rows of an (n, N) array as a stack of tangent vectors, each
+        T_l with a leading batch axis."""
+        out, k = [], 0
+        for a in self.As:
+            out.append(V[:, k:k + a.size].reshape((V.shape[0],) + a.shape))
+            k += a.size
+        return out
+
+    def batch_size(self, op=None):
+        """How many tangent vectors apply_many takes at once for the
+        operator `op` (default H), so that the stacked right environments
+        and the largest intermediate stay within BATCH_BYTES."""
+        Ws = (op if op is not None else (self.Ws,))[0]
+        envs = sum(a.shape[2] ** 2 * W.shape[3] for a, W in zip(self.As, Ws))
+        work = max(a.size * max(W.shape[0], W.shape[3]) for a, W in zip(self.As, Ws))
+        return int(max(1, BATCH_BYTES // (16 * (envs + 3 * work + 2 * self.flat_size()))))
+
+    def apply_many(self, op, T):
+        """apply() on a stack of tangent vectors, every T_l with a leading
+        batch axis: P O P on each, as one contraction per site. The right
+        environments are kept for the whole stack and the left ones are
+        carried along the sweep, so the caller bounds the stack with
+        batch_size()."""
+        Ws, LE, RE = op
+        L, As, Bs = self.L, self.As, self.Bs
+        Rc = [None] * (L + 1)
+        for l in range(L - 1, 0, -1):
+            Rc[l] = _ext_right_k(RE[l + 1], Bs[l], Ws[l], T[l])
+            if l < L - 1:
+                Rc[l] = Rc[l] + _ext_right_e(Rc[l + 1], Bs[l], Ws[l], As[l])
+        out, Lc = [], None
+        for l in range(L):
+            y = _open1_k(LE[l], Ws[l], T[l], RE[l + 1])
+            if l > 0:
+                y = y + _open1_l(Lc, Ws[l], Bs[l], RE[l + 1])
+            if l < L - 1:
+                y = y + _open1_r(LE[l], Ws[l], As[l], Rc[l + 1])
+                new = _ext_left_k(LE[l], As[l], Ws[l], T[l])
+                if l > 0:
+                    new = new + _ext_left_e(Lc, As[l], Ws[l], Bs[l])
+                Lc = new
+            Rc[l + 1] = None
+            out.append(_proj_left_many(y, As[l]))
+        return out
+
+    def apply_h_many(self, T):
+        """P (H - E0) P on a stack of tangent vectors."""
+        y = self.apply_many((self.Ws, self.LH, self.RH), T)
+        return [a - self.e0 * t for a, t in zip(y, T)]
 
     def apply_h(self, T):
         """P (H - E0) P acting on the tangent vector T."""
@@ -917,6 +1087,50 @@ def poles(ts, b, nkry, a=None):
     return ws, weights, U, (store, m)
 
 
+def real_starts(ts, starts, tol=1e-13):
+    """The starting vectors with a global phase removed from each, as real
+    arrays, when the state and H are real and every start is a real vector
+    times a phase (S_y|GS> = i times a real vector, on a real ground
+    state); the starts unchanged otherwise.
+
+    The complex span of the starts, and so the Krylov space and every Ritz
+    value, is the same. What changes is that the basis is then real: half
+    the memory of the store, and real arithmetic in every application of H
+    and every overlap, where one imaginary start out of three made all of
+    them complex."""
+    xp = backend.xp()
+    if any(xp.iscomplexobj(x) for x in list(ts.As) + list(ts.Ws)):
+        return starts
+    out = []
+    for w in starts:
+        if not any(xp.iscomplexobj(x) for x in w):
+            out.append(w)
+            continue
+        f = ts.flat(w)
+        k = int(xp.argmax(xp.abs(f)))
+        top = backend.scalar(f[k])
+        if abs(top) == 0.0:
+            out.append([x.real for x in w])
+            continue
+        phase = top / abs(top)
+        f = f * phase.conjugate()
+        if float(xp.max(xp.abs(f.imag))) > tol * abs(top):
+            return starts
+        out.append(ts.unflat(f.real))
+    return out
+
+
+def _overlap_columns(store, ys, n):
+    """<q_i|y_k> for the first n rows q_i of the store and every row y_k of
+    ys, as a host (n, len(ys)) array: one matrix product on the host, the
+    chunked row_overlaps vector by vector on a device, where a product
+    with the whole store as an operand is what ran out of memory."""
+    if backend.backend_name() == "numpy":
+        return store[:n].conj() @ ys.T
+    return np.stack([backend.to_host(backend.row_overlaps(store, y, n))[:n]
+                     for y in ys], axis=1)
+
+
 def block_krylov(ts, starts, nkry, breakdown=1e-10):
     """Orthonormal basis of the block Krylov space of P(H-E0)P from the
     tangent vectors `starts`, nkry blocks beyond the starting one, and the
@@ -941,6 +1155,7 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10):
     (count, count) array."""
     xp = backend.xp()
     N = ts.flat_size()
+    starts = real_starts(ts, starts)
     # preallocated and filled row by row: a vstack per accepted vector
     # copies the whole basis each time
     dtype = np.result_type(*[x.dtype for w in starts for x in w],
@@ -983,10 +1198,13 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10):
         if n == done:
             break
         Hb = []
-        for j in range(done, n):
-            h = ts.apply_h(ts.unflat(store[j]))
-            Hu[:n, j] = backend.to_host(backend.row_overlaps(store, ts.flat(h), n))[:n]
-            Hb.append(h)
+        nb = ts.batch_size()
+        for j0 in range(done, n, nb):  # the whole block at once
+            j1 = min(n, j0 + nb)
+            hs = ts.flat_many(ts.apply_h_many(ts.unflat_many(store[j0:j1])))
+            Hu[:n, j0:j1] = _overlap_columns(store, hs, n)
+            Hb.extend(ts.unflat(hs[j - j0]) for j in range(j0, j1))
+            del hs
         done = n
         if step == nkry:
             break
@@ -1021,14 +1239,18 @@ def projected_spectrum(ts, ops, nkry):
 
     mats = []
     for (W, Wd), bk, bdk in zip(ops, b, bd):
-        op = ts.operator(W)
+        op = ts.operator(compress_mpo(W))
         M = np.zeros((n + 1, n + 1), dtype=complex)
         M[0, 0] = ts.expectation(op)
         M[1:, 0] = Uh @ overlaps(ts.flat(bk))
         M[0, 1:] = (Uh @ overlaps(ts.flat(bdk))).conj()
         G = np.zeros((n, n), dtype=complex)  # <q_i|O|q_j>
-        for j in range(n):
-            G[:, j] = overlaps(ts.flat(ts.apply(op, ts.unflat(store[j]))))
+        nb = ts.batch_size(op)
+        for j0 in range(0, n, nb):  # the basis in stacks, not vector by vector
+            j1 = min(n, j0 + nb)
+            ys = ts.flat_many(ts.apply_many(op, ts.unflat_many(store[j0:j1])))
+            G[:, j0:j1] = _overlap_columns(store, ys, n)
+            del ys
         M[1:, 1:] = Uh @ G @ U
         mats.append(M)
     return e, mats

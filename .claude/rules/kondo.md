@@ -101,6 +101,29 @@ energy below the snapping window means the state handed over is not the
 ground state (DMRG stopped at a mixture of a near-degenerate doublet), and
 `TaskKondoSpectrum` warns (2026-10 audit, finding 3).
 
+**The TASK spectrum is batched and cached (2026-11-10).** Four changes,
+none of which moves a number (1.7e-10 on a 24-site chain, 117 s to 28 s):
+`TangentSpace.apply_many` applies an operator to a stack of tangent
+vectors, and `block_krylov` and `projected_spectrum` use it; the operator
+MPOs go through `task.compress_mpo` before the P S P matrices are built
+(AutoMPO gives a one-site operator bond dimension 2); `task.real_starts`
+removes a global phase from each start when the state and H are real, so
+Sy no longer makes the basis complex; and `taskdmrg.session_spectrum`
+keeps the last `SPECTRUM_CACHE_SIZE` spectra on the chain
+(`_task_spectrum_cache`) under a digest of the exported arrays. The key is
+the content on purpose: do NOT replace it by a flag of the chain, since
+`n_gs` sets each member with `set_gs` and a flag would return the first
+member's spectrum for all of them. The cache serves `n_gs=1` only: with
+`n_gs>1` every call gets new members from `get_excited_states`, so every
+call builds again (measured, 2 builds per `n_gs=2` call). The MPOs of the
+starts and of H are left uncompressed, which is not tested either way. At
+`maxm=100` the factor was 3.3 (175 s to 53 s). Two fresh v3 solves of that
+chain at `maxm=40` differ by 3e-3 of the peak with the same code, so
+compare old and new code on one exported state, never across runs. Not
+measured yet: a real GPU, and sizes where `BATCH_BYTES` cuts the stack
+below a Krylov block (about 40 sites at `maxm=200`); both go to d22.
+`tests/test_task_batched_spectrum.py`.
+
 **Spinful fermion chains (2026-10-22).** `get_kondo_spectrum` lives on
 `kondospectrumtk/kondomethod.py::KondoSpectrumMixin`, inherited by
 `Spin_Chain`, `Spinful_Fermionic_Chain` and `Spinful_Fermionic_Chain_Native`;

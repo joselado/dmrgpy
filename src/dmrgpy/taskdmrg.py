@@ -150,34 +150,79 @@ def session_poles(self,terms_i,terms_j,terms_idag,nkry,variance=False,
     return ws,wt,complex(elastic),var,dim,complex(s.vev(terms_ij,wf))
 
 
+# How many spectra a chain keeps (SPECTRUM_CACHE_SIZE of them, the most
+# recent ones): enough for the members of a small n_gs manifold on a few
+# sites. Each is a few matrices of the size of the Krylov space.
+SPECTRUM_CACHE_SIZE = 8
+
+
+def _spectrum_key(Ms,Ws,ops,settings):
+    """A digest of everything task.spectrum_from_arrays reads: the site
+    arrays of the state, of H and of every operator, and the settings. The
+    key is the content and not a flag of the chain, so a state set with
+    set_gs, a new Hamiltonian or a re-solve that moved the state each give
+    a new key, and nothing has to be invalidated by hand."""
+    import hashlib
+    from .pyitensor import backend
+    h = hashlib.blake2b(digest_size=20)
+    h.update(repr((settings,backend.backend_name())).encode())
+    def feed(arrays):
+        h.update(b"|%d" % len(arrays))
+        for a in arrays:
+            a = np.ascontiguousarray(backend.to_host(a))
+            h.update(repr((a.shape,a.dtype.str)).encode())
+            h.update(a.data)
+    feed(Ms)
+    feed(Ws)
+    for W,Wd in ops:
+        feed(W)
+        feed(Wd)
+    return h.hexdigest()
+
+
 def session_spectrum(self,ops_terms,nkry,pad_bonds=None,expand_bonds=None,
         expand_rounds=1):
     """(e, mats, dim) of task.projected_spectrum on the chain's session,
     ops_terms a list of (terms of O, terms of O^dagger). pad_bonds and
-    expand_bonds as in session_poles."""
+    expand_bonds as in session_poles.
+
+    The result is kept on the chain under a digest of the arrays it was
+    computed from (_spectrum_key), so a second call on the same state, the
+    same Hamiltonian and the same operators costs the export and the digest
+    only. This is what makes a scan of get_kondo_spectrum over its coupling
+    constants or its bias grid cost one Krylov space: the spectrum does not
+    depend on them. Copies are returned, the stored arrays are never handed
+    out."""
     s = self._session
     from .pyitensor import task
     task.check_expansion_keywords(pad_bonds,expand_bonds,expand_rounds)
     if self.itensor_version=="julia_live":
         Ms,_ = _julia_state(self)
+        Ws = _julia_mpo_arrays(self,self.hamiltonian)
         ops = [(_julia_mpo_arrays(self,t),_julia_mpo_arrays(self,td))
                for t,td in ops_terms]
-        return task.spectrum_from_arrays(Ms,
-                _julia_mpo_arrays(self,self.hamiltonian),ops,nkry,
-                pad_bonds=pad_bonds,expand_bonds=expand_bonds,
-                expand_rounds=expand_rounds)
-    if self.itensor_version=="python":
+    elif self.itensor_version=="python":
         Ms,_ = _python_state(s)
+        Ws = task.mpo_arrays(s.H)
         ops = [(task.mpo_arrays(s._mpo(t)),task.mpo_arrays(s._mpo(td)))
                for t,td in ops_terms]
-        return task.spectrum_from_arrays(Ms,task.mpo_arrays(s.H),ops,nkry,
+    else:
+        Ms = s.mps_site_arrays(s.gs_wavefunction())
+        Ws = s.mpo_site_arrays(s.hamiltonian_mpo())
+        ops = [(_v3_arrays(s,t),_v3_arrays(s,td)) for t,td in ops_terms]
+    key = _spectrum_key(Ms,Ws,ops,(int(nkry),pad_bonds,expand_bonds,
+            int(expand_rounds)))
+    cache = self.__dict__.setdefault("_task_spectrum_cache",{})
+    if key in cache:
+        cache[key] = cache.pop(key) # most recent last
+    else:
+        cache[key] = task.spectrum_from_arrays(Ms,Ws,ops,nkry,
                 pad_bonds=pad_bonds,expand_bonds=expand_bonds,
-            expand_rounds=expand_rounds)
-    ops = [(_v3_arrays(s,t),_v3_arrays(s,td)) for t,td in ops_terms]
-    return task.spectrum_from_arrays(s.mps_site_arrays(s.gs_wavefunction()),
-            s.mpo_site_arrays(s.hamiltonian_mpo()),ops,nkry,
-            pad_bonds=pad_bonds,expand_bonds=expand_bonds,
-            expand_rounds=expand_rounds)
+                expand_rounds=expand_rounds)
+        while len(cache)>SPECTRUM_CACHE_SIZE:
+            cache.pop(next(iter(cache)))
+    e,mats,dim = cache[key]
+    return e.copy(),[m.copy() for m in mats],dim
 
 
 def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False,pad_bonds=None,

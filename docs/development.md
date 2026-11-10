@@ -5720,6 +5720,29 @@ $\Theta_0$ in 5 runs of 6 on a Kramers doublet until energies within
 `edkondo`'s degeneracy tolerance were snapped to 0
 (`tests/test_kondo_spectrum_task.py`).
 
+Four things keep this spectrum cheap, and none of them moves a number
+(1.7e-10 of the peak on a 24-site S=1/2 chain at `maxm=40`, `nkry=100`,
+old code against new on the same exported state, 117 s against 28 s on one
+thread, and 3.1e-10 with 175 s against 53 s at `maxm=100`; not measured on
+a GPU or at larger sizes). The tangent-space applications take a stack of vectors
+(`TangentSpace.apply_many`, with a leading batch axis and a stack size set
+by `task.BATCH_BYTES`): each Krylov block goes through $P(H-E_0)P$ at once,
+and the three matrices $PS_aP$ are built from the whole basis in stacks,
+where they used to take 909 of the 1212 applications one by one. An
+operator MPO is brought to its exact bond rank first (`task.compress_mpo`):
+AutoMPO writes a one-site operator with bond dimension 2, and with it $S_a$
+cost half an application of $H$. The starts lose a global phase when the
+state and $H$ are real (`task.real_starts`): $S_y|\mathrm{GS}\rangle$ is
+$i$ times a real vector, and that one start made the whole basis complex.
+And `taskdmrg.session_spectrum` keeps the spectrum on the chain under a
+digest of the arrays it was computed from (the state, $H$, the operators,
+the settings), so a scan of `get_kondo_spectrum` over `Jrho_s`, `U`,
+`omega0` or the bias grid builds one Krylov space; the key is the content,
+so a state set with `set_gs`, a new Hamiltonian or a re-solve gives a new
+key and nothing is invalidated by hand. With `n_gs>1` every call gets new
+members from `get_excited_states`, so there the spectra are built again
+(`tests/test_task_batched_spectrum.py`).
+
 On `itensor_version=3` the numerics are the same Python code. The session
 exports the ground-state MPS, the Hamiltonian MPO and each operator MPO as
 dense numpy site tensors (`Chain::hamiltonian_mpo`, and `mps_site_arrays`/
