@@ -248,7 +248,12 @@ def row_overlaps(store, w, count):
     JAX (zero from `count` on). See _rows_chunked for why the JAX path
     walks the store in chunks."""
     if _NAME == "numpy":
-        return (store[:count] @ w.conj()).conj()
+        Q = store[:count]
+        if np.iscomplexobj(w) and not np.iscomplexobj(Q):
+            # a real store times a complex vector makes NumPy copy the
+            # whole store as complex (measured: twice its size at peak)
+            return Q @ w.real + 1j * (Q @ w.imag)
+        return (Q @ w.conj()).conj()
     return _rows_chunked(store, w, count, False)[0]
 
 
@@ -258,6 +263,9 @@ def project_rows(store, w, count):
     Gram-Schmidt pass, c as in row_overlaps."""
     if _NAME == "numpy":
         Q = store[:count]
+        if np.iscomplexobj(w) and not np.iscomplexobj(Q):
+            c = Q @ w.real + 1j * (Q @ w.imag)  # no complex copy of Q
+            return c, w - (c.real @ Q + 1j * (c.imag @ Q))
         c = (Q @ w.conj()).conj()
         return c, w - c @ Q
     return _rows_chunked(store, w, count, True)

@@ -370,7 +370,7 @@ def pad_mps_bonds(Ms, pad_bonds):
 EXPANSION_FEEDS = ("operator", "krylov")
 # Bytes apply_many may hold for one stack of tangent vectors (the stacked
 # environments and the largest intermediate, counted as complex).
-BATCH_BYTES = 1 << 30
+BATCH_BYTES = 1 << 28
 
 # Singular values of the stacked feeds below this fraction of the largest
 # one over all bonds are not used: a bond whose discarded weight is
@@ -1126,7 +1126,14 @@ def _overlap_columns(store, ys, n):
     chunked row_overlaps vector by vector on a device, where a product
     with the whole store as an operand is what ran out of memory."""
     if backend.backend_name() == "numpy":
-        return store[:n].conj() @ ys.T
+        # written so that the store is never copied: its conjugate, or its
+        # complex copy when it is real and ys is not, is as large as it is
+        Qt = store[:n].T
+        if np.iscomplexobj(store):
+            return (ys.conj() @ Qt).conj().T
+        if np.iscomplexobj(ys):
+            return (ys.real @ Qt + 1j * (ys.imag @ Qt)).T
+        return (ys @ Qt).T
     return np.stack([backend.to_host(backend.row_overlaps(store, y, n))[:n]
                      for y in ys], axis=1)
 
