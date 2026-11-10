@@ -192,6 +192,13 @@ excited states are one-site changes of the ground state, which moves the
 steps slightly. It takes only `nkry` (default 100, increase until the
 spectrum stops changing) and `n_gs`.
 
+At $T=0$ every excited state is a sharp step of $dI/dV$. On a long chain
+the Krylov space resolves only the lowest excited states one by one, and
+the others are steps at energies that still move with `nkry`. A warning
+says how many, and how large the largest of these steps is. A larger
+`nkry` makes them fewer. On a long chain some always remain, so compare
+such curves only at a bias resolution above the spacing of the steps.
+
 See `examples/kondo/kondo_third_order_dmrg_VS_ED`, which is the right
 panel of the figure in [Third order](#third-order), and
 `examples/kondo/kondo_third_order_task_VS_ED`. The tip couples to one

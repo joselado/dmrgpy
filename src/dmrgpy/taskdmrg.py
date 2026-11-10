@@ -181,10 +181,12 @@ def _spectrum_key(Ms,Ws,ops,settings):
 
 
 def session_spectrum(self,ops_terms,nkry,pad_bonds=None,expand_bonds=None,
-        expand_rounds=1):
+        expand_rounds=1,residual=False):
     """(e, mats, dim) of task.projected_spectrum on the chain's session,
     ops_terms a list of (terms of O, terms of O^dagger). pad_bonds and
-    expand_bonds as in session_poles.
+    expand_bonds as in session_poles. With residual=True a fourth entry
+    is the residual norm of every state (task.projected_spectrum), zero
+    for the ones the Krylov space has converged.
 
     The result is kept on the chain under a digest of the arrays it was
     computed from (_spectrum_key), so a second call on the same state, the
@@ -218,10 +220,11 @@ def session_spectrum(self,ops_terms,nkry,pad_bonds=None,expand_bonds=None,
     else:
         cache[key] = task.spectrum_from_arrays(Ms,Ws,ops,nkry,
                 pad_bonds=pad_bonds,expand_bonds=expand_bonds,
-                expand_rounds=expand_rounds)
+                expand_rounds=expand_rounds,residual=True)
         while len(cache)>SPECTRUM_CACHE_SIZE:
             cache.pop(next(iter(cache)))
-    e,mats,dim = cache[key]
+    e,mats,dim,res = cache[key]
+    if residual: return e.copy(),[m.copy() for m in mats],dim,res.copy()
     return e.copy(),[m.copy() for m in mats],dim
 
 

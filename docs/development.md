@@ -5723,8 +5723,14 @@ $\Theta_0$ in 5 runs of 6 on a Kramers doublet until energies within
 Four things keep this spectrum cheap, and none of them moves a number
 (1.7e-10 of the peak on a 24-site S=1/2 chain at `maxm=40`, `nkry=100`,
 old code against new on the same exported state, 117 s against 28 s on one
-thread, and 3.1e-10 with 175 s against 53 s at `maxm=100`; not measured on
-a GPU or at larger sizes). The tangent-space applications take a stack of vectors
+thread, and 3.1e-10 with 172 s against 45 s at `maxm=100`; on d22, 40 sites
+at bond dimension 100, 1.6e-13 with 691 s and 3.1 GB against 217 s and
+1.9 GB, and at bond dimension 200, 3.5e-13 with 3701 s and 10.7 GB against
+1350 s and 5.8 GB, a factor 2.7, with two runs sharing the host). The gain is on NumPy only. On JAX the old and the new code take
+the same time (297 s and 301 s on the CPU for the 24-site case, where NumPy
+takes 23 s), and on d22's RTX A2000 the 40-site run took 1477 s, 7 times
+one CPU core, in float64. The JAX host memory went up (4.6 GB against
+2.2 GB on that 24-site run), which is open. The tangent-space applications take a stack of vectors
 (`TangentSpace.apply_many`, with a leading batch axis and a stack size set
 by `task.BATCH_BYTES`): each Krylov block goes through $P(H-E_0)P$ at once,
 and the three matrices $PS_aP$ are built from the whole basis in stacks,
@@ -5742,6 +5748,45 @@ so a state set with `set_gs`, a new Hamiltonian or a re-solve gives a new
 key and nothing is invalidated by hand. With `n_gs>1` every call gets new
 members from `get_excited_states`, so there the spectra are built again
 (`tests/test_task_batched_spectrum.py`).
+
+Which poles are converged is measured. `block_krylov(residual=True)`
+returns the Gram matrix of what $P(H-E_0)P$ takes out of the basis from
+its last block, and `projected_spectrum` turns it into the residual norm
+$\lVert(PHP-e)|a\rangle\rVert$ of every Ritz state, which
+`TaskKondoSpectrum` keeps as `residual`. The reason is the $T=0$ step: a
+Ritz state with a residual is a quadrature node that stands for a group of
+eigenstates, and its energy moves with `nkry` and with a change of the
+state far below what an overlap resolves. Measured on a 24-site S=1/2
+chain (`maxm=40`, `nkry=100`), with the state changed by 1e-8: the poles
+with a residual below 1e-7 eV moved by less than 1e-11 eV, the others by
+about $r^2/(2\,\mathrm{meV})$ for a residual $r$, up to 3e-5 eV, the
+spacing of the poles; on a 161-point bias grid $dI/dV$ differed by up to
+3e-3 of its peak between two fresh solves (overlap 1 to 1e-15), at the
+points a pole had crossed, and by 1.3e-2 from the `nkry=200` curve. NumPy
+and JAX on one state differ in the same way, by 2e-5 of the peak with the
+old and the new code alike: their poles with a residual below 1e-9 of the
+width agree to 4e-17 eV, the others to 1e-6 eV.
+The mean displacement between runs (8e-7 eV) was half the distance to an
+`nkry=300` reference (1.6e-6 eV), so the difference between runs is the
+Krylov error itself and not a second error. `convergence(emax)` counts the
+poles below `emax` with a residual above `CONVERGED_RESIDUAL` (1e-8 of the
+width of the spectrum), their share of the weight and their largest step,
+and `get_kondo_spectrum` warns when that step is above `UNCONVERGED_STEP`
+(1e-3 of the largest second-order value). On that chain the share was 0.86,
+0.61, 0.31 and 0.09 at `nkry` = 50, 100, 200 and 400, so a long chain
+always warns at $T=0$, and a larger `nkry` only makes the difference
+smaller. Smoothing each step by its residual was tried and dropped: it cut
+the difference between runs by 4 and doubled the rms error against
+`nkry=300`. What removes the dependence is the thermal step of the leads.
+With `TaskKondoSpectrum.T` set by hand and the occupation left on the
+ground state, the three sums of `conductance.py` at 0.3 K gave, for two
+fresh solves, curves different by 2.9e-6 of the peak at `nkry=100`
+(3.4e-3 at $T=0$), and 1.0e-5 from the `nkry=200` curve (1.3e-2 at $T=0$).
+This holds while the sample stays in its ground state: the lowest pole
+there is 0.29 meV, a Boltzmann factor of 1.3e-5 at 0.3 K and of 3e-2 at
+1 K, where `mode="ED"` would occupy the excited states too. A temperature
+on the DMRG route is not implemented; this measurement is the case for it
+(`tests/test_kondo_task_convergence.py`).
 
 On `itensor_version=3` the numerics are the same Python code. The session
 exports the ground-state MPS, the Hamiltonian MPO and each operator MPO as

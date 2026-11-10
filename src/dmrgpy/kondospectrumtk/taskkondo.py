@@ -22,6 +22,26 @@ import numpy as np
 # exact when the bond dimension saturates the Hilbert space and the Krylov
 # space is exhausted. T=0 only, since the occupied initial state is the
 # ground state; the T>0 route stays edkondo.KondoSpectrum.
+#
+# Which Ritz states are eigenstates of PHP is measured, by the residual norm
+# ||(PHP - e)|a>|| the block Krylov returns for each of them. It matters at
+# T=0, where every pole is a sharp step of dI/dV: a pole with a residual is
+# a quadrature node that stands for a group of eigenstates, its energy moves
+# with nkry, and it moved between two solves of the same chain whose states
+# had an overlap of 1 to 1e-15 (24-site S=1/2 chain, maxm=40, nkry=100: 21
+# of the poles with weight converged, and dI/dV different by 3e-3 of its
+# peak at the biases a pole had crossed, by 1.3e-2 against nkry=200). The
+# converged poles agreed to 3e-13. convergence() reports it and
+# get_kondo_spectrum warns. A larger nkry shrinks the open share (0.61 at
+# 100, 0.09 at 400 on that chain) and does not close it on a long chain.
+
+# A Ritz state counts as an eigenstate of PHP when its residual norm is
+# below this fraction of the width of the spectrum; its energy is then
+# right to the square of that over the gap to its neighbours.
+CONVERGED_RESIDUAL = 1e-8
+# get_kondo_spectrum warns when a pole that is not converged makes a step
+# larger than this fraction of the largest second-order dI/dV.
+UNCONVERGED_STEP = 1e-3
 
 
 class TaskKondoSpectrum():
@@ -45,8 +65,11 @@ class TaskKondoSpectrum():
         for name in ("Sx", "Sy", "Sz"):
             op = getattr(chain, name)[site]
             ops.append((op.to_terms(), op.get_dagger().to_terms()))
-        e, mats, dim = taskdmrg.session_spectrum(chain, ops, int(nkry))
+        self.nkry = int(nkry)
+        e, mats, dim, res = taskdmrg.session_spectrum(chain, ops, int(nkry),
+                                                      residual=True)
         e = np.asarray(e, dtype=float)
+        self.residual = np.asarray(res, dtype=float)
         # A state degenerate with the ground state comes out of the Ritz
         # solve at +-1e-16 rather than at 0, and the zero-bias point then
         # reads the Theta0 step on one side or the other at random: on a
@@ -95,6 +118,49 @@ class TaskKondoSpectrum():
         self.p = np.zeros(self.dim)
         self.p[0] = 1.
         self.Sx, self.Sy, self.Sz = mats
+
+
+    def convergence(self, emax=np.inf):
+        """How much of the spectrum below the excitation energy emax the
+        Krylov space has converged. Returns a dict: "poles", the number of
+        poles with weight there; "unconverged", how many of them have a
+        residual norm above CONVERGED_RESIDUAL times the width of the
+        spectrum; "weight", the fraction of the spectral weight
+        sum_k |<a|S_k|GS>|^2 in that window they carry; and "step", the
+        largest of their weights over the total weight, which is the size
+        of the largest step of the second-order dI/dV whose position is
+        not converged, relative to its largest value."""
+        w = sum(np.abs(M[:, 0]) ** 2 for M in (self.Sx, self.Sy, self.Sz))
+        total = max(float(np.sum(w)), 1e-300)
+        width = max(float(np.max(np.abs(self.e))), 1e-300)
+        window = (self.e > 0.) & (self.e <= emax) & (w > 1e-14 * total)
+        loose = window & (self.residual > CONVERGED_RESIDUAL * width)
+        inside = max(float(np.sum(w[window])), 1e-300)
+        return {"poles": int(np.sum(window)),
+                "unconverged": int(np.sum(loose)),
+                "weight": float(np.sum(w[loose])) / inside,
+                "step": float(np.max(w[loose])) / total if loose.any() else 0.}
+
+    def warn_unconverged(self, emax, stacklevel=5):
+        """Warn when a pole below emax whose position is not converged
+        makes a step of dI/dV above UNCONVERGED_STEP of the largest value."""
+        c = self.convergence(emax)
+        if c["step"] <= UNCONVERGED_STEP:
+            return c
+        import warnings
+        warnings.warn(
+            "get_kondo_spectrum(submode=\"TASK\"): %d of the %d poles below "
+            "max|eV| = %.3g are not converged at nkry=%d, and they carry "
+            "%.2g of the spectral weight there. At T=0 every pole is a sharp "
+            "step of dI/dV, so at the biases next to these poles the curve "
+            "changes with nkry, and from one solve of the ground state to "
+            "the next, by up to %.2g of its largest value. A larger nkry "
+            "makes this smaller; on a long chain it does not remove it, and "
+            "curves are then comparable only at a resolution above the "
+            "spacing of the poles."
+            % (c["unconverged"], c["poles"], emax, self.nkry, c["weight"],
+               c["step"]), RuntimeWarning, stacklevel=stacklevel)
+        return c
 
 
 def connected_to_ground_state(mats, tol=1e-8):

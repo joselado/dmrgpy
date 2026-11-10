@@ -117,12 +117,38 @@ member's spectrum for all of them. The cache serves `n_gs=1` only: with
 `n_gs>1` every call gets new members from `get_excited_states`, so every
 call builds again (measured, 2 builds per `n_gs=2` call). The MPOs of the
 starts and of H are left uncompressed, which is not tested either way. At
-`maxm=100` the factor was 3.3 (175 s to 53 s). Two fresh v3 solves of that
+`maxm=100` the factor is 3.9 (172 s to 45 s, with `BATCH_BYTES` at 256 MB;
+1 GB was slower and doubled the peak memory). Two fresh v3 solves of that
 chain at `maxm=40` differ by 3e-3 of the peak with the same code, so
-compare old and new code on one exported state, never across runs. Not
-measured yet: a real GPU, and sizes where `BATCH_BYTES` cuts the stack
-below a Krylov block (about 40 sites at `maxm=200`); both go to d22.
+compare old and new code on one exported state, never across runs. On
+d22 (40 sites): 691 s to 217 s at bond dimension 100 and 3701 s to 1350 s
+at 200, on one core, with less memory (3.1 to 1.9 GB, 10.7 to 5.8 GB); and
+1477 s on the RTX A2000 at 100, so the card loses by 7 in float64. The gain is on NumPy
+only: on JAX old and new take the same time, and the new code's JAX host
+memory is higher (4.6 GB against 2.2 GB on 24 sites), which is open.
 `tests/test_task_batched_spectrum.py`.
+
+**Unconverged TASK poles are measured and warned about (2026-11-10).**
+`TaskKondoSpectrum.residual` is the Lanczos residual of every Ritz state
+(`block_krylov(residual=True)`), `convergence(emax)` the count, weight and
+largest step of the poles that have one, and `get_kondo_spectrum` warns
+above `taskkondo.UNCONVERGED_STEP`. At T=0 a pole with a residual is a
+sharp step at an energy that moves with `nkry` and with rounding of the
+solve: two solves of one 24-site chain gave dI/dV different by 3e-3 of the
+peak (1.3e-2 from `nkry=200`), and JAX against NumPy by 2e-5 on one state,
+old and new code alike, with the converged poles equal to 4e-17 eV. This
+is the Krylov error, not a bug, and a larger `nkry` shrinks it without
+closing it on a long chain. Do NOT smooth the steps by the residual
+(tested: the difference between runs went down by 4 and the rms error
+against `nkry=300` doubled). Seeding the solve was not tried; it would hide
+the difference between runs, not the error. What was measured to remove it
+is the thermal step of the leads with the sample in its ground state
+(2.9e-6 between two solves at 0.3 K, full third order), valid while kT is
+far below the lowest pole; the DMRG route does not have it yet. In `_overlap_columns`,
+`row_overlaps` and `project_rows` a real store is never multiplied by a
+complex array directly, since NumPy then copies the store as complex
+(4.7 GB against 1.9 GB on 40 sites at bond dimension 100).
+`tests/test_kondo_task_convergence.py`.
 
 **Spinful fermion chains (2026-10-22).** `get_kondo_spectrum` lives on
 `kondospectrumtk/kondomethod.py::KondoSpectrumMixin`, inherited by

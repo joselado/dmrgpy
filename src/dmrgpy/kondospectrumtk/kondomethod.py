@@ -301,6 +301,9 @@ class KondoSpectrumMixin():
                 from . import conductance
                 if self.get_mode(mode="DMRG") == "DMRG":
                     ks = TaskKondoSpectrum(self, site, nkry=nkry)
+                    # the poles the Krylov space has not converged are
+                    # sharp steps at energies that move with nkry
+                    if len(eV): ks.warn_unconverged(np.max(np.abs(eV)))
                 else: # a chain too short for the session (mode.py): the
                     # exact spectrum, as every other DMRG route falls back
                     from .edkondo import KondoSpectrum

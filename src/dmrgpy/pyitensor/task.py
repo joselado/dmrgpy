@@ -1138,7 +1138,7 @@ def _overlap_columns(store, ys, n):
                      for y in ys], axis=1)
 
 
-def block_krylov(ts, starts, nkry, breakdown=1e-10):
+def block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
     """Orthonormal basis of the block Krylov space of P(H-E0)P from the
     tangent vectors `starts`, nkry blocks beyond the starting one, and the
     projected Hamiltonian in it, Hq[i,j] = <q_i|P(H-E0)P|q_j>.
@@ -1159,7 +1159,15 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10):
     give Hq[:, j] above the diagonal, and Hermiticity gives the rest.
     Returns (store, count, Hq), the basis being the first `count` rows of
     the flattened store (the rows after `count` are zero) and Hq a host
-    (count, count) array."""
+    (count, count) array.
+
+    With residual=True a fourth entry (j0, R) describes what the basis
+    leaves out: R[j,k] = <r_j|r_k>, with r_j the part of P(H-E0)P|q_j>
+    outside the basis for the vectors j0 <= j < count of the last block,
+    the only ones whose image leaves it. A Ritz vector with coefficients u
+    then has the residual norm ||(P(H-E0)P - w)|u>|| =
+    sqrt(u[j0:]^dagger R u[j0:]), zero for an eigenstate; R is empty when
+    the Krylov space was exhausted before nkry blocks."""
     xp = backend.xp()
     N = ts.flat_size()
     starts = real_starts(ts, starts)
@@ -1200,6 +1208,7 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10):
     del first
     done = 0
     Hu = np.zeros((nmax, nmax), dtype=complex)  # Hu[i, j] for i <= j
+    left = None
     for step in range(nkry + 1):
         n = count
         if n == done:
@@ -1212,9 +1221,21 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10):
             Hu[:n, j0:j1] = _overlap_columns(store, hs, n)
             Hb.extend(ts.unflat(hs[j - j0]) for j in range(j0, j1))
             del hs
-        done = n
         if step == nkry:
+            if residual:
+                # two passes, as in add(): the remainder of a vector that
+                # is already in the space is then rounding noise
+                out = []
+                for h in Hb:
+                    h = ts.flat(h)
+                    for rep in range(2):
+                        h = backend.project_rows(store, h, n)[1]
+                    out.append(backend.to_host(h))
+                out = np.array(out)
+                left = (done, out.conj() @ out.T)
+            done = n
             break
+        done = n
         add(Hb)
         del Hb
     upper = np.triu(Hu[:count, :count])
@@ -1222,10 +1243,14 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10):
     Hq = 0.5 * (Hq + Hq.conj().T)  # real diagonal
     if not np.iscomplexobj(np.zeros(0, dtype=dtype)):
         Hq = Hq.real
+    if residual:
+        if left is None:  # nothing leaves an exhausted space
+            left = (count, np.zeros((0, 0)))
+        return store, count, Hq, left
     return store, count, Hq
 
 
-def projected_spectrum(ts, ops, nkry):
+def projected_spectrum(ts, ops, nkry, residual=False):
     """Energies and operator matrices in the basis {|GS>} + the Ritz states
     of P(H-E0)P on the block Krylov space started from P O|GS> and
     P O^dagger|GS> for every operator in `ops`.
@@ -1234,11 +1259,21 @@ def projected_spectrum(ts, ops, nkry):
     Returns (e, mats): e[0] = 0 for the ground state and e[1:] the Ritz
     energies relative to E0, and for each operator the matrix
     mats[k][a,b] = <a|O_k|b> in that basis, in which the O_k|GS> column is
-    exact and the tangent-tangent block is the projection P O_k P."""
+    exact and the tangent-tangent block is the projection P O_k P.
+
+    With residual=True a third entry gives, for every state of the basis,
+    the residual norm ||(P(H-E0)P - e)|a>|| of block_krylov: zero for the
+    ground state and for a Ritz state that is an eigenstate of P H P, and
+    of the order of the distance to its neighbours for one that only
+    stands for a group of eigenstates the Krylov space has not resolved."""
     b = [ts.project_operator(W) for W, _ in ops]  # P O|GS>
     bd = [ts.project_operator(Wd) for _, Wd in ops]  # P O^dagger|GS>
-    store, n, Hq = block_krylov(ts, b + bd, nkry)
+    store, n, Hq, (jl, R) = block_krylov(ts, b + bd, nkry, residual=True)
     ws, U = np.linalg.eigh(Hq)
+    res = np.zeros(n + 1)
+    if len(R):
+        Ul = U[jl:, :]
+        res[1:] = np.sqrt(np.abs(np.einsum("jf,jk,kf->f", Ul.conj(), R, Ul)))
     Uh = U.conj().T
     e = np.concatenate([[0.0], ws])
     def overlaps(v):  # <q_i|v> for the n basis vectors, on the host
@@ -1260,6 +1295,8 @@ def projected_spectrum(ts, ops, nkry):
             del ys
         M[1:, 1:] = Uh @ G @ U
         mats.append(M)
+    if residual:
+        return e, mats, res
     return e, mats
 
 
@@ -1299,12 +1336,16 @@ def correlator_poles(Ms, Ws, Wb, Wadag=None, nkry=100, variance=False,
 
 
 def spectrum_from_arrays(Ms, Ws, ops, nkry, pad_bonds=None,
-                         expand_bonds=None, expand_rounds=1):
+                         expand_bonds=None, expand_rounds=1, residual=False):
     """projected_spectrum from site arrays: ops is a list of (MPO of O,
-    MPO of O^dagger). Returns (e, mats, dim). pad_bonds and expand_bonds
-    as in correlator_poles; the expansion is fed by every O and O^dagger."""
+    MPO of O^dagger). Returns (e, mats, dim), and with residual=True the
+    residual norm of every state as a fourth entry. pad_bonds and
+    expand_bonds as in correlator_poles; the expansion is fed by every O
+    and O^dagger."""
     ts = TangentSpace(Ms, Ws, pad_bonds=pad_bonds, expand_bonds=expand_bonds,
                       expand_ops=[W for pair in ops for W in pair],
                       expand_rounds=expand_rounds)
-    e, mats = projected_spectrum(ts, ops, nkry)
+    e, mats, res = projected_spectrum(ts, ops, nkry, residual=True)
+    if residual:
+        return e, mats, ts.dimension(), res
     return e, mats, ts.dimension()

@@ -1454,3 +1454,21 @@ DMRG backend, at the subtraction of the expectation value from an MPO. It
 now builds its operators as MultiOperators and runs, matching `mode="ED"`.
 The `mode="ED"` spectra do not change (to 6e-17 on the trigonal d-shell
 atom of `tests/test_atom_iets.py`).
+
+
+## The 2026-11-10 TASK Kondo spectrum
+
+`get_kondo_spectrum(mode="DMRG", submode="TASK")` is 3 to 4 times faster
+on NumPy (not on JAX) and keeps its spectrum on the chain, with no change of its numbers: old
+and new code agree to 3e-10 of the peak on the same exported state.
+
+It now warns when the Krylov space has not converged the poles below
+max|eV|. At $T=0$ every pole is a sharp step, and a pole that is not
+converged sits at an energy that moves with `nkry` and with the rounding
+of the ground-state solve. Two solves of a 24-site S=1/2 chain
+(`maxm=40`, `nkry=100`) whose states have an overlap of 1 to 1e-15 gave
+curves different by up to 3e-3 of the peak, at the biases a pole had
+crossed, and the curve differs from the `nkry=200` one by 1.3e-2; the
+poles with no residual agreed to 3e-13. Any `submode="TASK"` Kondo curve from a
+long chain carries this, before and after this date. Compare such curves
+old against new on one state, not across runs.
