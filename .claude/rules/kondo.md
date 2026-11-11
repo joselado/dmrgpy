@@ -24,7 +24,7 @@ test or a Kondo example is read or edited.
 last paragraph) is the third-order perturbation theory of
 Ternes, NJP 17 063016 (2015), arXiv:1505.04430; `mode="ED"` (full
 diagonalization, any T) is the reference implementation and `mode="DMRG"`
-(T=0 only) reproduces its two T=0-reducible pieces via the dynamical
+(T=0 only, except `submode="TASK"`, see below) reproduces its two T=0-reducible pieces via the dynamical
 correlator and the third one via a two-time TDVP construction. Read
 `conductance.py`'s module docstring before touching a prefactor: every
 normalization there was pinned against the paper's absolutely scaled Fig. 7
@@ -144,7 +144,21 @@ against `nkry=300` doubled). Seeding the solve was not tried; it would hide
 the difference between runs, not the error. What was measured to remove it
 is the thermal step of the leads with the sample in its ground state
 (2.9e-6 between two solves at 0.3 K, full third order), valid while kT is
-far below the lowest pole; the DMRG route does not have it yet. In `_overlap_columns`,
+far below the lowest pole. That is `T>0` on the TASK route since
+2026-11-10 (the author's pick: "T with a guard"): `TaskKondoSpectrum(T=)`
+keeps `p` on the ground state and raises `ValueError` when the Boltzmann
+factor of the lowest pole above the ground state exceeds
+`THERMAL_OCCUPATION` = 1e-3. Do NOT turn the raise into a warning or
+populate the Ritz states thermally: the tangent space holds the
+excitations of the ground state, not those of an excited state, so its
+sums from an excited row are incomplete. The guard (`_check_cold`) takes
+the lowest pole minus its residual and wants it converged (a Ritz energy
+is an upper bound: 0.47 meV at `nkry=3` for 0.29 meV), counts the poles
+within 1e-3 kT of zero as the manifold of `n_gs` and raises when there
+are more than `n_gs`-1 (a truncated partner sits at 1.5e-9 eV, not at 0),
+and raises on a reached pole below the state. Keep all three. At T>0 the warning counts a pole only when its third nearest pole
+is further than 5.4 kT (`THERMAL_WIDTH`), a rule fitted on one 24-site
+chain. The other DMRG submodes still raise at T>0. In `_overlap_columns`,
 `row_overlaps` and `project_rows` a real store is never multiplied by a
 complex array directly, since NumPy then copies the store as complex
 (4.7 GB against 1.9 GB on 40 sites at bond dimension 100).

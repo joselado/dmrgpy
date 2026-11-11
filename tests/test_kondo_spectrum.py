@@ -275,8 +275,18 @@ def test_get_kondo_spectrum_mode_dmrg_rejects_nonzero_T_and_missing_kwargs():
     sc = spinchain.Spin_Chain(["1/2"])
     sc.set_hamiltonian(G*MUB*5.0*sc.Sz[0])
     eVs = np.linspace(-1e-3, 1e-3, 5)
-    with pytest.raises(ValueError):
-        sc.get_kondo_spectrum(eVs, site=0, T=1.0, mode="DMRG")
+    # T>0 is refused by the correlator and two-time routes, which have no
+    # thermal form, and by a negative temperature. submode="TASK" takes it
+    # (tests/test_kondo_task_convergence.py); this chain is too short for
+    # a session, so there it is the thermal ED spectrum itself.
+    with pytest.raises(ValueError, match="only supports T=0"):
+        sc.get_kondo_spectrum(eVs, site=0, T=1.0, mode="DMRG", submode="KPM",
+                              es=np.linspace(-2e-3, 2e-3, 20))
+    with pytest.raises(ValueError, match="T must be >= 0"):
+        sc.get_kondo_spectrum(eVs, site=0, T=-1.0, mode="DMRG")
+    _, short = sc.get_kondo_spectrum(eVs, site=0, T=1.0, mode="DMRG")
+    _, ed = sc.get_kondo_spectrum(eVs, site=0, T=1.0, mode="ED")
+    assert np.allclose(short, ed, rtol=0, atol=1e-12*np.max(np.abs(ed)))
     # U!=0, order=3 is implemented for mode="DMRG" (potentialdc.py), but
     # still requires the same mandatory `es` kwarg as the plain
     # second-order term (checked before the potential term is reached) --

@@ -86,12 +86,14 @@ class KondoSpectrumMixin():
               kondospectrumtk/twotime.py's module docstring for the
               construction, and
               examples/kondo_third_order_timing_ED_v3_pyitensor for a
-              three-way ED/v3/pyitensor timing comparison. Only T=0 is
-              supported (the T>0 excited-state
+              three-way ED/v3/pyitensor timing comparison. The correlator
+              and two-time routes support T=0 only (the T>0 excited-state
               Boltzmann sum this feature was originally scoped around was
               never built for DMRG -- T=0 turned out to admit a cleaner,
               diagonalization-free construction instead, which is what
-              shipped). The potential-interference term (U!=0, order=3)
+              shipped); submode="TASK" takes T>0 as the temperature of
+              the electrodes with the sample in its ground state, see
+              below. The potential-interference term (U!=0, order=3)
               is also supported for DMRG, via
               kondospectrumtk.potentialdc.third_order_potential_dIdV_dc --
               like the second-order term, its T=0 limit collapses to a
@@ -187,6 +189,23 @@ class KondoSpectrumMixin():
               `delta` or time grid, which raise if passed, only `nkry`
               (default 100) and `n_gs`. Exact when maxm saturates the
               Hilbert space (cutoff=0) and nkry exhausts the Krylov space.
+              At T=0 every pole is a sharp step, and a warning says how
+              much of the weight below max|eV| is in poles the Krylov
+              space has not converged (TaskKondoSpectrum.convergence).
+              T>0 broadens the steps and the Kondo log with the
+              temperature of the electrodes, as mode="ED" does, and keeps
+              the sample in its ground state (or in the n_gs manifold),
+              which is the thermal state while kT is far below the lowest
+              excitation: the call raises ValueError when the Boltzmann
+              factor of the lowest pole above the ground state exceeds
+              taskkondo.THERMAL_OCCUPATION (1e-3), and mode="ED" is then
+              the route. The check sees the states the spin of the site
+              reaches from the ground state, not the others. It also
+              raises when that lowest pole is not converged in nkry (a
+              Ritz energy is an upper bound, so the excitation could be
+              lower), when more states lie within 1e-3 kT of the ground
+              state than n_gs declares, and when the spin reaches a state
+              below the one DMRG converged to.
 
         Returns (eV, dIdV)."""
         if order not in (2, 3, "LL"):
@@ -228,11 +247,11 @@ class KondoSpectrumMixin():
             return self._get_kondo_spectrum_ed(eV, site, Jrho_s, U, T, T0,
                                                 omega0, Gamma0, order, kB)
         elif mode == "DMRG":
-            if T != 0.:
-                raise ValueError("mode=\"DMRG\" only supports T=0")
+            if not T >= 0.:
+                raise ValueError("T must be >= 0, got %r" % (T,))
             return self._get_kondo_spectrum_dmrg(eV, site, Jrho_s, U, T0,
                                                   omega0, Gamma0, order,
-                                                  **kwargs)
+                                                  T=T, kB=kB, **kwargs)
         else: raise ValueError("mode must be \"ED\" or \"DMRG\"")
     def _get_kondo_spectrum_ed(self, eV, site, Jrho_s, U, T, T0, omega0,
                                 Gamma0, order, kB):
@@ -260,7 +279,7 @@ class KondoSpectrumMixin():
                                   Gamma0, order, submode=None, delta=None,
                                   es=None, dt2=None, n_t2_half=None,
                                   dtau=None, n_tau_half=None, n_gs=1,
-                                  **dc_kwargs):
+                                  T=0., kB=8.617333262e-5, **dc_kwargs):
         implicit = submode is None
         if submode is None:
             # TASK wherever it exists: exact at saturation, no grids to
@@ -296,29 +315,47 @@ class KondoSpectrumMixin():
                       "pass submode=\"KPM\" (or another correlator submode) "
                       "for the correlator and two-time route these grids "
                       "belong to" if implicit else ""))
+            Fb = None
+            if T > 0. and order == 3:
+                # the thermal Kondo log, tabulated once for every member
+                from .stepfunctions import FBuilder
+                Fb = FBuilder(T, omega0=omega0, Gamma0=Gamma0, kB=kB)
             def terms():
                 from .taskkondo import TaskKondoSpectrum
                 from . import conductance
                 if self.get_mode(mode="DMRG") == "DMRG":
-                    ks = TaskKondoSpectrum(self, site, nkry=nkry)
+                    # T>0 is the temperature of the electrodes, with the
+                    # sample in its ground state; TaskKondoSpectrum raises
+                    # when that is not the thermal state
+                    ks = TaskKondoSpectrum(self, site, nkry=nkry, kB=kB,
+                                           T=T, n_gs=n_gs)
                     # the poles the Krylov space has not converged are
-                    # sharp steps at energies that move with nkry
+                    # steps at energies that move with nkry
                     if len(eV): ks.warn_unconverged(np.max(np.abs(eV)))
                 else: # a chain too short for the session (mode.py): the
                     # exact spectrum, as every other DMRG route falls back
                     from .edkondo import KondoSpectrum
-                    ks = KondoSpectrum(self, site, T=0.)
+                    ks = KondoSpectrum(self, site, T=T, kB=kB)
                 dIdV = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
                 if order == 3:
                     dIdV = dIdV + conductance.third_order_kondo_dIdV(
-                            ks, eV, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0)
+                            ks, eV, Jrho_s, T0=T0, omega0=omega0,
+                            Gamma0=Gamma0, Fb=Fb)
                     if U != 0.0:
                         dIdV = dIdV + conductance.third_order_potential_dIdV(
                                 ks, eV, Jrho_s, U, T0=T0, omega0=omega0,
-                                Gamma0=Gamma0)
+                                Gamma0=Gamma0, Fb=Fb)
                 return dIdV
             split_tol = Gamma0 # no broadening: the F kernel's own width
         else:
+            if T != 0.:
+                # the correlator and two-time routes are built on the T=0
+                # limit of the step functions and have no thermal form
+                raise ValueError(
+                    "get_kondo_spectrum(mode=\"DMRG\", submode=%r) only "
+                    "supports T=0; T>0 is implemented for submode=\"TASK\" "
+                    "(itensor_version=\"python\", 3 and \"julia_live\") "
+                    "and for mode=\"ED\"" % (submode,))
             if delta is None: delta = 2e-6
             split_tol = delta
             short = self.get_mode(mode="DMRG") != "DMRG"

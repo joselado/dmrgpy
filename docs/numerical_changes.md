@@ -1473,6 +1473,12 @@ poles with no residual agreed to 3e-13. Any `submode="TASK"` Kondo curve from a
 long chain carries this, before and after this date. Compare such curves
 old against new on one state, not across runs.
 
+`get_kondo_spectrum(mode="DMRG", submode="TASK")` used to raise at `T>0`.
+It now takes `T` as the temperature of the electrodes, with the sample in
+its ground state, and raises `ValueError` when the Boltzmann factor of the
+lowest pole is above 1e-3, where `mode="ED"` also occupies excited states.
+The other DMRG submodes still raise at `T>0`.
+
 
 ## The 2026-11-11 leading-log Kondo spectrum
 

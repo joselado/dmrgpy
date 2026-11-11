@@ -132,7 +132,8 @@ bare excitation energies. The derivation and its checks are in
 `mode="ED"` (the default) diagonalizes the full
 Hamiltonian, since every eigenstate enters as a virtual state. It works
 at any temperature, on small chains. `mode="DMRG"`
-works at $T=0$ only and never needs excited states. The second-order and
+works at $T=0$ and never needs excited states (`submode="TASK"` below also
+takes the temperature of the electrodes). The second-order and
 potential terms come from the [dynamical correlator](dynamical-correlators.md), and the
 Kondo term from a real-time evolution of a three-point function. It runs
 on `itensor_version=3`, `"python"` and `"julia_live"`, on chains of at
@@ -198,6 +199,26 @@ the others are steps at energies that still move with `nkry`. A warning
 says how many, and how large the largest of these steps is. A larger
 `nkry` makes them fewer. On a long chain some always remain, so compare
 such curves only at a bias resolution above the spacing of the steps.
+
+With `T>0` the steps and the Kondo peak are broadened by the temperature
+of the tip and of the substrate, as in an experiment, and the sample stays
+in its ground state:
+
+```python
+eV, dIdV = sc.get_kondo_spectrum(eV, Jrho_s=-0.05, U=0.0, T=0.5, order=3,
+               omega0=2e-3, Gamma0=2e-3, mode="DMRG", submode="TASK",
+               nkry=100)
+```
+
+This is the thermal spectrum as long as $k_BT$ is well below the lowest
+excitation of the sample. The call raises an error when the Boltzmann
+factor of the lowest excitation that the spin of the site reaches is
+above $10^{-3}$; use `mode="ED"` then. An excitation that this spin does
+not reach is not checked. A degenerate ground state needs `n_gs`, as at
+$T=0$. Once the thermal width $5.4\,k_BT$ is larger than the spacing of
+the steps, the curve no longer depends on the steps that are not
+converged, and a smaller `nkry` is enough, as long as the lowest
+excitation itself is converged.
 
 See `examples/kondo/kondo_third_order_dmrg_VS_ED`, which is the right
 panel of the figure in [Third order](#third-order), and

@@ -5784,8 +5784,36 @@ fresh solves, curves different by 2.9e-6 of the peak at `nkry=100`
 (3.4e-3 at $T=0$), and 1.0e-5 from the `nkry=200` curve (1.3e-2 at $T=0$).
 This holds while the sample stays in its ground state: the lowest pole
 there is 0.29 meV, a Boltzmann factor of 1.3e-5 at 0.3 K and of 3e-2 at
-1 K, where `mode="ED"` would occupy the excited states too. A temperature
-on the DMRG route is not implemented; this measurement is the case for it
+1 K, where `mode="ED"` would occupy the excited states too.
+
+This is what `T>0` now does on the TASK route (the author's choice,
+2026-11-10: "T with a guard"). `TaskKondoSpectrum(T=)` keeps `p` on the
+ground state and sets `T`, so `conductance.py` uses its thermal step and
+the thermal Kondo log of `FBuilder`, built once per call. The constructor
+raises when $e^{-e_1/k_BT}$ of the lowest pole above the ground state is
+above `THERMAL_OCCUPATION` (1e-3), and a state the spin of the site does
+not reach is not seen by the check. Three cases shape it
+(`TaskKondoSpectrum._check_cold`). The lowest pole enters with its
+residual subtracted and must be converged, since a Ritz energy is an upper
+bound: at `nkry=3` on the 24-site chain it is 0.47 meV for 0.29 meV, which
+would let a warm sample through. The poles within 1e-3 $k_BT$ of the
+ground state are the degenerate manifold, which `n_gs` averages as at
+$T=0$, and there must be at most `n_gs`-1 of them: at a truncated `maxm`
+the partner of a member is not at zero (1.5e-9 eV on 9 sites at
+`maxm=10`, where the first version refused the average), and one state of
+a doublet with `n_gs=1` is refused. And a pole the spin reaches below the
+state handed over raises, where $T=0$ warns. Below the bound
+the route agrees with `mode="ED"` to about that factor (2e-8 on the 3-site
+chain of the guide at 0.5 K and 10 T, 1.7e-4 at a Boltzmann factor of
+1.3e-4, and 1e-9 at saturation with a factor of $e^{-45}$). A chain too
+short for the session falls back to `KondoSpectrum(T=)`, the thermal ED
+spectrum. The other DMRG submodes still raise at `T>0`. The warning
+follows the temperature: a pole that is not converged counts only when its
+third nearest pole with weight (the three spin operators give up to three
+poles per step) is further than the thermal width $5.4\,k_BT$. On the
+24-site chain it fires at 0.1 K and 0.2 K for `nkry=100` (8e-4 and 1e-4
+from the `nkry=200` curve) and not at 0.3 K (1e-5); for `nkry=50` it fires
+up to 0.3 K (2e-3) and not at 0.45 K (3e-4)
 (`tests/test_kondo_task_convergence.py`).
 
 On `itensor_version=3` the numerics are the same Python code. The session
