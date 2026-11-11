@@ -161,7 +161,9 @@ These keywords have no default and must be chosen for the problem:
 - `es`: the frequency grid of the dynamical correlator. For `order=2` it
   must cover the transitions below $\max|eV|$. With `U` not zero it must
   cover the whole spin excitation spectrum of the site, plus a few
-  `delta`. The grid may be non-uniform.
+  `delta`. The grid may be non-uniform. The grid must start several
+  `delta` below 0 (the elastic line at zero energy is cut otherwise) and
+  pass $\max|eV|$, and a warning says when it does not.
 - `delta`, `submode`: the broadening and the method of the dynamical
   correlator.
 - `dt2`, `n_t2_half`, `dtau`, `n_tau_half`: the two time grids of the

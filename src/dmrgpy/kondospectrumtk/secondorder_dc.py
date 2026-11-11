@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 
 # T=0 second-order dI/dV via the dynamical correlator, avoiding explicit
@@ -56,6 +58,28 @@ def _cumulative_theta0_weight(chain, op, eVs, mode, submode, delta, es,
     order = np.argsort(x, kind="stable")
     x, S = x[order], S[order]
     S = S.real
+    # the coverage of es, checked on what the correlator returned. The
+    # cumulative weight starts at 0 on the lowest point and np.interp clamps
+    # outside the grid, so a line sitting on or below x[0] is cut (the
+    # elastic line at w=0 for es from 0: zero bias came out 0.000 against an
+    # exact 1.037), and every transition above x[-1] is dropped. Whether a
+    # line sits at the lower edge is read from S itself, not from es alone:
+    # with a singlet ground state there is no elastic weight and es from 0
+    # is harmless. The top test is only a necessary condition.
+    if S.size and S[0] > 1e-2*np.max(S):
+        warnings.warn(
+            "second_order_dIdV_dc: the correlator is %.2g of its maximum at "
+            "the lowest point of es (%.4g), so a line is cut by the lower "
+            "edge of the grid and its weight is missing from the result "
+            "(the elastic line at w=0 for a ground state with a moment); "
+            "start es several delta below 0." % (S[0]/np.max(S), x[0]),
+            RuntimeWarning, stacklevel=3)
+    if x.size and len(eVs) and x[-1] < np.max(np.abs(eVs)):
+        warnings.warn(
+            "second_order_dIdV_dc: the largest es (%.4g) is below max|eV| "
+            "(%.4g), so the transitions between them are missing from the "
+            "result; run es past max|eV| by several delta."
+            % (x[-1], np.max(np.abs(eVs))), RuntimeWarning, stacklevel=3)
     # cumulative integral from -inf up to each x point, by the trapezoid
     # rule -- NOT np.cumsum(S)*dw, which counts the whole bin around x_i
     # as lying below x_i and so, exactly at a threshold (where S is a
