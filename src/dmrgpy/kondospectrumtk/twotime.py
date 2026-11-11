@@ -208,7 +208,7 @@ def kondo_term_from_two_time(t2_grid, tau_grid, G_batches, eVs, omega0, Gamma0):
     eVs = np.atleast_1d(np.asarray(eVs, dtype=float))
     nev = len(eVs)
     totals = np.zeros(2*nev, dtype=complex) # t->s, then s->t
-    dt2 = t2_grid[1] - t2_grid[0]
+    dt2 = float(t2_grid[1] - t2_grid[0])
     t2_first, t2_last = t2_grid[0], t2_grid[-1]
     for batch in G_batches:
         if len(batch) != 3:
@@ -218,7 +218,7 @@ def kondo_term_from_two_time(t2_grid, tau_grid, G_batches, eVs, omega0, Gamma0):
                 "needs Gx(s,tau)=G(-s,tau+s) (see twotime.py's module "
                 "docstring); G alone gives only the paper's eq. 25 form")
         t2_chunk, G_chunk, Gx_chunk = batch
-        weights = np.full(len(t2_chunk), dt2)
+        weights = np.full(len(t2_chunk), float(dt2))
         weights[np.isclose(t2_chunk, t2_first)] *= 0.5
         weights[np.isclose(t2_chunk, t2_last)] *= 0.5
         # the Theta0 filter is linear and both diagrams share the t kernel,

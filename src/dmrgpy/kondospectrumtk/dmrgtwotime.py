@@ -68,14 +68,12 @@ from .twotime import kondo_term_from_two_time
 #      Sk|psi_j(-s)> (also from step 2). No new long evolution is needed:
 #      the shear only picks which checkpoints meet.
 #
-# This costs, per t2 checkpoint (of which there are len(t2_grid)), one
-# tau-direction trajectory per (j,k) pair with j != k (six; the three
-# with j == k vanish by antisymmetry and are skipped) for G, plus one per
-# l (three) for Gx -- i.e. O(len(t2_grid)) separate short TDVP
-# trajectories, each O(len(tau_grid)) steps. This is the "N_t2 separate
-# DMRG runs" cost flagged from the start of this feature's design
-# discussion; Gx, added on 2026-09-26 when the exchange log moved to
-# eV-(e_f-e_m), made it 1.5x.
+# G is read off three bra trajectories exp(+iH' tau) Sl|GS> computed once
+# (the overlap <Sl GS|exp(-iH' tau)|branch> moves the evolution onto the
+# fixed bra), so per t2 checkpoint (of which there are len(t2_grid)) G costs
+# only 6*len(tau_grid) overlaps, and Gx one tau-direction trajectory per l
+# (three): O(len(t2_grid)) short TDVP trajectories, each O(len(tau_grid))
+# steps. Before 2026-11 G took six ket trajectories per checkpoint on top.
 
 _AXES = ("Sx", "Sy", "Sz")
 
@@ -156,10 +154,12 @@ def _levi_civita_coeff_G_batches_dmrg(chain, site, dt2, n_t2_half, dtau,
     time evolution instead of edtwotimeref.py's eigenbasis shortcut.
     Gx_chunk is the exchange diagram's Gx(s,tau) at s = t2 (this module's
     step 6).
-    t2_batch=1 here (each checkpoint's tau-trajectory is its own
-    "chunk"): unlike the ED case, there is no cheap way to batch many t2
-    checkpoints into one vectorized array, since each one requires its
-    own independent tau-direction TDVP trajectory."""
+    G is built from three bra trajectories of Sl|GS>, computed once before
+    the t2 loop (the bra does not depend on t2), so a row costs only
+    overlaps for G; Gx still needs its own three tau trajectories per row,
+    since its bra psi_l(-s) moves with s. t2_batch=1 here (each row is its
+    own "chunk"): the Gx trajectories cannot be batched over t2 into one
+    vectorized array the way the ED case does."""
     ops = {name: getattr(chain, name) for name in _AXES}
     E0 = chain.gs_energy()
     Hop = chain.toMPO(chain.hamiltonian - E0) # e0-shifted, matching the
@@ -168,6 +168,17 @@ def _levi_civita_coeff_G_batches_dmrg(chain, site, dt2, n_t2_half, dtau,
     gs = chain.get_gs()
 
     ref_wf = {l: ops[l][site]*gs for l in _AXES} # <GS|Sl, i.e. Sl|GS> (l fixed)
+
+    # G needs <Sl GS| exp(-iH' tau) |branch> = <exp(+iH' tau) Sl GS|branch>
+    # and the bra does not depend on t2: three trajectories of Sl|GS>, once.
+    # Entry n of the walk is the state at time +tau_n, so the reversed list
+    # has exp(-iH' tau_n) Sl|GS> at entry n, and the bra is its conjugate in
+    # the dot product.
+    bra_G = {}
+    for l in _AXES:
+        _, wfs = _tdvp_trajectory(chain, Hop, ref_wf[l], dtau, n_tau_half)
+        bra_G[l] = wfs[::-1]
+    tau_grid_row = dtau*np.arange(-n_tau_half, n_tau_half + 1)
 
     t2_times, t2_wfs_by_j = {}, {}
     for j in _AXES:
@@ -180,22 +191,16 @@ def _levi_civita_coeff_G_batches_dmrg(chain, site, dt2, n_t2_half, dtau,
     for it2 in range(n_t2):
         t2 = t2_times[_AXES[0]][it2]
         G_row = np.zeros((1, 2*n_tau_half + 1), dtype=complex)
-        tau_grid_row = None
         for jj, j in enumerate(_AXES):
             psi_j_t2 = t2_wfs_by_j[j][it2]
             for kk, k in enumerate(_AXES):
-                if jj == kk: continue # eps_jkl==0 for every l here -- skip
-                                       # the expensive tau trajectory itself,
-                                       # not just the (already-guarded) sum
+                if jj == kk: continue # eps_jkl==0 for every l here
                 branch = ops[k][site]*psi_j_t2
-                tau_times, tau_wfs = _tdvp_trajectory(chain, Hop, branch,
-                                                       dtau, n_tau_half)
-                if tau_grid_row is None: tau_grid_row = tau_times
                 for ll, l in enumerate(_AXES):
                     c = _EPS3[jj, kk, ll]
                     if c == 0.: continue
-                    overlap = np.array([ref_wf[l].dot(wf) for wf in tau_wfs])
-                    G_row[0, :] += c*overlap
+                    G_row[0, :] += c*np.array([b.dot(branch)
+                                               for b in bra_G[l]])
         # exchange diagram (step 6): Gx(s,tau) = <psi_l(-s-tau)|Sk|psi_j(-s)>
         # at s = t2; the t2 grid is symmetric, so -s is the mirrored index
         mirror = n_t2 - 1 - it2
@@ -215,6 +220,30 @@ def _levi_civita_coeff_G_batches_dmrg(chain, site, dt2, n_t2_half, dtau,
                     Gx_row[0, :] += c*np.array([b.dot(kets[(j, k)])
                                                 for b in bras])
         yield np.array([t2]), tau_grid_row, G_row, Gx_row
+
+
+def _grid_step(x, name):
+    """A time step as a positive finite float (an int dt2 stays an int
+    array otherwise, and the half weight of the end points cannot be cast)."""
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a positive number, got {x!r}")
+    if not (np.isfinite(x) and x > 0.):
+        raise ValueError(f"{name} must be a positive number, got {x!r}")
+    return x
+
+
+def _grid_half_width(n, name):
+    """A half-width as a positive integer; checked before any TDVP step."""
+    if isinstance(n, (bool, np.bool_)) or not isinstance(n, (int, np.integer)):
+        if isinstance(n, (float, np.floating)) and float(n).is_integer():
+            n = int(n)
+        else:
+            raise ValueError(f"{name} must be a positive integer, got {n!r}")
+    if n < 1:
+        raise ValueError(f"{name} must be a positive integer, got {n!r}")
+    return int(n)
 
 
 def two_time_kondo_term_dmrg(chain, site, eVs, omega0=20e-3, Gamma0=5e-6,
@@ -257,6 +286,9 @@ def two_time_kondo_term_dmrg(chain, site, eVs, omega0=20e-3, Gamma0=5e-6,
             "explicitly: no default grid is both correct and practical "
             "for arbitrary omega0/Gamma0 -- see this function's own "
             "docstring")
+    dt2, dtau = _grid_step(dt2, "dt2"), _grid_step(dtau, "dtau")
+    n_t2_half = _grid_half_width(n_t2_half, "n_t2_half")
+    n_tau_half = _grid_half_width(n_tau_half, "n_tau_half")
     def batches():
         for t2_chunk, _tau_row, G_chunk, Gx_chunk in _levi_civita_coeff_G_batches_dmrg(
                 chain, site, dt2, n_t2_half, dtau, n_tau_half):
