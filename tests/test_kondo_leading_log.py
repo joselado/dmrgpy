@@ -9,7 +9,9 @@ models of test_kondo_spectrum_tmatrix.py. Plus the stop at the Kondo
 scale, and the pieces of the joint flow (2026-11-11): the block form of
 the vertex product, the cut to the columns of the occupied states, the
 tip potential scattering that does not flow, the closed form below the
-stop, and the values of the two-pass implementation it replaced.
+stop, and the values of the two-pass implementation it replaced. And the
+running tip coupling, which reads the open transitions with a floor on
+the bare vertex.
 """
 import warnings
 from types import SimpleNamespace
@@ -384,3 +386,85 @@ def test_the_joint_flow_gives_the_two_pass_values(name):
     ks = _ks(*MODELS[name])
     got = leadinglog.leading_log_dIdV(ks, EVS[::5], -0.05, U=0.25)
     assert got == pytest.approx(_TWO_PASS[name], rel=1e-9)
+
+
+# ---------------------------------------------------------------------
+# the running tip coupling on a large impurity (2026-11-11)
+
+def _spin_half_chain(n):
+    """n spins 1/2, exchange 1 meV with anisotropy 0.8, a field along z
+    that grows along the chain and a weak one along x; tip on spin 0."""
+    S = _spin(0.5)
+    def at(a, i):
+        ops = [np.eye(2)]*n; ops[i] = S[a]
+        out = ops[0]
+        for o in ops[1:]: out = np.kron(out, o)
+        return out
+    H = sum(1e-3*(at(0, i)@at(0, i+1) + at(1, i)@at(1, i+1) + 0.8*at(2, i)@at(2, i+1))
+            for i in range(n-1))
+    H = H + sum(1e-4*(1 + 0.1*i)*at(2, i) + 3e-5*at(0, i) for i in range(n))
+    return _ks(H, [at(a, 0) for a in range(3)])
+
+
+def test_closed_and_weak_transitions_do_not_set_the_tip_coupling():
+    """With 64 states there are final states far above the bias whose bare
+    vertex is 1e-6 of the largest one, and whose flowed vertex is hundreds
+    of times that. They do not enter dI/dV at that bias. The check used
+    to read them: at these three biases it gave 1.7, 6.2 and 4.3 and NaN,
+    at Jrho_s=-0.05, where the open transitions run at 0.06."""
+    ks = _spin_half_chain(6)
+    eVs = np.array([1e-3, 1.5e-3, 2e-3]) + 1e-5
+    g = -0.05
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        got, info = leadinglog.leading_log_dIdV(ks, eVs, g, U=0.25, omega0=W0,
+                                                Gamma0=G0, return_info=True)
+    assert np.all(np.isfinite(got))
+    assert np.all(info["coupling"] < 0.1) and np.all(info["coupling"] >= abs(g))
+    assert not any("leading_log_dIdV" in str(x.message) for x in w)
+
+
+def test_a_forbidden_transition_is_measured_against_the_floor():
+    """The dimer's ground state has no spin, so its elastic vertex is zero
+    and the flow generates one. Below the first step it is the only open
+    transition. At 8 microeV from the step and Jrho_s=-0.05 it is 10% of
+    the largest bare vertex: under control, although it is infinitely
+    many times its own bare value, and it must not be flagged. At
+    Jrho_s=-0.15, where g ln(omega0/|x|) is above 1 there, it is larger
+    than the largest bare vertex, and this bias is NaN."""
+    ks = _ks(*MODELS["S=1/2 dimer, J=1 meV, Bz=5 T, tip on 0"])
+    assert abs(ks.Sz[0, 0]) + abs(ks.Sx[0, 0]) + abs(ks.Sy[0, 0]) < 1e-12
+    eVs = np.array([ks.e[1] - 8e-6, 3e-3])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        weak, iw = leadinglog.leading_log_dIdV(ks, eVs, -0.05, omega0=W0, Gamma0=G0,
+                                               return_info=True)
+        strong, ist = leadinglog.leading_log_dIdV(ks, eVs, -0.15, omega0=W0, Gamma0=G0,
+                                                  return_info=True)
+    assert np.all(np.isfinite(weak)) and np.all(iw["coupling"] < 0.1)
+    assert ist["coupling"][0] > 1. and np.isnan(strong[0])
+    assert ist["coupling"][1] < leadinglog.WARN_COUPLING and np.isfinite(strong[1])
+
+
+def test_a_closed_transition_does_not_set_the_tip_coupling():
+    """S=1 with anisotropy in a tilted field, Jrho_s=-0.15, at 13 microeV.
+    Only the elastic transition is open, and its vertex is 1.9 times the
+    bare one. The transition to the first excited state, 0.46 meV up and
+    closed, has a vertex 7 times its bare one. It does not enter dI/dV
+    at this bias, and this bias used to be NaN because of it."""
+    ks = _ks(*MODELS["S=1, D=-1 meV, B=(1,0,2) T"])
+    g, eVs = -0.15, np.array([1.3e-5])
+    assert ks.e[1] > 10*eVs[0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        got, info = leadinglog.leading_log_dIdV(ks, eVs, g, omega0=W0, Gamma0=G0,
+                                                return_info=True)
+    assert np.isfinite(got[0])
+    assert 0.25 < info["coupling"][0] < leadinglog.WARN_COUPLING
+    A, _ = leadinglog.tip_vertex(ks, np.concatenate([eVs, -eVs]), 0., g, omega0=W0,
+                                 Gamma0=G0, cols=[0])
+    flow = np.sqrt(np.sum(np.abs(A[:, 1:, :, 0])**2, axis=1))
+    bare = np.sqrt(np.sum(np.abs(leadinglog._spin_ops(ks)[:, :, 0]/2.)**2, axis=0))
+    assert bare[1] > leadinglog.BARE_FLOOR*np.max(bare) # not a matter of the floor
+    assert abs(g)*np.max(flow[:, 1])/bare[1] > 1.
+    assert abs(g)*np.max(flow[:, 0])/bare[0] == pytest.approx(info["coupling"][0], rel=1e-6)

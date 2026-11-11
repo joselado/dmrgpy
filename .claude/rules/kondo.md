@@ -236,13 +236,27 @@ flow per bias: its dense output is 350 MB per step at 512 states;
 measured and loses in float64 (0.235 s against 0.121 s on six cores for
 the four products), and complex64 is 3e-4 off. `_hole_sum` (numba, one
 core) is what is left; numba threads gave 0.38 s to 0.04 s and were not
-added, since they do not follow the BLAS thread settings. Open, and the
-same in the old code: from 6 spins on the tip coupling check makes most
-biases NaN (211 of 241 at 9 spins). It takes the largest ratio over all
-final states, and at 6 spins every NaN bias is set by a closed transition
-with a bare vertex 1.7e-6 of the largest; over the open transitions the
-coupling is 0.06 to 0.08, no NaN. Section 7 of the method's README has
-the rest.
+added, since they do not follow the BLAS thread settings. The author
+chose to leave it on one core (2026-11-11); do not thread it unasked.
+
+**The tip coupling check reads open transitions, with a floor
+(2026-11-11).** `info["coupling"]` is |Jrho_s| times the largest
+flowed/bare ratio over the transitions that are open at the bias
+(`Th > 0`, the ones in dI/dV), with the bare vertex bounded below by
+`BARE_FLOOR` = 0.1 of the largest one. The author asked for it ("make it
+work and give finite results", "with some regularization if needed")
+after the old check, over every final state down to 1e-8, made 211 of
+241 biases NaN at 9 spins and Jrho_s=-0.05. Both parts are needed and
+both are pinned: a closed transition with a large bare vertex set the
+check on the S=1 test model, and open transitions with a bare vertex
+near zero still gave a NaN on 4 spins 1. Do NOT lower the floor to a cut
+like 1e-3: a forbidden transition gets a vertex of order g ln times the
+large matrix elements (4 to 10% of the largest bare vertex on the dimer
+at Jrho_s=-0.05), which is under control and far above 1e-3. The values
+of dI/dV do not change, only which biases are NaN or warned. The NaN
+mask around D_stop still takes every energy difference of the spectrum,
+so a stopped flow on a dense spectrum is all NaN; left as it is. Section
+7 of the method's README has the measurements.
 
 **A Kondo spin on a superconductor (2026-11-06)**, `ysr.py`, is the
 composite-operator dI/dV with a BCS Wilson chain (uniform onsite pairing

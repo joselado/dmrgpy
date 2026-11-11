@@ -69,6 +69,15 @@ WARN_COUPLING = 0.5
 
 _EPS = np.finfo(float).eps
 
+# The running tip coupling compares the flowed with the bare vertex of a
+# transition. A bare vertex below this fraction of the largest one out of
+# the occupied states is replaced by that fraction. The flow gives a weak
+# or forbidden transition a vertex of order g ln times the large matrix
+# elements, which is under control and is many times its own bare value;
+# measured against the floor, it is flagged only once it is comparable to
+# the largest bare vertex.
+BARE_FLOOR = 0.1
+
 
 def _kernel(x, D, omega0, Gamma0):
     """K(x,D) = 1/(D+r_x) - 1/(D+omega0+|x|), r_x = sqrt(x^2+Gamma0^2):
@@ -413,8 +422,9 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     T=0 only (ks.T must be 0). Two checks of validity, per bias:
       - the running tip coupling, |Jrho_s| times the largest ratio of the
         flowed to the bare spin vertex over the transitions out of occupied
-        states. Above WARN_COUPLING it warns, at pole_threshold the bias is
-        NaN.
+        states that are open at this bias, the ones that enter dI/dV
+        there, with the bare vertex bounded below by BARE_FLOOR. Above
+        WARN_COUPLING it warns, at pole_threshold the bias is NaN.
       - if the sample coupling reaches pole_threshold during the flow (the
         Kondo scale is above Gamma0), the flow stops at that cutoff D_stop,
         and every bias within stop_margin*D_stop of zero or of any energy
@@ -445,12 +455,14 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     Th = _theta_raw(ks, omegas[:, None, None] - eps_if[None])
     g = np.einsum('i,kfi,kfi->k', p, W, Th)
     dIdV = 2*np.pi*T0**2*(g[:n] + g[n:])
-    # the running tip coupling at each bias
+    # the running tip coupling at each bias, over the open transitions. A
+    # closed one does not enter dI/dV, and with many states there is
+    # always one with a bare vertex near zero and a ratio far above 1.
     S = _spin_ops(ks)
     bare = np.sqrt(np.sum(np.abs(S[:, :, occ]/2.)**2, axis=0)) # [f,i]
-    mask = bare > 1e-8*np.max(bare)
+    bare = np.maximum(bare, BARE_FLOOR*np.max(bare))
     flow = np.sqrt(np.sum(np.abs(A[:, 1:])**2, axis=1)) # [k,f,i]
-    ratio = np.max(np.where(mask[None], flow/np.where(mask, bare, 1.)[None], 0.), axis=(1, 2))
+    ratio = np.max(np.where(Th > 0., flow/bare[None], 0.), axis=(1, 2))
     coupling = abs(Jrho_s)*np.maximum(ratio[:n], ratio[n:])
     info["coupling"] = coupling
     bad = coupling >= pole_threshold

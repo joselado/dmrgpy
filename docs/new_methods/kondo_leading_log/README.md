@@ -150,8 +150,12 @@ potential term is odd.
   default); then the biases within 10 D_stop of any energy difference
   of the spectrum are NaN. And at each bias the running tip coupling,
   |Jrho_s| times the largest ratio of the flowed to the bare spin
-  vertex out of the occupied states, is returned as `info["coupling"]`;
-  above 0.5 the code warns, at `pole_threshold` the bias is NaN. The
+  vertex, is returned as `info["coupling"]`; above 0.5 the code warns,
+  at `pole_threshold` the bias is NaN. The ratio is taken over the
+  transitions out of the occupied states that are open at this bias,
+  the ones that enter dI/dV there, and a bare vertex below 0.1 of the
+  largest one is replaced by 0.1 of the largest one (`BARE_FLOOR`);
+  the end of section 7 gives the reasons and the measurements. The
   second check matters near a threshold, where the tip vertex can grow
   while the sample coupling is still small: S=3/2 with D=1 meV,
   B=0.3 meV and Jrho_s=-0.1 has a running coupling of 0.89 at eV=B and
@@ -284,22 +288,57 @@ four products take 0.235 s, slower than six cores, and the exchange sum
 3 ms, but the bracket is then 3e-4 off, far above the tolerance of the
 flow.
 
-One thing to know on a large impurity. On this chain the running tip
-coupling of section 4 passes `pole_threshold` at many biases from 6
-spins on (8 of 13 biases at 6 spins, 211 of 241 at 9), and those biases
-are NaN. The first implementation gives the same NaN biases. The check
-takes the largest ratio of the flowed to the bare vertex over all final
-states, open or not. Measured at 6 spins: at every NaN bias the largest
-ratio is on a closed transition, to a state above the bias, whose bare
-vertex is 1.7e-6 of the largest one and whose flowed vertex is at most
-2.2e-4 of it. Such a transition does not enter dI/dV at that bias. Over
-the open transitions only, the coupling is 0.06 to 0.08 at all 13
-biases, with no NaN and no warning (the same at 7 spins). So on a large
-impurity the NaN there says nothing about dI/dV. Until the check is
-changed, a large `pole_threshold` in `leading_log_dIdV` switches it
-off, and with it the stop of the sample flow, so `info["max_coupling"]`
-must then be read by hand. Whether the check should take the open
-transitions only is open.
+**The tip coupling check on a large impurity.** Until 2026-11-11 the
+check took the ratio of the flowed to the bare vertex over every final
+state with a bare vertex above 1e-8 of the largest one. On a chain this
+made most biases NaN from 6 spins on, 211 of 241 at 9 spins, at
+Jrho_s=-0.05. Two things were wrong with it.
+
+- It read closed transitions. At 6 spins every NaN bias was set by a
+  transition to a state above the bias, which does not enter dI/dV
+  there. A closed transition can also have a large bare vertex: for the
+  S=1 model of section 5 at Jrho_s=-0.15 and 13 microeV the transition
+  to the first excited state has a vertex 7 times its bare one, and the
+  bias was NaN, while the elastic transition, the only open one, is at
+  1.9 times.
+- It divided by a bare vertex that can be almost zero. The flow gives a
+  weak or forbidden transition a vertex of order g ln times the large
+  matrix elements. This is under control, and it is many times the bare
+  value of that transition: at 9 spins a transition with a bare vertex
+  9e-7 of the largest one had a flowed vertex 6.5e-4 of the largest
+  one, a ratio of 700. With only the open transitions and the old cut
+  at 1e-8, a chain of 4 spins 1 with a weak transverse field still had
+  one NaN bias and six warnings from such transitions.
+
+So the check now takes the open transitions only, and measures a weak
+transition against 0.1 of the largest bare vertex. A transition with a
+bare vertex above that is judged as before. A weak or forbidden one is
+flagged only when its flowed vertex is comparable to the largest bare
+vertex. Measured at Jrho_s=-0.05, on bias windows that cover the whole
+spectrum: chains of 6 and 7 spins 1/2 (three fields, tip on the end and
+in the middle, Ising-like exchange) and of 3 and 4 spins 1 have no NaN
+and no warning, and a coupling between 0.062 and 0.065, the same to
+0.004 for a floor of 0.03 or 0.3 except on the 4 spins 1 (0.085 and
+0.061). At 9 spins all 241 biases are finite, where 211 were NaN,
+with a coupling between 0.057 and 0.066 and no warning; the 30 that
+were finite before have the same values, and the curve is between 0.997
+and 1.095 times the second plus third order. The check still follows
+the growth of the vertex on a chain: at 6 spins the largest coupling
+goes 0.064, 0.123, 0.178, 0.252 for Jrho_s = -0.05, -0.08, -0.1, -0.12,
+while dI/dV over the second plus third order goes up to 1.09, 1.26,
+1.48, 1.83. The checks that should fire still do: 0.892 for the S=3/2
+case of section 4, and the free S=1/2 at Jrho_s=-0.12 and -0.2 as
+before. One case is now stricter. The ground state of a dimer in a
+field has no spin, so its elastic vertex is zero and the old check did
+not see it. Below the first step it is the only open transition. At
+Jrho_s=-0.15 and 8 microeV from the step its flowed vertex is 1.1 times
+the largest bare vertex, and this bias is now NaN (3 of 21 biases on
+the grid of the tests, none before).
+
+What stays as it was: when the sample flow stops at D_stop, every bias
+within 10 D_stop of any energy difference of the spectrum is NaN, and
+on a dense spectrum this is every bias. This happens only when the
+Kondo scale is above Gamma0, where the method fails anyway.
 
 ## 8. References
 
@@ -333,5 +372,7 @@ is not tested.
 2026-11-11: the flow is solved as one system on the columns of the
 occupied states (section 7). No number moved beyond the tolerance of
 the integration. `tip_vertex` takes any mix of U now, and `cols=`.
-Open: the tip coupling check on a large impurity (end of section 7),
-and threads for the exchange sum.
+The tip coupling check reads the open transitions only, with a floor
+on the bare vertex (end of section 7); this changes which biases are
+NaN or warned, not the values. The exchange sum stays on one core, by
+the author's choice on this date.

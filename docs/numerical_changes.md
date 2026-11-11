@@ -1472,3 +1472,27 @@ crossed, and the curve differs from the `nkry=200` one by 1.3e-2; the
 poles with no residual agreed to 3e-13. Any `submode="TASK"` Kondo curve from a
 long chain carries this, before and after this date. Compare such curves
 old against new on one state, not across runs.
+
+
+## The 2026-11-11 leading-log Kondo spectrum
+
+`get_kondo_spectrum(order="LL")` is solved as one flow on the columns of
+the occupied states. Its values do not change beyond the tolerance of the
+integration (1e-11 on chains of 3 to 5 spins 1/2), and 9 spins 1/2 with
+241 biases take 392 s where the old code was not usable.
+`leadinglog.tip_vertex` takes any mix of `Us` now, where it raised for
+more than one value and its opposite.
+
+What changes is which biases are NaN or warned. The running tip coupling
+used to be the largest ratio of the flowed to the bare vertex over every
+final state with a bare vertex above 1e-8 of the largest one. It is now
+taken over the transitions that are open at the bias, and a bare vertex
+below 0.1 of the largest one counts as 0.1 of the largest one. On a
+chain of 6 or more spins 1/2 at `Jrho_s=-0.05` most biases were NaN (211
+of 241 at 9 spins) and are finite now. On small systems a bias can
+change either way: the S=1 model with anisotropy in a tilted field at
+`Jrho_s=-0.15` had one NaN bias of 21 and has none, and the S=1/2 dimer
+in a field at `Jrho_s=-0.15` had none and has 3, near its first step,
+where the only open transition is the elastic one, which the old check
+did not read because its bare vertex is zero. The finite values are the
+same as before.
