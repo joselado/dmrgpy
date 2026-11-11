@@ -6,7 +6,10 @@ form at S=1/2, B=0; the S=1/2 equations in a field of Rosch, Costi,
 Paaske, Woelfle, cond-mat/0301106 eq. 6, integrated independently; and
 the first order in Jrho_s against conductance.py's third order on the
 models of test_kondo_spectrum_tmatrix.py. Plus the stop at the Kondo
-scale.
+scale, and the pieces of the joint flow (2026-11-11): the block form of
+the vertex product, the cut to the columns of the occupied states, the
+tip potential scattering that does not flow, the closed form below the
+stop, and the values of the two-pass implementation it replaced.
 """
 import warnings
 from types import SimpleNamespace
@@ -249,3 +252,135 @@ def test_get_kondo_spectrum_order_LL():
         sc.get_kondo_spectrum(eVs, site=0, Jrho_s=-0.05, T=0., order="LL", mode="DMRG")
     with pytest.raises(ValueError):
         sc.get_kondo_spectrum(eVs, site=0, order=4)
+
+
+# ---------------------------------------------------------------------
+# the joint flow (2026-11-11)
+
+def _pauli_bracket(G, A, Kdirect, Kexchange):
+    """The bracket of the flow written with the structure constants of
+    the Pauli matrices, sixteen products per channel: the definition."""
+    C = leadinglog._C
+    part = np.einsum('mac,ncb,cb->mnab', G, A, Kdirect)
+    hole = np.einsum('mac,ac,ncb->mnab', A, Kexchange, G)
+    return (np.einsum('mnl,mnab->lab', C, part)
+            - np.einsum('nml,mnab->lab', C, hole))
+
+
+def test_the_block_product_is_the_pauli_contraction():
+    """A vertex is a 2d x 2d matrix, and the contraction with the Pauli
+    structure constants is its matrix product: _rate, _onshell_rate and
+    the column-cut _tip_bracket against the sixteen-term definition."""
+    rng = np.random.default_rng(3)
+    d = 5
+    rnd = lambda *sh: rng.normal(size=sh) + 1j*rng.normal(size=sh)
+    G, A, K = rnd(4, d, d), rnd(4, d, d), rng.normal(size=(d, d))
+    ref = _pauli_bracket(G, A, K, K)
+    assert np.max(np.abs(leadinglog._rate(G, A, K) - ref)) < 1e-13*np.max(np.abs(ref))
+    # on shell the kernel sits on G: direct K[a,c], exchange K[c,b]
+    ref = (np.einsum('mnl,mac,ac,ncb->lab', leadinglog._C, G, K, A)
+           - np.einsum('nml,mac,ncb,cb->lab', leadinglog._C, A, G, K))
+    assert np.max(np.abs(leadinglog._onshell_rate(G, A, K) - ref)) < 1e-13*np.max(np.abs(ref))
+    assert np.max(np.abs(leadinglog._unblock(leadinglog._block(A)) - A)) < 1e-15
+    # the tip bracket at several energies, two columns, both kernels
+    e = np.sort(rng.normal(size=d)); w = rng.normal(size=4); cols = np.array([1, 3])
+    x = w[:, None, None] - (e[:, None] - e[None, :])[None]
+    for D, Dlow in [(0.3, -1.), (0.7, 0.02)]:
+        if Dlow < 0: Kw = leadinglog._kernel(x, D, 0.5, 0.01)
+        else: Kw = np.array([[[quad(lambda D: leadinglog._kernel(xx, D, 0.5, 0.01), Dlow, D,
+                                    epsabs=1e-13, epsrel=1e-13)[0] for xx in r] for r in xk] for xk in x])
+        ref = np.array([_pauli_bracket(G, A, k, k) for k in Kw])[:, :, :, cols]
+        got = leadinglog._cut_columns(leadinglog._tip_bracket(
+            leadinglog._block(G), leadinglog._block(A), cols, w, e, D, Dlow, 0.5, 0.01))
+        assert np.max(np.abs(got - ref)) < 1e-11*np.max(np.abs(ref))
+
+
+def test_the_tip_potential_scattering_does_not_flow():
+    """The direct and the exchange term of a potential vertex cancel at
+    every cutoff, so A(omega; U) = A(omega; 0) + U and the on-shell tip
+    vertex is A_on(0) + U. The flow of the tip is solved at U=0 on this."""
+    ks = _ks(*MODELS["S=1, D=-1 meV, B=(1,0,2) T"])
+    d, U, g = ks.dim, 0.3, -0.05
+    sol, _ = leadinglog.onshell_flow(ks, g, U=U, omega0=W0, Gamma0=G0)
+    for s in (sol.t[-1], sol.t[len(sol.t)//2]):
+        X = sol.sol(s).view(complex).reshape(3, 4, d, d)
+        dX = X[1] - X[2]
+        dX[0] -= 2*U*np.eye(d)
+        assert np.max(np.abs(dX)) < 1e-9
+    # and the full rate of a potential vertex is zero for any G and kernel
+    rng = np.random.default_rng(5)
+    G = rng.normal(size=(4, d, d)) + 1j*rng.normal(size=(4, d, d))
+    A = np.zeros((4, d, d), complex); A[0] = np.eye(d)
+    K = np.full((d, d), 0.7) # the potential vertex is cut at omega for every state
+    assert np.max(np.abs(leadinglog._rate(G, A, K))) < 1e-13
+    assert np.max(np.abs(leadinglog._onshell_rate(G, A, rng.normal(size=(d, d))))) < 1e-13
+    # tip_vertex adds each U at the end, any mix of them
+    oms = np.array([1e-3, -2e-3, 0.4e-3])
+    A0, _ = leadinglog.tip_vertex(ks, oms, 0., g, omega0=W0, Gamma0=G0)
+    AU, _ = leadinglog.tip_vertex(ks, oms, [U, -U, 0.1], g, omega0=W0, Gamma0=G0)
+    dA = AU - A0
+    for k, u in enumerate([U, -U, 0.1]): dA[k, 0] -= u*np.eye(d)
+    assert np.max(np.abs(dA)) < 1e-13
+
+
+def test_the_occupied_columns_are_columns_of_the_full_vertex():
+    """dI/dV reads only the columns of the occupied states; cut there, the
+    tip vertex is the same numbers as the full one, and a repeated energy
+    is solved once."""
+    ks = _ks(*MODELS["S=1/2 dimer, J=1 meV, Bz=5 T, tip on 0"])
+    oms = np.array([1e-3, -1e-3, 0.3e-3, 1e-3])
+    full, _ = leadinglog.tip_vertex(ks, oms, 0.25, -0.05, omega0=W0, Gamma0=G0)
+    cols = np.array([2, 0])
+    cut, _ = leadinglog.tip_vertex(ks, oms, 0.25, -0.05, omega0=W0, Gamma0=G0, cols=cols)
+    assert cut.shape == (4, 4, ks.dim, 2)
+    assert np.max(np.abs(cut - full[:, :, :, cols])) < 1e-9
+    assert np.array_equal(full[0], full[3])
+
+
+def test_below_the_stop_the_quadrature_is_the_closed_form():
+    """When the sample coupling reaches pole_threshold the couplings are
+    held, and the rest of the tip quadrature is the integral of the
+    kernel from Dmin to D_stop. Against the two-pass route: the on-shell
+    flow first, then the tip vertex integrated down to Dmin with the
+    couplings frozen below D_stop."""
+    ks = _ks(*MODELS["S=1, D=-1 meV, B=(1,0,2) T"])
+    d, g = ks.dim, -0.2
+    oms = np.array([2.2e-3, -0.7e-3, 0.05e-3])
+    got, info = leadinglog.tip_vertex(ks, oms, 0., g, omega0=W0, Gamma0=G0)
+    assert info["D_stop"] is not None and info["D_stop"] > G0
+    Dmax, Dmin = leadinglog._energy_range(ks, W0, oms, G0)
+    sol, D_stop = leadinglog.onshell_flow(ks, g, omega0=W0, Gamma0=G0, Dmax=Dmax, Dmin=Dmin)
+    assert abs(D_stop - info["D_stop"]) < 1e-9*D_stop
+    frozen = sol.y[:, -1].view(complex).reshape(3, 4, d, d)
+    x = oms[:, None, None] - (ks.e[:, None] - ks.e[None, :])[None]
+
+    def rhs(s, y):
+        X = frozen if s <= sol.t[-1] else sol.sol(s).view(complex).reshape(3, 4, d, d)
+        D = np.exp(s)
+        return (-D*leadinglog._rate(X[0], X[1], _K(x, D))).reshape(-1).view(float)
+    A0 = np.broadcast_to(leadinglog._bare_vertex(leadinglog._spin_ops(ks), 1., 0.), (3, 4, d, d))
+    ref = solve_ivp(rhs, (np.log(Dmax), np.log(Dmin)), A0.reshape(-1).view(float),
+                    method="DOP853", rtol=1e-11, atol=1e-14).y[:, -1].view(complex).reshape(3, 4, d, d)
+    assert np.max(np.abs(got - ref)) < 1e-8*np.max(np.abs(ref))
+
+
+# leading_log_dIdV(ks, EVS[::5], -0.05, U=0.25, rtol=1e-12) of the two-pass
+# implementation of 2026-11-06 (commit e4c8b28), which solved the on-shell
+# flow with dense output and then one flow per bias for the full d x d tip
+# vertex; the joint flow must give the same numbers
+_TWO_PASS = {
+    "S=1/2, Bx=10 T": [7.423359537055, 8.076148419175, 3.736654877698,
+                       7.811601326244, 7.321681752024],
+    "S=1, D=-1 meV, B=(1,0,2) T": [17.132506928825, 18.870761553211, 10.194985157709,
+                                   18.283389856232, 16.913574725051],
+    "S=1/2 dimer, J=1 meV, Bz=5 T, tip on 0": [7.451776352556, 8.17758329172,
+                                               1.568310403449, 7.816335162193,
+                                               7.321404128422],
+}
+
+
+@pytest.mark.parametrize("name", list(MODELS))
+def test_the_joint_flow_gives_the_two_pass_values(name):
+    ks = _ks(*MODELS[name])
+    got = leadinglog.leading_log_dIdV(ks, EVS[::5], -0.05, U=0.25)
+    assert got == pytest.approx(_TWO_PASS[name], rel=1e-9)

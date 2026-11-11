@@ -22,11 +22,25 @@ the tip vertex element (x,y) at its own on-shell energy e_x - e_y (A_on).
 These two sets of matrices flow together and close. The tip vertex at a
 bias omega is then a quadrature over the cutoff of G times A_on, with the
 cuts of omega.
+
+How it is computed (_joint_flow). G, A_on and the tip vertex at every
+bias are one system of equations, solved once, with nothing stored along
+the flow. Three facts keep it cheap for an impurity of dimension d:
+  - dI/dV reads the tip vertex only on the columns of the occupied
+    states, and the quadrature of a column needs no other column, so the
+    tip costs d^2 per bias and occupied state, not d^3;
+  - a vertex is a 2d x 2d matrix (electron spin times impurity), and the
+    contraction with _C is its matrix product, so the d^3 work of the
+    flow of G and A_on is four 2d x 2d products per step;
+  - the potential scattering of the tip does not flow: its direct and
+    exchange terms cancel at every cutoff, so U is added at the end.
 """
 import warnings
 
 import numpy as np
-from scipy.integrate import solve_ivp
+from numba import njit
+from scipy.integrate import solve_ivp, DOP853
+from scipy.optimize import brentq
 
 from .conductance import _theta_raw, _occupied_states, P_CUT
 
@@ -53,6 +67,8 @@ SIGN = 1.0
 # leading-log result is then only qualitative
 WARN_COUPLING = 0.5
 
+_EPS = np.finfo(float).eps
+
 
 def _kernel(x, D, omega0, Gamma0):
     """K(x,D) = 1/(D+r_x) - 1/(D+omega0+|x|), r_x = sqrt(x^2+Gamma0^2):
@@ -62,9 +78,55 @@ def _kernel(x, D, omega0, Gamma0):
     return 1./(D + np.sqrt(ax*ax + Gamma0*Gamma0)) - 1./(D + omega0 + ax)
 
 
-def _combine(part, hole):
-    return (np.einsum('mnl,...mnab->...lab', _C, part)
-            - np.einsum('mnl,...mnab->...lab', _CR, hole))
+def _kernel_integral(x, Dlow, Dhigh, omega0, Gamma0):
+    """The integral of K(x,D) over D from Dlow to Dhigh, in closed form."""
+    ax = np.abs(x)
+    r = np.sqrt(ax*ax + Gamma0*Gamma0)
+    return (np.log((Dhigh + r)/(Dlow + r))
+            - np.log((Dhigh + omega0 + ax)/(Dlow + omega0 + ax)))
+
+
+def _block(A):
+    """The vertex sum_mu sigma^mu (x) A[mu] as one 2d x 2d matrix, with the
+    electron spin as the outer index; A: (...,4,d,d). The product of two
+    vertices is then the matrix product, which is the contraction with _C
+    in one 2d x 2d product instead of sixteen d x d ones."""
+    d = A.shape[-1]
+    B = np.empty(A.shape[:-3] + (2*d, 2*d), dtype=complex)
+    B[..., :d, :d] = A[..., 0, :, :] + A[..., 3, :, :]
+    B[..., :d, d:] = A[..., 1, :, :] - 1j*A[..., 2, :, :]
+    B[..., d:, :d] = A[..., 1, :, :] + 1j*A[..., 2, :, :]
+    B[..., d:, d:] = A[..., 0, :, :] - A[..., 3, :, :]
+    return B
+
+
+def _unblock(B):
+    """The inverse of _block: (...,2d,2d) -> (...,4,d,d)."""
+    d = B.shape[-1]//2
+    A = np.empty(B.shape[:-2] + (4, d, d), dtype=complex)
+    A[..., 0, :, :] = (B[..., :d, :d] + B[..., d:, d:])/2.
+    A[..., 3, :, :] = (B[..., :d, :d] - B[..., d:, d:])/2.
+    A[..., 1, :, :] = (B[..., :d, d:] + B[..., d:, :d])/2.
+    A[..., 2, :, :] = 0.5j*(B[..., :d, d:] - B[..., d:, :d])
+    return A
+
+
+def _swap(B):
+    """Transpose of the electron spin index only: the two off-diagonal
+    d x d blocks change places."""
+    d = B.shape[-1]//2
+    out = B.copy()
+    out[..., :d, d:] = B[..., d:, :d]
+    out[..., d:, :d] = B[..., :d, d:]
+    return out
+
+
+def _bracket(Xb, Yb):
+    """Direct minus exchange for two vertices in block form: X Y with the
+    electron matrices in this order, minus the product with the electron
+    matrices in the reversed order (the hole channel), where the impurity
+    matrices keep the order Y X."""
+    return np.matmul(Xb, Yb) - _swap(np.matmul(_swap(Yb), _swap(Xb)))
 
 
 def _rate(G, A, Kmat):
@@ -75,20 +137,75 @@ def _rate(G, A, Kmat):
     omega-(e_c-e_b), the exchange cut at omega-(e_a-e_c).
     G: (4,d,d); A: (...,4,d,d), the on-shell vertex on the right-hand
     side; Kmat: (...,d,d)."""
-    KA = A*Kmat[..., None, :, :]
-    part = np.matmul(G[:, None], KA[..., None, :, :, :])
-    hole = np.matmul(KA[..., :, None, :, :], G[None])
-    return _combine(part, hole)
+    return _unblock(_bracket(_block(G), _block(A*Kmat[..., None, :, :])))
 
 
 def _onshell_rate(G, A, Kfix):
     """The same bracket for the element (a,b) taken at its own on-shell
     energy omega = e_a - e_b: the direct cut becomes e_a - e_c and the
     exchange cut e_c - e_b, Kfix[x,y] = K(e_x - e_y)."""
-    GK = G*Kfix
-    part = np.matmul(GK[:, None], A[..., None, :, :, :])
-    hole = np.matmul(A[..., :, None, :, :], GK[None])
-    return _combine(part, hole)
+    return _unblock(_bracket(_block(G*Kfix), _block(A)))
+
+
+@njit(cache=True, fastmath=True)
+def _hole_sum(Q, w, e, D, Dlow, omega0, Gamma0, out):
+    """out[k,a,l] = sum_c Q[a,l,c] K(w[k]-(e[a]-e[c])), for real Q. The
+    kernel is K(x,D), or its integral over the cutoff from Dlow to D when
+    Dlow >= 0. This is the one sum of the flow with a kernel for every
+    bias, final and intermediate state, so it never stores the kernel."""
+    nk, d, nl = len(w), len(e), Q.shape[1]
+    G2 = Gamma0*Gamma0
+    row = np.empty(d)
+    for a in range(d):
+        for k in range(nk):
+            u = w[k] - e[a]
+            if Dlow < 0.:
+                # K(x,D) on one denominator: the division is most of the cost
+                for c in range(d):
+                    ax = abs(u + e[c])
+                    r = np.sqrt(ax*ax + G2)
+                    row[c] = (omega0 + ax - r)/((D + r)*(D + omega0 + ax))
+            else:
+                for c in range(d):
+                    ax = abs(u + e[c])
+                    r = np.sqrt(ax*ax + G2)
+                    row[c] = (np.log((D + r)/(Dlow + r))
+                              - np.log((D + omega0 + ax)/(Dlow + omega0 + ax)))
+            for l in range(nl):
+                acc = 0.
+                for c in range(d):
+                    acc += Q[a, l, c]*row[c]
+                out[k, a, l] = acc
+
+
+def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0):
+    """The bracket of _rate for the tip vertex at each incoming energy w[k],
+    for the columns b in cols only (the initial states) and with the
+    on-shell tip vertex Ab on the right-hand side, both vertices in block
+    form. Returns (n,2,d,2,m): the block form with the columns cut,
+    [k, electron out, a, electron in, column]. With Dlow >= 0 the kernel
+    is integrated over the cutoff from Dlow to D (see _hole_sum).
+
+    Only matrix-vector work: d^2 per bias and column, where the full
+    vertex needs d^3."""
+    d, m, n = len(e), len(cols), len(w)
+    G4 = Gb.reshape(2, d, 2, d)
+    A4 = Ab.reshape(2, d, 2, d)
+    # direct: sum_c G[a,c] A[c,b] K(w-(e_c-e_b)); P[j,(i,a,n),c]
+    P = np.einsum('iakc,kcnj->jianc', G4, A4[:, :, :, cols]).reshape(m, 4*d, d)
+    x = w[None, None, :] - (e[None, :, None] - e[cols][:, None, None]) # [j,c,k]
+    if Dlow < 0.: Kp = _kernel(x, D, omega0, Gamma0)
+    else: Kp = _kernel_integral(x, Dlow, D, omega0, Gamma0)
+    part = (np.matmul(np.ascontiguousarray(P.real), Kp)
+            + 1j*np.matmul(np.ascontiguousarray(P.imag), Kp)) # [j,(i,a,n),k]
+    part = part.reshape(m, 2, d, 2, n).transpose(4, 1, 2, 3, 0)
+    # exchange: sum_c A[a,c] K(w-(e_a-e_c)) G[c,b]; Q[a,(i,n,j),c]
+    Q = np.einsum('kanc,ickj->ainjc', A4, G4[:, :, :, cols]).reshape(d, 4*m, d)
+    Qr = np.ascontiguousarray(np.concatenate([Q.real, Q.imag], axis=1))
+    hole = np.empty((n, d, 8*m))
+    _hole_sum(Qr, w, e, D, Dlow, omega0, Gamma0, hole)
+    hole = (hole[:, :, :4*m] + 1j*hole[:, :, 4*m:]).reshape(n, d, 2, 2, m)
+    return part - hole.transpose(0, 2, 1, 3, 4)
 
 
 def _spin_ops(ks):
@@ -115,7 +232,10 @@ def _energy_range(ks, omega0, eVs, Gamma0):
 
 def onshell_flow(ks, Jrho_s, U=0.0, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
                  atol=1e-14, pole_threshold=1.0, Dmax=None, Dmin=None):
-    """Flow of the on-shell couplings from D=Dmax down to Dmin: the sample
+    """Flow of the on-shell couplings from D=Dmax down to Dmin, with dense
+    output: the reference for the couplings along the flow, used by the
+    tests. dI/dV does not go through it (see _joint_flow), since the dense
+    output is seven copies of the state per step. The state is the sample
     vertex G and the tip vertex A_on for bare potential scattering +U and
     -U (the second one is the s->t direction). Returns (sol, D_stop):
     sol.sol(ln D) gives the state, of shape (3,4,d,d) once viewed as
@@ -172,54 +292,114 @@ def sample_flow(ks, Jrho_s, **kwargs):
     return onshell_flow(ks, Jrho_s, **kwargs)
 
 
-def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
-               atol=1e-14, pole_threshold=1.0, chunk=None):
-    """The tip vertex A(omega) at D -> 0 for each incoming energy
-    omegas[k], with bare potential scattering Us[k], which must be +U or
-    -U for one U; shape (n,4,d,d). Also returns the flow's info: D_stop
-    and max_coupling (see onshell_flow)."""
-    omegas = np.asarray(omegas, dtype=float)
-    Us = np.broadcast_to(np.asarray(Us, dtype=float), omegas.shape)
-    U = float(Us[0]) if len(Us) else 0.
-    if not np.all(np.isclose(np.abs(Us), abs(U))):
-        raise ValueError("tip_vertex takes one U and its opposite only")
-    sel = np.where(np.isclose(Us, U), 1, 2) # which A_on drives each bias
+def _cut_columns(Tb):
+    """_unblock for a vertex with its columns cut: (n,2,d,2,m) -> (n,4,d,m)."""
+    return np.stack([(Tb[:, 0, :, 0] + Tb[:, 1, :, 1])/2.,
+                     (Tb[:, 0, :, 1] + Tb[:, 1, :, 0])/2.,
+                     0.5j*(Tb[:, 0, :, 1] - Tb[:, 1, :, 0]),
+                     (Tb[:, 0, :, 0] - Tb[:, 1, :, 1])/2.], axis=1)
+
+
+def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
+                pole_threshold):
+    """One flow from Dmax to Dmin of the sample vertex G, of the on-shell
+    tip vertex A_on and of the tip vertex at each incoming energy
+    omegas[k], the last one for the columns cols only, all at U=0.
+    Returns the tip vertex, of shape (n,4,d,m), and the info of the flow.
+
+    The tip vertex does not enter its own right-hand side, so it is a
+    quadrature over G and A_on, and here it is integrated in the same
+    solve with the same error control. Nothing is stored along the flow.
+    If the sample coupling reaches pole_threshold at a cutoff D_stop, the
+    couplings are held there, and what is left of the quadrature is the
+    integral of the kernel from Dmin to D_stop, known in closed form."""
+    if not Gamma0 > 0.:
+        raise ValueError("Gamma0 must be positive, it cuts the logs")
     S = _spin_ops(ks)
     d = S.shape[-1]
-    e = np.asarray(ks.e, dtype=float)
+    e = np.ascontiguousarray(ks.e, dtype=float)
     dE = e[:, None] - e[None, :]
-    Dmax, Dmin = _energy_range(ks, omega0, omegas, Gamma0)
-    fsol, D_stop = onshell_flow(ks, Jrho_s, U=U, omega0=omega0, Gamma0=Gamma0,
-                                rtol=rtol, atol=atol, pole_threshold=pole_threshold,
-                                Dmax=Dmax, Dmin=Dmin)
-    s_stop = fsol.t[-1] # the flow ran from log(Dmax) down to here
-    X_frozen = fsol.y[:, -1].view(complex).reshape(3, 4, d, d)
+    w = np.ascontiguousarray(omegas, dtype=float)
+    cols = np.asarray(cols, dtype=int)
+    n, m = len(w), len(cols)
+    Dmax, Dmin = _energy_range(ks, omega0, w, Gamma0)
+    nx = 8*d*d # complex entries of G and A_on
+    A_bare = _bare_vertex(S, 1., 0.)
+    T0 = _block(A_bare).reshape(2, d, 2, d)[:, :, :, cols]
+    y0 = np.concatenate([_bare_vertex(S, SIGN*Jrho_s, 0.).ravel(), A_bare.ravel(),
+                         np.broadcast_to(T0, (n, 2, d, 2, m)).ravel()]).view(float)
+    smax = np.max(np.abs(S))/2.
+    ref = pole_threshold*smax
 
-    def X_at(s):
-        if s <= s_stop: return X_frozen
-        return fsol.sol(s).view(complex).reshape(3, 4, d, d)
+    def couplings(y):
+        return y.view(complex)[:nx].reshape(2, 4, d, d)
 
-    if chunk is None: chunk = max(1, int(2e6)//(16*d*d))
-    out = np.empty((len(omegas), 4, d, d), dtype=complex)
-    for k0 in range(0, len(omegas), chunk):
-        w = omegas[k0:k0+chunk]
-        n = len(w)
-        A0 = np.stack([_bare_vertex(S, 1.0, u) for u in Us[k0:k0+chunk]])
-        x = w[:, None, None] - dE[None]
-        idx = sel[k0:k0+chunk]
+    def rhs(s, y):
+        D = np.exp(s)
+        X = couplings(y)
+        Kf = _kernel(dE, D, omega0, Gamma0)
+        Gb, GKb, Ab = _block(X[0]), _block(X[0]*Kf), _block(X[1])
+        out = np.empty(len(y)//2, dtype=complex)
+        out[:nx//2] = _unblock(_bracket(Gb, GKb)).ravel()
+        out[nx//2:nx] = _unblock(_bracket(GKb, Ab)).ravel()
+        out[nx:] = _tip_bracket(Gb, Ab, cols, w, e, D, -1., omega0, Gamma0).ravel()
+        out *= -D
+        return out.view(float)
 
-        def rhs(s, y):
-            D = np.exp(s)
-            X = X_at(s)
-            K = _kernel(x, D, omega0, Gamma0)
-            return (-D*_rate(X[0], X[idx], K)).reshape(-1).view(float)
+    def sample_coupling(y):
+        return np.max(np.abs(couplings(y)[0, 1:]))
 
-        sol = solve_ivp(rhs, (np.log(Dmax), np.log(Dmin)), A0.reshape(-1).view(float),
-                        method="DOP853", rtol=rtol, atol=atol)
-        if not sol.success:
-            raise RuntimeError("leading-log tip vertex failed: "+str(sol.message))
-        out[k0:k0+n] = sol.y[:, -1].view(complex).reshape(n, 4, d, d)
-    return out, {"D_stop": D_stop, "max_coupling": fsol.max_coupling}
+    solver = DOP853(rhs, np.log(Dmax), y0, np.log(Dmin), rtol=rtol, atol=atol)
+    g_old = sample_coupling(y0)
+    max_coupling = g_old
+    y, D_stop = solver.y, None
+    while solver.status == "running":
+        message = solver.step()
+        if solver.status == "failed":
+            raise RuntimeError("leading-log flow failed: "+str(message))
+        y = solver.y
+        g_new = sample_coupling(y)
+        if g_old <= ref and g_new >= ref:
+            # the coupling crossed pole_threshold inside this step
+            dense = solver.dense_output()
+            s_stop = brentq(lambda s: ref - sample_coupling(dense(s)),
+                            solver.t_old, solver.t, xtol=4*_EPS, rtol=4*_EPS)
+            y = dense(s_stop)
+            D_stop = float(np.exp(s_stop))
+            max_coupling = max(max_coupling, sample_coupling(y))
+            break
+        max_coupling = max(max_coupling, g_new)
+        g_old = g_new
+    Tb = y.view(complex)[nx:].reshape(n, 2, d, 2, m)
+    if D_stop is not None and D_stop > Dmin:
+        X = couplings(y)
+        Tb = Tb + _tip_bracket(_block(X[0]), _block(X[1]), cols, w, e, D_stop,
+                               Dmin, omega0, Gamma0)
+    return _cut_columns(Tb), {"D_stop": D_stop, "max_coupling": float(max_coupling/smax)}
+
+
+def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
+               atol=1e-14, pole_threshold=1.0, cols=None):
+    """The tip vertex A(omega) at D -> 0 for each incoming energy
+    omegas[k], with bare potential scattering Us[k]; shape (n,4,d,d), or
+    (n,4,d,m) for the columns (initial states) cols only, which is what
+    dI/dV needs and costs d^2 per bias and column instead of d^3. Also
+    returns the flow's info: D_stop and max_coupling (see onshell_flow).
+
+    The potential scattering of the tip does not flow: its direct and
+    exchange terms cancel exactly at every cutoff. So the flow is solved
+    once at U=0, and Us[k] is added to the mu=0 vertex at the end."""
+    omegas = np.asarray(omegas, dtype=float)
+    Us = np.broadcast_to(np.asarray(Us, dtype=float), omegas.shape)
+    d = len(ks.e)
+    cols = np.arange(d) if cols is None else np.asarray(cols, dtype=int)
+    # a symmetric bias grid asks for each energy twice
+    w, inverse = np.unique(omegas, return_inverse=True)
+    A, info = _joint_flow(ks, w, cols, Jrho_s, omega0, Gamma0, rtol, atol,
+                          pole_threshold)
+    A = A[inverse]
+    A[:, 0, cols, np.arange(len(cols))] += Us[:, None]
+    return A, info
 
 
 def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
@@ -254,11 +434,13 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     # t->s at (eV, U) and its particle-hole conjugate s->t at (-eV, -U)
     omegas = np.concatenate([eVs, -eVs])
     Us = np.concatenate([np.full(n, U), np.full(n, -U)])
+    # A[k,lam,f,i], i over the occupied states only
     A, info = tip_vertex(ks, omegas, Us, Jrho_s, omega0=omega0, Gamma0=Gamma0,
-                         rtol=rtol, atol=atol, pole_threshold=pole_threshold)
+                         rtol=rtol, atol=atol, pole_threshold=pole_threshold,
+                         cols=occ)
     D_stop = info["D_stop"]
-    # W[k,f,i] = 4 sum_lam |A^lam_fi(omega_k)|^2, i over occupied states
-    W = 4.*np.sum(np.abs(A[:, :, :, occ])**2, axis=1)
+    # W[k,f,i] = 4 sum_lam |A^lam_fi(omega_k)|^2
+    W = 4.*np.sum(np.abs(A)**2, axis=1)
     eps_if = e[:, None] - e[occ][None, :] # [f,i] = e_f - e_i
     Th = _theta_raw(ks, omegas[:, None, None] - eps_if[None])
     g = np.einsum('i,kfi,kfi->k', p, W, Th)
@@ -267,7 +449,7 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     S = _spin_ops(ks)
     bare = np.sqrt(np.sum(np.abs(S[:, :, occ]/2.)**2, axis=0)) # [f,i]
     mask = bare > 1e-8*np.max(bare)
-    flow = np.sqrt(np.sum(np.abs(A[:, 1:, :, :][:, :, :, occ])**2, axis=1)) # [k,f,i]
+    flow = np.sqrt(np.sum(np.abs(A[:, 1:])**2, axis=1)) # [k,f,i]
     ratio = np.max(np.where(mask[None], flow/np.where(mask, bare, 1.)[None], 0.), axis=(1, 2))
     coupling = abs(Jrho_s)*np.maximum(ratio[:n], ratio[n:])
     info["coupling"] = coupling

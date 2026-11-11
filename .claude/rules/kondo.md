@@ -217,6 +217,33 @@ warning when the sample coupling or the per-bias tip coupling
 `mode="ED"` and `T=0` only; `mode="DMRG"` raises because the TASK space does
 not close under the products of spin operators the flow needs.
 
+**The leading-log flow is one solve on the occupied columns (2026-11-11).**
+`leadinglog._joint_flow` integrates G, A_on and the tip vertex at every
+bias together, with no dense output, and `leading_log_dIdV` asks only for
+the columns of the occupied states (`tip_vertex(cols=occ)`): d^2 per bias
+and occupied state instead of d^3. A vertex is a 2d x 2d matrix
+(`_block`), the `_C` contraction is its matrix product, and the hole
+channel is the product with the electron index transposed (`_swap`), so
+the flow of G and A_on is four 2d x 2d products per step. The tip
+potential scattering does not flow (direct and exchange cancel), so the
+flow runs at U=0 and U is added at the end. Below D_stop the quadrature
+is the closed-form integral of the kernel. Numbers are those of the
+two-pass code to 1e-11 (pinned as `_TWO_PASS` in the tests); 5 spins 1/2
+went from 110 s to 1.6 s, and 9 spins with 241 biases take 392 s on d22
+(658 s on one core, 1.7 GB). Do NOT go back to `onshell_flow` plus one
+flow per bias: its dense output is 350 MB per step at 512 states;
+`onshell_flow` stays as the reference the tests read. The card was
+measured and loses in float64 (0.235 s against 0.121 s on six cores for
+the four products), and complex64 is 3e-4 off. `_hole_sum` (numba, one
+core) is what is left; numba threads gave 0.38 s to 0.04 s and were not
+added, since they do not follow the BLAS thread settings. Open, and the
+same in the old code: from 6 spins on the tip coupling check makes most
+biases NaN (211 of 241 at 9 spins). It takes the largest ratio over all
+final states, and at 6 spins every NaN bias is set by a closed transition
+with a bare vertex 1.7e-6 of the largest; over the open transitions the
+coupling is 0.06 to 0.08, no NaN. Section 7 of the method's README has
+the rest.
+
 **A Kondo spin on a superconductor (2026-11-06)**, `ysr.py`, is the
 composite-operator dI/dV with a BCS Wilson chain (uniform onsite pairing
 on every site), plan in `docs/superconducting_substrate_dIdV_plan.md`,

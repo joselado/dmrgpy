@@ -226,7 +226,82 @@ difference is the g^2 ln^2 and higher terms, and it is large already
 here because g ln(omega0/|eV|) is about 0.38 at 10 microeV. Far from
 zero bias the two agree: 1.10 against 1.09 at 9 meV.
 
-## 7. References
+## 7. How it is computed and what it costs
+
+The flow of G and A_on, and the quadrature that gives the tip vertex at
+every bias, are one system of equations in ln D, solved once with an
+adaptive Runge-Kutta method (`leadinglog._joint_flow`). Nothing is
+stored along the flow. Three facts set the cost for an impurity with d
+states.
+
+- dI/dV reads the tip vertex only on the columns of the occupied
+  states, A_fi with i occupied, and the quadrature of a column does not
+  need the other columns. So the tip vertex costs d^2 per bias and per
+  occupied state, where the full matrix costs d^3 per bias.
+- A vertex sum_mu sigma^mu (x) A^mu is a 2d x 2d matrix, and the
+  contraction with C^{mu nu}_lambda is its matrix product. The hole
+  channel is the same product with the electron-spin index transposed.
+  So the flow of G and A_on needs four 2d x 2d products per step, and
+  this is the only d^3 work that is left.
+- The potential scattering of the tip does not flow. For a vertex
+  proportional to the identity the direct and the exchange term are
+  the same matrix, G^lambda K(omega), and they cancel at every cutoff.
+  So A(omega; U) = A(omega; 0) + U exactly, the flow is solved at U=0,
+  and the two tunnelling directions share one solve.
+
+When the sample coupling reaches `pole_threshold` at D_stop the
+couplings are held, and what is left of the quadrature is the integral
+of K over D from D_min to D_stop, a difference of two logs.
+
+The first implementation solved the on-shell flow with dense output
+and then one flow per bias for the full d x d tip vertex. The two give
+the same numbers: 1e-11 relative on chains of 3 to 5 spins 1/2, the
+same NaN biases and D_stop to 1e-12 on the stopped flows, and the
+values of the first one are pinned in the tests.
+
+Measured, on a chain of spins 1/2 with exchange 1 meV, a tilted field,
+Jrho_s=-0.05 and U=0.25:
+
+- 5 spins (32 states), 61 biases, one core: 110 s before, 1.6 s now.
+- 6, 7 and 8 spins, 61 biases, one core: 7 s, 35 s and 176 s.
+- 9 spins (512 states), 241 biases, on d22 (i5-12600K): 392 s with the
+  default threads and 658 s on one core, 1.7 GB, 578 evaluations of the
+  right-hand side. With `rtol=1e-12` the curve moves by 1.3e-11. The
+  first implementation was not run at this size: it needs about 350 MB
+  of dense output per step and one flow of d^3 work per bias.
+
+What is left at 9 spins is, per evaluation of the right-hand side and
+on one core, 0.59 s for the four products and 0.38 s for the exchange
+sum of the tip vertex, which has one kernel for every bias, final state
+and intermediate state (482 x 512 x 512). The products use the threads
+of the BLAS library (0.12 s on six cores). The exchange sum runs on one
+core. With numba threads it took 0.04 s on six cores; this is not in
+the code, since it would not follow the BLAS thread settings.
+
+The GPU does not help here. On the RTX A2000 of d22, in float64, the
+four products take 0.235 s, slower than six cores, and the exchange sum
+0.060 s, slower than the threaded sum. In complex64 the products take
+3 ms, but the bracket is then 3e-4 off, far above the tolerance of the
+flow.
+
+One thing to know on a large impurity. On this chain the running tip
+coupling of section 4 passes `pole_threshold` at many biases from 6
+spins on (8 of 13 biases at 6 spins, 211 of 241 at 9), and those biases
+are NaN. The first implementation gives the same NaN biases. The check
+takes the largest ratio of the flowed to the bare vertex over all final
+states, open or not. Measured at 6 spins: at every NaN bias the largest
+ratio is on a closed transition, to a state above the bias, whose bare
+vertex is 1.7e-6 of the largest one and whose flowed vertex is at most
+2.2e-4 of it. Such a transition does not enter dI/dV at that bias. Over
+the open transitions only, the coupling is 0.06 to 0.08 at all 13
+biases, with no NaN and no warning (the same at 7 spins). So on a large
+impurity the NaN there says nothing about dI/dV. Until the check is
+changed, a large `pole_threshold` in `leading_log_dIdV` switches it
+off, and with it the stop of the sample flow, so `info["max_coupling"]`
+must then be read by hand. Whether the check should take the open
+transitions only is open.
+
+## 8. References
 
 - A. Rosch, J. Paaske, J. Kroha, P. Woelfle, PRL 90, 076804 (2003),
   cond-mat/0202404: frequency-dependent couplings, the cut by Gamma.
@@ -254,3 +329,9 @@ states is then truncated to the Krylov space, and the flow needs
 products of spin operators that the space built from S_k|GS> does not
 hold; a block-Krylov space from S^a S^b|GS> is the likely fix, and it
 is not tested.
+
+2026-11-11: the flow is solved as one system on the columns of the
+occupied states (section 7). No number moved beyond the tolerance of
+the integration. `tip_vertex` takes any mix of U now, and `cols=`.
+Open: the tip coupling check on a large impurity (end of section 7),
+and threads for the exchange sum.
