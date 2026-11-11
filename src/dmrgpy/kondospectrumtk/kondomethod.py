@@ -18,6 +18,11 @@ _N_GS_SUBMODES = ("KPM", "CVM", "CVM_explicit", "ROOTN", "TD", "TDZ", "EX",
                   "TASK")
 
 
+def _task_backends():
+    """The itensor_version values that have TASK, as the text of an error"""
+    from ..taskdmrg import BACKENDS
+    return ", ".join(repr(b) for b in BACKENDS)
+
 class KondoSpectrumMixin():
     """get_kondo_spectrum for a chain with Sx/Sy/Sz[site] operators"""
     def get_kondo_spectrum(self, eV, site=0, Jrho_s=0.0, U=0.0, T=1.0,
@@ -104,8 +109,9 @@ class KondoSpectrumMixin():
               conductance.third_order_potential_dIdV (see that
               function's docstring). With mode="DMRG" the extra
               kwargs are forwarded: `submode` (default "TASK" on
-              itensor_version="python" and 3, see below, and "KPM" on
-              the others), `delta`,
+              itensor_version="python", 3 and "julia_live", see below,
+              and "KPM" on v2, where only order=2 is available),
+              `delta`,
               `es` to kondospectrumtk.secondorder_dc.second_order_dIdV_dc
               (second-order term) and
               kondospectrumtk.potentialdc.third_order_potential_dIdV_dc
@@ -182,8 +188,8 @@ class KondoSpectrumMixin():
               secondorder_dc.py was made a trapezoid rule on 2026-09-12;
               the error was never KPM's).
 
-          submode="TASK" (itensor_version="python" and 3, where it
-              is the default) replaces all of the above by the exact sums of mode="ED" over the tangent-space
+          submode="TASK" (itensor_version="python", 3 and
+              "julia_live", where it is the default) replaces all of the above by the exact sums of mode="ED" over the tangent-space
               Krylov spectrum of the ground state
               (kondospectrumtk/taskkondo.py, arXiv:2510.07279): no `es`,
               `delta` or time grid, which raise if passed, only `nkry`
@@ -211,6 +217,10 @@ class KondoSpectrumMixin():
         if order not in (2, 3, "LL"):
             raise ValueError("order must be 2, 3 or \"LL\"")
         eV = np.asarray(eV, dtype=float)
+        # the mode is validated before anything qualifies it: a mistyped
+        # name must not be told that LL is unsupported on it
+        if mode not in ("ED", "DMRG"):
+            raise ValueError("mode must be \"ED\" or \"DMRG\"")
         if order == "LL" and mode != "ED":
             # the flow sums over every intermediate state and needs
             # products of spin operators that the TASK Krylov space built
@@ -252,7 +262,6 @@ class KondoSpectrumMixin():
             return self._get_kondo_spectrum_dmrg(eV, site, Jrho_s, U, T0,
                                                   omega0, Gamma0, order,
                                                   T=T, kB=kB, **kwargs)
-        else: raise ValueError("mode must be \"ED\" or \"DMRG\"")
     def _get_kondo_spectrum_ed(self, eV, site, Jrho_s, U, T, T0, omega0,
                                 Gamma0, order, kB):
         from .edkondo import KondoSpectrum
@@ -280,14 +289,20 @@ class KondoSpectrumMixin():
                                   es=None, dt2=None, n_t2_half=None,
                                   dtau=None, n_tau_half=None, n_gs=1,
                                   T=0., kB=8.617333262e-5, **dc_kwargs):
+        # first, before the submode is resolved or anything is built
+        if (isinstance(n_gs, bool) or not isinstance(n_gs, (int, np.integer))
+                or n_gs < 1):
+            raise ValueError("n_gs must be a positive integer, the size of "
+                             "the degenerate ground-state manifold to "
+                             "average over, got %r" % (n_gs,))
         implicit = submode is None
         if submode is None:
-            # TASK wherever it exists: exact at saturation, no grids to
-            # choose, and orders of magnitude faster than the two-time
-            # TDVP Kondo term on the same chain. v2 and julia_live have no
-            # TASK, so they get the correlator route. On v2 it covers
-            # order=2 only: the two-time Kondo term needs the TDVP of
-            # itensor_version="python", 3 or "julia_live".
+            # TASK wherever it exists (taskdmrg.BACKENDS: "python", 3 and
+            # "julia_live"): exact at saturation, no grids to choose, and
+            # orders of magnitude faster than the two-time TDVP Kondo term
+            # on the same chain. v2 has no TASK, so it gets the correlator
+            # route, which covers order=2 only: the two-time Kondo term
+            # needs the TDVP of itensor_version="python", 3 or "julia_live".
             from ..taskdmrg import BACKENDS
             submode = "TASK" if self.itensor_version in BACKENDS else "KPM"
         if submode == "TASK":
@@ -311,10 +326,10 @@ class KondoSpectrumMixin():
                     "get_kondo_spectrum(mode=\"DMRG\", submode=\"TASK\") "
                     "takes nkry and n_gs only, it sums the poles exactly "
                     "with no frequency or time grid; got "+", ".join(unused)
-                    +(". TASK is the default on itensor_version=\"python\" and 3; "
+                    +(". TASK is the default on itensor_version in %s; "
                       "pass submode=\"KPM\" (or another correlator submode) "
                       "for the correlator and two-time route these grids "
-                      "belong to" if implicit else ""))
+                      "belong to" % (_task_backends(),) if implicit else ""))
             Fb = None
             if T > 0. and order == 3:
                 # the thermal Kondo log, tabulated once for every member
@@ -399,11 +414,6 @@ class KondoSpectrumMixin():
                             Gamma0=Gamma0, mode="DMRG", submode=submode,
                             delta=delta, es=es, **dc_kwargs)
                 return dIdV
-        if (isinstance(n_gs, bool) or not isinstance(n_gs, (int, np.integer))
-                or n_gs < 1):
-            raise ValueError("n_gs must be a positive integer, the size of "
-                             "the degenerate ground-state manifold to "
-                             "average over, got %r" % (n_gs,))
         if n_gs == 1: return eV, terms() # the single converged state
         # n_gs>1: equal-weight average over an orthonormal basis of the
         # manifold, mode="ED"'s T->0+ limit (edkondo.KondoSpectrum). Every
