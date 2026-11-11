@@ -288,6 +288,51 @@ four products take 0.235 s, slower than six cores, and the exchange sum
 3 ms, but the bracket is then 3e-4 off, far above the tolerance of the
 flow.
 
+**Real arithmetic and a table for the exchange sum (2026-11-11).** For
+a real Hamiltonian every vertex is a real 2d x 2d matrix in block form.
+The block form is [[A0+A3, A1-iA2], [A1+iA2, A0-A3]], and it is real
+when Sx and Sz are real and Sy is imaginary in the eigenbasis, which is
+the case in a real eigenbasis. The kernel is real, and the products and
+the electron transpose keep a real matrix real. So `_joint_flow` tests
+once that the block form of the bare vertex is real to 1e-12 of its
+largest entry (`_block_is_real`). If it is, the state is kept in block
+form and the flow runs in real arithmetic: the four products are dgemm
+instead of zgemm, and the exchange sum of the tip vertex has 4m columns
+instead of 8m. If it is not, as with a field along y, the complex code
+runs as before.
+
+The exchange sum recomputes sqrt(x^2+Gamma0^2) and omega0+|x| for every
+final state, bias and intermediate state at every evaluation, and none of
+them depends on D. They are now tabulated once per flow, which takes
+16 n d^2 bytes for n distinct incoming energies, and the sum is one
+division per element. The table is used only below `HOLE_TABLE_BYTES`
+(256 MB). Above it, and for the closed-form integral below D_stop, the
+sum is computed on the fly as before. The 9-spin call with 241 biases
+needs 2 GB for the table, so it is above the cap, and it is unchanged.
+The table is a gain for the cheap sizes only.
+
+Measured on d22, one core, through `get_kondo_spectrum(order="LL")`, on
+the chain above with 61 biases (median of 3):
+
+- 6 spins: 2.80 s before, 0.99 s now (2.8 times).
+- 7 spins: 13.52 s before, 4.04 s now (3.3 times). The largest change of
+  dI/dV is 2.7e-11 relative at 7 spins and 1.2e-12 at 6 spins.
+- 6 spins with a field along y of 3e-5 eV, which takes the complex
+  route: 2.83 s before, 2.41 s now. Only the table acts here, and dI/dV
+  changes by 9e-16.
+
+The change of 1e-11 on the real route is not roundoff. The integrator
+sees the state in another layout, so its error norm picks other steps
+(41 and 38 accepted steps at 7 spins, 614 and 518 evaluations), and the
+result moves inside the tolerance rtol=1e-10. Against a reference at
+rtol=1e-12 the new numbers are as close as the old ones. The table alone
+changes dI/dV by roundoff.
+
+A site with no spin on any state, such as an empty orbital in a conserved
+sector, has no exchange vertex. The flow does nothing and dI/dV is the
+potential scattering 2 pi 4 U^2 of the second order, with the tip
+coupling at zero and no warning.
+
 **The tip coupling check on a large impurity.** Until 2026-11-11 the
 check took the ratio of the flowed to the bare vertex over every final
 state with a bare vertex above 1e-8 of the largest one. On a chain this

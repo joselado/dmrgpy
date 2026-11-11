@@ -34,6 +34,13 @@ the flow. Three facts keep it cheap for an impurity of dimension d:
     flow of G and A_on is four 2d x 2d products per step;
   - the potential scattering of the tip does not flow: its direct and
     exchange terms cancel at every cutoff, so U is added at the end.
+For a real Hamiltonian the block form of every vertex is a real matrix,
+and the flow is run in real arithmetic (_block_is_real); a complex
+eigenbasis, as with a field along y, takes the complex route.
+
+An impurity with no spin gives the potential scattering of the tip alone,
+2*pi*T0^2*4*U^2 for dI/dV, without a warning: there is no exchange vertex
+to flow, and the result is the second order.
 """
 import warnings
 
@@ -77,6 +84,16 @@ _EPS = np.finfo(float).eps
 # measured against the floor, it is flagged only once it is comparable to
 # the largest bare vertex.
 BARE_FLOOR = 0.1
+
+# _joint_flow tabulates, once per flow, the two D-independent arrays of the
+# exchange sum of the tip vertex, sqrt(x^2+Gamma0^2) and omega0+|x| for every
+# final state, bias and intermediate state: 16 n d^2 bytes for n distinct
+# incoming energies. Above this size the sum computes them on the fly.
+HOLE_TABLE_BYTES = 256e6
+
+# a vertex is real in block form when the bare one is, to this relative
+# precision (see _block_is_real)
+REAL_TOL = 1e-12
 
 
 def _kernel(x, D, omega0, Gamma0):
@@ -187,7 +204,47 @@ def _hole_sum(Q, w, e, D, Dlow, omega0, Gamma0, out):
                 out[k, a, l] = acc
 
 
-def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0):
+@njit(cache=True, fastmath=True)
+def _hole_sum_table(Q, R, Wt, D, out):
+    """The same sum as _hole_sum for Dlow < 0 with the D-independent parts
+    tabulated: R[a,k,c] = sqrt(x^2+Gamma0^2), Wt[a,k,c] = omega0+|x|,
+    x = w[k]-e[a]+e[c], so that K = (Wt-R)/((D+R)(D+Wt)). One division per
+    element, and the same value as _hole_sum to roundoff."""
+    d, nk, _ = R.shape
+    nl = Q.shape[1]
+    row = np.empty(d)
+    for a in range(d):
+        for k in range(nk):
+            for c in range(d):
+                r = R[a, k, c]
+                wt = Wt[a, k, c]
+                row[c] = (wt - r)/((D + r)*(D + wt))
+            for l in range(nl):
+                acc = 0.
+                for c in range(d):
+                    acc += Q[a, l, c]*row[c]
+                out[k, a, l] = acc
+
+
+def _hole_tables(w, e, omega0, Gamma0):
+    """The tables of _hole_sum_table, or None when they would take more
+    than HOLE_TABLE_BYTES (two arrays of d*n*d doubles)."""
+    n, d = len(w), len(e)
+    if 16*n*d*d > HOLE_TABLE_BYTES:
+        return None
+    ax = np.abs((w[None, :, None] - e[:, None, None]) + e[None, None, :])
+    return (np.ascontiguousarray(np.sqrt(ax*ax + Gamma0*Gamma0)),
+            np.ascontiguousarray(omega0 + ax))
+
+
+def _hole_call(Q, w, e, D, Dlow, omega0, Gamma0, out, tables):
+    if tables is not None and Dlow < 0.:
+        _hole_sum_table(Q, tables[0], tables[1], D, out)
+    else:
+        _hole_sum(Q, w, e, D, Dlow, omega0, Gamma0, out)
+
+
+def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0, tables=None):
     """The bracket of _rate for the tip vertex at each incoming energy w[k],
     for the columns b in cols only (the initial states) and with the
     on-shell tip vertex Ab on the right-hand side, both vertices in block
@@ -196,7 +253,9 @@ def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0):
     is integrated over the cutoff from Dlow to D (see _hole_sum).
 
     Only matrix-vector work: d^2 per bias and column, where the full
-    vertex needs d^3."""
+    vertex needs d^3. Real vertices (a real block form) take the real
+    route: no imaginary halves, half the columns in the exchange sum.
+    tables, from _hole_tables, is used by the exchange sum when Dlow < 0."""
     d, m, n = len(e), len(cols), len(w)
     G4 = Gb.reshape(2, d, 2, d)
     A4 = Ab.reshape(2, d, 2, d)
@@ -205,6 +264,12 @@ def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0):
     x = w[None, None, :] - (e[None, :, None] - e[cols][:, None, None]) # [j,c,k]
     if Dlow < 0.: Kp = _kernel(x, D, omega0, Gamma0)
     else: Kp = _kernel_integral(x, Dlow, D, omega0, Gamma0)
+    if not (np.iscomplexobj(Gb) or np.iscomplexobj(Ab)):
+        Q = np.einsum('kanc,ickj->ainjc', A4, G4[:, :, :, cols]).reshape(d, 4*m, d)
+        hole = np.empty((n, d, 4*m))
+        _hole_call(np.ascontiguousarray(Q), w, e, D, Dlow, omega0, Gamma0, hole, tables)
+        part = np.matmul(P, Kp).reshape(m, 2, d, 2, n).transpose(4, 1, 2, 3, 0)
+        return part - hole.reshape(n, d, 2, 2, m).transpose(0, 2, 1, 3, 4)
     part = (np.matmul(np.ascontiguousarray(P.real), Kp)
             + 1j*np.matmul(np.ascontiguousarray(P.imag), Kp)) # [j,(i,a,n),k]
     part = part.reshape(m, 2, d, 2, n).transpose(4, 1, 2, 3, 0)
@@ -212,7 +277,7 @@ def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0):
     Q = np.einsum('kanc,ickj->ainjc', A4, G4[:, :, :, cols]).reshape(d, 4*m, d)
     Qr = np.ascontiguousarray(np.concatenate([Q.real, Q.imag], axis=1))
     hole = np.empty((n, d, 8*m))
-    _hole_sum(Qr, w, e, D, Dlow, omega0, Gamma0, hole)
+    _hole_call(Qr, w, e, D, Dlow, omega0, Gamma0, hole, tables)
     hole = (hole[:, :, :4*m] + 1j*hole[:, :, 4*m:]).reshape(n, d, 2, 2, m)
     return part - hole.transpose(0, 2, 1, 3, 4)
 
@@ -309,6 +374,48 @@ def _cut_columns(Tb):
                      (Tb[:, 0, :, 0] - Tb[:, 1, :, 1])/2.], axis=1)
 
 
+def _block_is_real(S, tol=REAL_TOL):
+    """True when the block form of the bare vertex, [[A0+A3, A1-iA2],
+    [A1+iA2, A0-A3]] for the stacked [0,Sx,Sy,Sz], is real to tol of its
+    largest entry. It is for a real Hamiltonian (Sx and Sz real, Sy
+    imaginary in a real eigenbasis), and then the kernel, the products and
+    _swap keep every vertex of the flow real."""
+    d = S.shape[-1]
+    B = _block(np.concatenate([np.zeros((1, d, d), dtype=complex), S]))
+    return bool(np.max(np.abs(B.imag)) <= tol*max(np.max(np.abs(B)), 1e-300))
+
+
+def _integrate(rhs, y0, Dmax, Dmin, sample_coupling, ref, rtol, atol):
+    """DOP853 in ln D from Dmax to Dmin, stopped where sample_coupling(y)
+    crosses ref from below (located inside the step by brentq on the dense
+    output). Returns (y, D_stop, max_coupling): the state at the end or at
+    the stop, the cutoff of the stop (None if there is none) and the
+    largest sample coupling along the flow."""
+    solver = DOP853(rhs, np.log(Dmax), y0, np.log(Dmin), rtol=rtol, atol=atol)
+    g_old = sample_coupling(y0)
+    max_coupling = g_old
+    y, D_stop = solver.y, None
+    while solver.status == "running":
+        message = solver.step()
+        if solver.status == "failed":
+            raise RuntimeError("leading-log flow failed: "+str(message))
+        y = solver.y
+        g_new = sample_coupling(y)
+        if g_old <= ref and g_new > ref:
+            # the coupling crossed pole_threshold inside this step; the
+            # crossing is strict, so a vertex that is zero never stops it
+            dense = solver.dense_output()
+            s_stop = brentq(lambda s: ref - sample_coupling(dense(s)),
+                            solver.t_old, solver.t, xtol=4*_EPS, rtol=4*_EPS)
+            y = dense(s_stop)
+            D_stop = float(np.exp(s_stop))
+            max_coupling = max(max_coupling, sample_coupling(y))
+            break
+        max_coupling = max(max_coupling, g_new)
+        g_old = g_new
+    return y, D_stop, max_coupling
+
+
 def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
                 pole_threshold):
     """One flow from Dmax to Dmin of the sample vertex G, of the on-shell
@@ -321,7 +428,14 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
     solve with the same error control. Nothing is stored along the flow.
     If the sample coupling reaches pole_threshold at a cutoff D_stop, the
     couplings are held there, and what is left of the quadrature is the
-    integral of the kernel from Dmin to D_stop, known in closed form."""
+    integral of the kernel from Dmin to D_stop, known in closed form.
+
+    When the block form of the bare vertex is real (a real Hamiltonian)
+    the state is kept in block form and in real arithmetic; otherwise the
+    state is the complex (4,d,d) matrices of the vertices. The two give
+    the same equations: the numbers differ by the integrator's step
+    sequence, 1e-11 of dI/dV. max_coupling is in units of the bare S/2,
+    and is 0 for an impurity with no spin."""
     if not Gamma0 > 0.:
         raise ValueError("Gamma0 must be positive, it cuts the logs")
     S = _spin_ops(ks)
@@ -332,59 +446,80 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
     cols = np.asarray(cols, dtype=int)
     n, m = len(w), len(cols)
     Dmax, Dmin = _energy_range(ks, omega0, w, Gamma0)
-    nx = 8*d*d # complex entries of G and A_on
-    A_bare = _bare_vertex(S, 1., 0.)
-    T0 = _block(A_bare).reshape(2, d, 2, d)[:, :, :, cols]
-    y0 = np.concatenate([_bare_vertex(S, SIGN*Jrho_s, 0.).ravel(), A_bare.ravel(),
-                         np.broadcast_to(T0, (n, 2, d, 2, m)).ravel()]).view(float)
     smax = np.max(np.abs(S))/2.
     ref = pole_threshold*smax
+    tables = _hole_tables(w, e, omega0, Gamma0)
+    real = _block_is_real(S)
+    A_bare = _bare_vertex(S, 1., 0.)
+    Ab0 = _block(A_bare)
+    T0 = Ab0.reshape(2, d, 2, d)[:, :, :, cols]
+    if real:
+        nb = 4*d*d
+        y0 = np.concatenate([_block(_bare_vertex(S, SIGN*Jrho_s, 0.)).ravel(),
+                             Ab0.ravel(),
+                             np.broadcast_to(T0, (n, 2, d, 2, m)).ravel()]).real.copy()
 
-    def couplings(y):
-        return y.view(complex)[:nx].reshape(2, 4, d, d)
+        def couplings(y):
+            return y[:2*nb].reshape(2, 2*d, 2*d)
 
-    def rhs(s, y):
-        D = np.exp(s)
-        X = couplings(y)
-        Kf = _kernel(dE, D, omega0, Gamma0)
-        Gb, GKb, Ab = _block(X[0]), _block(X[0]*Kf), _block(X[1])
-        out = np.empty(len(y)//2, dtype=complex)
-        out[:nx//2] = _unblock(_bracket(Gb, GKb)).ravel()
-        out[nx//2:nx] = _unblock(_bracket(GKb, Ab)).ravel()
-        out[nx:] = _tip_bracket(Gb, Ab, cols, w, e, D, -1., omega0, Gamma0).ravel()
-        out *= -D
-        return out.view(float)
+        def rhs(s, y):
+            D = np.exp(s)
+            X = couplings(y)
+            Gb, Ab = X[0], X[1]
+            GKb = Gb*np.tile(_kernel(dE, D, omega0, Gamma0), (2, 2))
+            out = np.empty(len(y))
+            out[:nb] = _bracket(Gb, GKb).ravel()
+            out[nb:2*nb] = _bracket(GKb, Ab).ravel()
+            out[2*nb:] = _tip_bracket(Gb, Ab, cols, w, e, D, -1., omega0, Gamma0,
+                                      tables).ravel()
+            out *= -D
+            return out
 
-    def sample_coupling(y):
-        return np.max(np.abs(couplings(y)[0, 1:]))
+        def sample_coupling(y):
+            B = couplings(y)[0]
+            return max(np.max(np.abs((B[:d, d:] + B[d:, :d])/2.)),
+                       np.max(np.abs((B[:d, d:] - B[d:, :d])/2.)),
+                       np.max(np.abs((B[:d, :d] - B[d:, d:])/2.)))
 
-    solver = DOP853(rhs, np.log(Dmax), y0, np.log(Dmin), rtol=rtol, atol=atol)
-    g_old = sample_coupling(y0)
-    max_coupling = g_old
-    y, D_stop = solver.y, None
-    while solver.status == "running":
-        message = solver.step()
-        if solver.status == "failed":
-            raise RuntimeError("leading-log flow failed: "+str(message))
-        y = solver.y
-        g_new = sample_coupling(y)
-        if g_old <= ref and g_new >= ref:
-            # the coupling crossed pole_threshold inside this step
-            dense = solver.dense_output()
-            s_stop = brentq(lambda s: ref - sample_coupling(dense(s)),
-                            solver.t_old, solver.t, xtol=4*_EPS, rtol=4*_EPS)
-            y = dense(s_stop)
-            D_stop = float(np.exp(s_stop))
-            max_coupling = max(max_coupling, sample_coupling(y))
-            break
-        max_coupling = max(max_coupling, g_new)
-        g_old = g_new
-    Tb = y.view(complex)[nx:].reshape(n, 2, d, 2, m)
-    if D_stop is not None and D_stop > Dmin:
-        X = couplings(y)
-        Tb = Tb + _tip_bracket(_block(X[0]), _block(X[1]), cols, w, e, D_stop,
-                               Dmin, omega0, Gamma0)
-    return _cut_columns(Tb), {"D_stop": D_stop, "max_coupling": float(max_coupling/smax)}
+        y, D_stop, max_coupling = _integrate(rhs, y0, Dmax, Dmin, sample_coupling, ref,
+                                              rtol, atol)
+        Tb = y[2*nb:].reshape(n, 2, d, 2, m)
+        if D_stop is not None and D_stop > Dmin:
+            X = couplings(y)
+            Tb = Tb + _tip_bracket(X[0], X[1], cols, w, e, D_stop, Dmin, omega0, Gamma0)
+    else:
+        nx = 8*d*d # complex entries of G and A_on
+        y0 = np.concatenate([_bare_vertex(S, SIGN*Jrho_s, 0.).ravel(), A_bare.ravel(),
+                             np.broadcast_to(T0, (n, 2, d, 2, m)).ravel()]).view(float)
+
+        def couplings(y):
+            return y.view(complex)[:nx].reshape(2, 4, d, d)
+
+        def rhs(s, y):
+            D = np.exp(s)
+            X = couplings(y)
+            Kf = _kernel(dE, D, omega0, Gamma0)
+            Gb, GKb, Ab = _block(X[0]), _block(X[0]*Kf), _block(X[1])
+            out = np.empty(len(y)//2, dtype=complex)
+            out[:nx//2] = _unblock(_bracket(Gb, GKb)).ravel()
+            out[nx//2:nx] = _unblock(_bracket(GKb, Ab)).ravel()
+            out[nx:] = _tip_bracket(Gb, Ab, cols, w, e, D, -1., omega0, Gamma0,
+                                    tables).ravel()
+            out *= -D
+            return out.view(float)
+
+        def sample_coupling(y):
+            return np.max(np.abs(couplings(y)[0, 1:]))
+
+        y, D_stop, max_coupling = _integrate(rhs, y0, Dmax, Dmin, sample_coupling, ref,
+                                              rtol, atol)
+        Tb = y.view(complex)[nx:].reshape(n, 2, d, 2, m)
+        if D_stop is not None and D_stop > Dmin:
+            X = couplings(y)
+            Tb = Tb + _tip_bracket(_block(X[0]), _block(X[1]), cols, w, e, D_stop,
+                                   Dmin, omega0, Gamma0)
+    return _cut_columns(Tb), {"D_stop": D_stop,
+                              "max_coupling": float(max_coupling/(smax if smax > 0. else 1.))}
 
 
 def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
@@ -430,6 +565,10 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
         and every bias within stop_margin*D_stop of zero or of any energy
         difference e_x - e_y of the spectrum is NaN, with a warning.
 
+    A site with no spin on any state of the impurity has no exchange
+    vertex: the flow does nothing, dI/dV is the potential scattering
+    2*pi*T0^2*4*U^2 of the second order, and there is no warning.
+
     return_info=True also returns a dict with D_stop, max_coupling (the
     largest running sample coupling, Jrho_s itself at the start) and
     coupling (the running tip coupling at each bias)."""
@@ -462,7 +601,9 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     bare = np.sqrt(np.sum(np.abs(S[:, :, occ]/2.)**2, axis=0)) # [f,i]
     bare = np.maximum(bare, BARE_FLOOR*np.max(bare))
     flow = np.sqrt(np.sum(np.abs(A[:, 1:])**2, axis=1)) # [k,f,i]
-    ratio = np.max(np.where(Th > 0., flow/bare[None], 0.), axis=(1, 2))
+    # a zero bare vertex (a site with no spin) has nothing to compare with
+    ratio = np.max(np.where(Th > 0., flow/np.where(bare > 0., bare, np.inf)[None], 0.),
+                   axis=(1, 2))
     coupling = abs(Jrho_s)*np.maximum(ratio[:n], ratio[n:])
     info["coupling"] = coupling
     bad = coupling >= pole_threshold
