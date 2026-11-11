@@ -1,3 +1,4 @@
+import functools
 import numpy as np
 from scipy.integrate import simpson
 from scipy.interpolate import CubicSpline
@@ -85,15 +86,24 @@ def Theta(x):
 
 def Theta_prime(x):
     """d Theta / dx, the even, unit-normalized (integral over x is 1)
-    thermal broadening kernel used inside F(eps,T)."""
+    thermal broadening kernel used inside F(eps,T).
+
+    Closed form (x cosh(x/2) - 2 sinh(x/2)) / (4 sinh(x/2)^3), whose
+    numerator is a difference of two nearly equal numbers for small x
+    (relative error about 12 eps/x^2), so below |x|=0.05 the Taylor series
+    1/6 - x^2/60 + x^4/1008 - x^6/21600 + x^8/532224 is used instead (the
+    next term is 1e-13 at the switch). Both pieces keep 1e-13 or better."""
     x = np.asarray(x, dtype=float)
     out = np.empty_like(x)
-    small = np.abs(x) < 1e-4
+    small = np.abs(x) < 0.05
     large = np.abs(x) > 40
     mid = ~small & ~large
-    out[small] = 1.0/6 - x[small]**2/60.0
+    xs = x[small]**2
+    out[small] = 1.0/6 + xs*(-1.0/60 + xs*(1.0/1008 + xs*(-1.0/21600
+                                                       + xs/532224.)))
     xm = x[mid]
-    out[mid] = (xm*np.sinh(xm)/2 - np.cosh(xm) + 1)/(np.cosh(xm) - 1)**2
+    h = 0.5*xm
+    out[mid] = (xm*np.cosh(h) - 2*np.sinh(h))/(4*np.sinh(h)**3)
     xl = x[large]
     out[large] = np.abs(xl)*np.exp(-np.abs(xl))
     return out
@@ -177,10 +187,14 @@ class FBuilder():
     returned. Building one costs ~0.4 s and evaluating it is O(1) per
     point (1e6 points in 0.15 s), so build it once per (T, omega0,
     Gamma0) and share it across the third-order terms
-    (Spin_Chain.get_kondo_spectrum does). Accuracy: the table reproduces
-    the direct convolution to ~1e-8, and the convolution itself is
-    converged in npts to ~1e-6 (npts=4001; 8001 buys 1e-6 at 20 K and
-    nothing at 1 K). Until
+    (Spin_Chain.get_kondo_spectrum does; cached_fbuilder shares one
+    across calls). Accuracy, for omega0 >~ kT (the regime of the paper,
+    1 to 20 K with omega0 of 20 to 200 meV): the table reproduces the
+    direct convolution to ~1e-8, and the convolution itself is converged
+    in npts to ~1e-6 (npts=4001; 8001 buys 1e-6 at 20 K and nothing at
+    1 K). For omega0 << kT the u step of 0.03 kT does not resolve the kink
+    of ln(omega0+|y|), and both the table and the direct convolution are
+    off by about 2e-4 of F (omega0=2 meV at 300 K). Until
     2026-09-12 __call__ ran a kT-wide quadrature per requested point on
     an unchunked (npoints x 2001) array -- ~5 GB and minutes for 21 bias
     points on 128 states; this is what made the T>0 third-order terms
@@ -215,9 +229,29 @@ class FBuilder():
         x = np.atleast_1d(np.asarray(x, dtype=float))
         if self._F_spline is None: return self._direct(x)
         inside = (x >= self._F_min) & (x <= self._F_max)
-        out = F0(x, omega0=self.omega0, Gamma0=self.Gamma0)
+        if inside.all(): return self._F_spline(x)
+        out = np.empty_like(x)
         out[inside] = self._F_spline(x[inside])
+        xo = x[~inside]
+        out[~inside] = F0(xo, omega0=self.omega0, Gamma0=self.Gamma0)
         return out
+
+
+@functools.lru_cache(maxsize=4)
+def _cached_fbuilder(T, omega0, Gamma0, kB, npts, width, grid_span, tabulate):
+    return FBuilder(T, omega0=omega0, Gamma0=Gamma0, kB=kB, npts=npts,
+                    width=width, grid_span=grid_span, tabulate=tabulate)
+
+
+def cached_fbuilder(T, omega0=20e-3, Gamma0=5e-6, kB=8.617333262e-5,
+                    npts=4001, width=60., grid_span=10., tabulate=True):
+    """An FBuilder shared between calls: the last four distinct argument
+    sets are kept, keyed on the float values, so a sweep at fixed T,
+    omega0, Gamma0 and kB builds the table once (about 0.2 to 0.6 s).
+    The returned object is shared, so it must not be mutated."""
+    return _cached_fbuilder(float(T), float(omega0), float(Gamma0),
+                            float(kB), int(npts), float(width),
+                            float(grid_span), bool(tabulate))
 
 
 def F(x, T, omega0=20e-3, Gamma0=5e-6, kB=8.617333262e-5):

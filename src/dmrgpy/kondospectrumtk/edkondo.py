@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.sparse import issparse, csr_matrix
 from ..algebra import algebra
 
 # Full-spectrum ED building blocks for the third-order Kondo/STM
@@ -66,6 +67,9 @@ class KondoSpectrum():
         # and refuses an operator that leaves it: Nf=n on a Hubbard chain is
         # exact at T=0, since S_i conserves the electron number, while an
         # Sz sector raises here rather than return a zero S+ column
-        mat = algebra.todense(edobj.get_operator(op))
-        mat = np.array(mat, dtype=complex)
+        mat = edobj.get_operator(op)
+        if issparse(mat): # O(dim^2) sparse product, one dense product left
+            mat = csr_matrix(mat, dtype=complex)
+            return np.conjugate(self.vs.T)@(mat@self.vs) # <a|S|b>
+        mat = np.array(algebra.todense(mat), dtype=complex)
         return np.conjugate(self.vs.T)@mat@self.vs # Xi^alpha_{ab} = <a|S|b>
