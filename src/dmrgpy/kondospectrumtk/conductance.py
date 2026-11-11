@@ -111,6 +111,29 @@ from .stepfunctions import Theta, Theta0, FBuilder, F0
 # order=2 and the U term are untouched.
 
 
+# Thermal occupations below this fraction of the largest one are treated
+# as zero when choosing which initial states i to sum over. Every term in
+# this module is linear in p_i, so a state dropped here contributes less
+# than P_CUT times the largest single-state contribution -- far below the
+# accuracy of anything else in the model (Theta/F tabulations are
+# ~1e-6..1e-8). It is what makes the third-order terms O(n_occ*dim^2)
+# instead of O(dim^3): at T=0 n_occ is the ground-state degeneracy, and at
+# any T it is the number of states within ~28 kT of the ground state.
+P_CUT = 1e-12
+
+
+# Byte budgets of the sums. CHUNK_ENTRIES is the size of one block of the
+# Theta and F arrays (entries, not bytes); COEFF_BYTES bounds the complex
+# Levi-Civita coefficient block of the third-order Kondo term, and
+# EXCHANGE_BYTES the two accumulators of its exchange diagram (one per
+# tunneling direction), which sets how many bias points share one pass over
+# the blocks. Peak memory of the third-order term is a few times the larger
+# of the two and does not grow with the number of occupied states.
+CHUNK_ENTRIES = 4e6
+COEFF_BYTES = 200e6
+EXCHANGE_BYTES = 600e6
+
+
 def _theta_raw(ks, x):
     """Theta evaluated at a raw energy argument x (not yet divided by kT);
     ks.T==0 dispatches to the closed-form Heaviside limit Theta0(x)."""
@@ -136,7 +159,7 @@ def _spin_matrix_elements_squared(ks):
     return 0.5*np.abs(Sminus)**2 + 0.5*np.abs(Splus)**2 + np.abs(ks.Sz)**2
 
 
-def second_order_dIdV(ks, eVs, T0=1.0, U=0.0):
+def second_order_dIdV(ks, eVs, T0=1.0, U=0.0, p_cut=P_CUT):
     """Second-order (Fermi golden rule) dI/dV, eq. "conductance", summed
     over both tunneling directions. U is the dimensionless potential-
     scattering ratio (eq. "Matrix1"); its interference with the spin-
@@ -147,15 +170,27 @@ def second_order_dIdV(ks, eVs, T0=1.0, U=0.0):
 
     The elastic potential-scattering channel enters as 4*|U|^2, not eq.
     "Matrix1sq"'s bare |U|^2 -- see the "SA factor" note in this module's
-    docstring, and Fig. 3d minus Fig. 3b (0.25 for the paper's U=0.25)."""
+    docstring, and Fig. 3d minus Fig. 3b (0.25 for the paper's U=0.25).
+
+    The sum runs over the thermally occupied initial states only, the same
+    ones as the third-order terms (p_cut, see P_CUT; p_cut=0 keeps every
+    state), so it costs O(n_eV dim n_occ) and not O(n_eV dim^2). The Theta
+    arrays are made for blocks of bias points of about CHUNK_ENTRIES
+    entries."""
     eVs = np.asarray(eVs, dtype=float)
-    M2 = _spin_matrix_elements_squared(ks) # [f,i]
-    eps = ks.e[:, None] - ks.e[None, :] # eps[f,i] = e_f - e_i
-    weight = ks.p[None, :]*M2 # weight[f,i] = p_i*|M_if|^2
-    x_ts = eVs[:, None, None] - eps[None, :, :]
-    x_st = -eVs[:, None, None] - eps[None, :, :]
-    spin_term = (np.einsum('fi,efi->e', weight, _theta_raw(ks, x_ts))
-                 + np.einsum('fi,efi->e', weight, _theta_raw(ks, x_st)))
+    occ = _occupied_states(ks, p_cut)
+    M2 = _spin_matrix_elements_squared(ks)[:, occ] # [f,i], i over occ
+    eps = ks.e[:, None] - ks.e[occ][None, :] # eps[f,i] = e_f - e_i
+    weight = ks.p[occ][None, :]*M2 # weight[f,i] = p_i*|M_if|^2
+    chunk = max(1, int(CHUNK_ENTRIES)//weight.size)
+    spin_term = np.empty(len(eVs))
+    for s0 in range(0, len(eVs), chunk):
+        v = eVs[s0:s0+chunk]
+        x_ts = v[:, None, None] - eps[None, :, :]
+        x_st = -v[:, None, None] - eps[None, :, :]
+        spin_term[s0:s0+len(v)] = (
+            np.einsum('fi,efi->e', weight, _theta_raw(ks, x_ts))
+            + np.einsum('fi,efi->e', weight, _theta_raw(ks, x_st)))
     # elastic potential scattering: eps_ii=0, Theta(eV)+Theta(-eV)=1
     # (Theta0(0)+Theta0(-0)=1 too, by the same convention)
     U_term = 4*(U**2)*np.ones_like(eVs)
@@ -167,17 +202,6 @@ for _i, _j, _k in [(0, 1, 2), (1, 2, 0), (2, 0, 1)]:
     _EPS3[_i, _j, _k] = 1.
 for _i, _j, _k in [(0, 2, 1), (2, 1, 0), (1, 0, 2)]:
     _EPS3[_i, _j, _k] = -1.
-
-
-# Thermal occupations below this fraction of the largest one are treated
-# as zero when choosing which initial states i to sum over. Every term in
-# this module is linear in p_i, so a state dropped here contributes less
-# than P_CUT times the largest single-state contribution -- far below the
-# accuracy of anything else in the model (Theta/F tabulations are
-# ~1e-6..1e-8). It is what makes the third-order terms O(n_occ*dim^2)
-# instead of O(dim^3): at T=0 n_occ is the ground-state degeneracy, and at
-# any T it is the number of states within ~28 kT of the ground state.
-P_CUT = 1e-12
 
 
 def _occupied_states(ks, p_cut=P_CUT):
@@ -242,6 +266,13 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     3.4 GB and 13 s at dim=512 even at T=0, where all but one row of it is
     multiplied by p_i=0).
 
+    The coefficient tensor is built for blocks of occupied initial states
+    (COEFF_BYTES), with both tunneling directions inside each block, so the
+    memory does not grow with n_occ; one block, the usual case, costs what a
+    single pass costs. Several blocks accumulate the exchange diagram's
+    sum over i into one array per direction (EXCHANGE_BYTES) and contract it
+    with F afterwards.
+
     Fb: an existing FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
     to reuse instead of building a new one -- building it tabulates
     _band_integral over hundreds of adaptive-quadrature points, so
@@ -252,7 +283,6 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     eVs = np.asarray(eVs, dtype=float)
     occ = _occupied_states(ks, p_cut) # initial states i that carry weight
     p = ks.p[occ]
-    coeff = np.imag(_triple_product_coefficients(ks, occ))/2. # SA factor: see above
     # eps_if[i,f] = e_f - e_i and eps_im[i,m] = e_m - e_i are the same
     # array (e[None,:]-e[occ,None]) under two names for readability at the
     # call sites below; the first axis runs over occ
@@ -260,26 +290,66 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     e_fm = ks.e[:, None] - ks.e[None, :] # e_fm[f,m] = e_f - e_m
     Fcall = _get_F(ks, omega0, Gamma0, Fb)
     dim, nocc = ks.dim, len(occ)
-    chunk = max(1, int(4e6)//(dim*dim)) # bias points per block of F calls
-
-    def one_direction(v):
-        """d(I^{t->s})/dV at bias v; the s->t direction is this same
-        expression at -v (only eV flips, not eps_if/eps_im/e_fm)."""
-        out = np.empty(len(v))
-        for s0 in range(0, len(v), chunk):
-            vc = v[s0:s0+chunk]
-            nv = len(vc)
-            Th = _theta_raw(ks, vc[:, None, None] - eps_if[None, :, :])
-            # direct diagram: log at eV = e_m - e_i
-            Fd = Fcall((vc[:, None, None] - eps_im[None, :, :]).ravel()).reshape(nv, nocc, dim)
-            # exchange diagram: log at eV = e_f - e_m
-            Fx = Fcall((vc[:, None, None] - e_fm[None, :, :]).ravel()).reshape(nv, dim, dim)
-            out[s0:s0+nv] = (np.einsum('i,ifm,eif,eim->e', p, coeff, Th, Fd, optimize=True)
-                             + np.einsum('i,ifm,eif,efm->e', p, coeff, Th, Fx, optimize=True))
-        return out
-
-    total = one_direction(eVs) + one_direction(-eVs) # eq. "sym_z": same sign
-    return 4*np.pi*T0**2*Jrho_s*total
+    # blocks of initial states for the coefficient tensor, and groups of
+    # bias points sharing one pass over the blocks (see COEFF_BYTES)
+    nblock = int(min(nocc, max(1, COEFF_BYTES//(16*dim*dim))))
+    group = int(max(1, EXCHANGE_BYTES//(16*dim*dim)))
+    sub = max(1, int(CHUNK_ENTRIES)//(dim*nblock)) # biases per Theta/Fd array
+    chunk = max(1, int(CHUNK_ENTRIES)//(dim*dim)) # biases per Fx array
+    out = np.zeros(len(eVs))
+    if nblock >= nocc:
+        # one block: the coefficients are built once and both diagrams are
+        # contracted per block of bias points, with no exchange accumulator
+        # (this is what the code did before the blocking, at the same cost)
+        pc = p[:, None, None]*np.imag(_triple_product_coefficients(ks, occ))/2.
+        for d, sign in enumerate((1., -1.)):
+            v = sign*eVs
+            for s0 in range(0, len(v), chunk):
+                vc = v[s0:s0+chunk]
+                nv = len(vc)
+                Th = _theta_raw(ks, vc[:, None, None] - eps_if[None, :, :])
+                Fd = Fcall((vc[:, None, None] - eps_im[None, :, :]).ravel()
+                           ).reshape(nv, nocc, dim)
+                Fx = Fcall((vc[:, None, None] - e_fm[None, :, :]).ravel()
+                           ).reshape(nv, dim, dim)
+                out[s0:s0+nv] += (np.einsum('ifm,eif,eim->e', pc, Th, Fd, optimize=True)
+                                  + np.einsum('ifm,eif,efm->e', pc, Th, Fx, optimize=True))
+        return 4*np.pi*T0**2*Jrho_s*out
+    for g0 in range(0, len(eVs), group):
+        vg = eVs[g0:g0+group]
+        ng = len(vg)
+        # the s->t direction is the same expression at -v (only eV flips,
+        # not eps_if/eps_im/e_fm), so both directions share each block of
+        # coefficients; W[d][e,f,m] = sum_i p_i coeff[i,f,m] Th[e,i,f]
+        dirs = (vg, -vg)
+        W = [np.zeros((ng, dim, dim)) for _ in dirs]
+        res = np.zeros(ng)
+        for b0 in range(0, nocc, nblock):
+            sl = slice(b0, b0+nblock)
+            # SA factor: see above
+            pc = p[sl, None, None]*np.imag(
+                _triple_product_coefficients(ks, occ[sl]))/2.
+            for d, v in enumerate(dirs):
+                for s0 in range(0, ng, sub):
+                    vc = v[s0:s0+sub]
+                    nv = len(vc)
+                    Th = _theta_raw(ks, vc[:, None, None] - eps_if[None, sl, :])
+                    # direct diagram: log at eV = e_m - e_i
+                    Fd = Fcall((vc[:, None, None] - eps_im[None, sl, :]).ravel()
+                               ).reshape(nv, -1, dim)
+                    res[s0:s0+nv] += np.einsum('ifm,eif,eim->e', pc, Th, Fd,
+                                               optimize=True)
+                    W[d][s0:s0+nv] += np.einsum('ifm,eif->efm', pc, Th,
+                                                optimize=True)
+        # exchange diagram: log at eV = e_f - e_m
+        for d, v in enumerate(dirs):
+            for s0 in range(0, ng, chunk):
+                vc = v[s0:s0+chunk]
+                Fx = Fcall((vc[:, None, None] - e_fm[None, :, :]).ravel()
+                           ).reshape(len(vc), dim, dim)
+                res[s0:s0+len(vc)] += np.einsum('efm,efm->e', W[d][s0:s0+len(vc)], Fx)
+        out[g0:g0+ng] = res # eq. "sym_z": same sign in both directions
+    return 4*np.pi*T0**2*Jrho_s*out
 
 
 def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
