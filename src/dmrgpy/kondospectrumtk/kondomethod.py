@@ -67,7 +67,9 @@ class KondoSpectrumMixin():
               kondospectrumtk/conductance.py's module docstring.
               "LL" sums the leading logs (Jrho_s)^n ln^n to all orders
               (kondospectrumtk/leadinglog.py); its first order in Jrho_s is
-              exactly order=3. mode="ED" and T=0 only; see
+              exactly order=3 at the same T. mode="ED" only; at T>0
+              the cutoff kernel is thermally averaged with the weight of
+              the third order (kondospectrumtk/thermalkernel.py); see
               docs/new_methods/kondo_leading_log/README.md.
           mode: "ED" (default) always uses full ED diagonalization of this
               chain's Hamiltonian (every eigenstate is needed as a
@@ -228,10 +230,6 @@ class KondoSpectrumMixin():
             # silently truncated one
             raise NotImplementedError(
                 "order=\"LL\" is implemented on mode=\"ED\" only; see "
-                "docs/new_methods/kondo_leading_log/README.md")
-        if order == "LL" and T != 0.:
-            raise NotImplementedError(
-                "order=\"LL\" is T=0 only for now (pass T=0); see "
                 "docs/new_methods/kondo_leading_log/README.md")
         if mode == "ED":
             # The ED route reads nothing beyond the named parameters, and

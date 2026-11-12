@@ -1542,3 +1542,13 @@ numbers.
 The `submode="TASK"` warning about unconverged poles fires less often at
 $T>0$: it now weighs each pole by how far it can still move against the
 width of the thermal step. The returned curves do not change.
+
+
+## The 2026-11-12 leading-log Kondo spectrum at T>0
+
+`get_kondo_spectrum(order="LL")` used to raise at `T>0`, and
+`leadinglog.leading_log_dIdV` raised for a spectrum at `T>0`. Both now
+return the thermal leading-log spectrum, whose first order is the thermal
+third order. At `T=0` the code path is the same as before, line for line,
+so no `T=0` number changes. The `info` dict of `leading_log_dIdV` has two
+new entries, `n_occ` and `n_chunks`.

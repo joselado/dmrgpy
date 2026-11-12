@@ -103,7 +103,11 @@ own virtual process, so in a field or with anisotropy the couplings depend
 on the energy of the electron (Rosch, Paaske, Kroha, Wölfle,
 cond-mat/0408506; Rosch, Costi, Paaske, Wölfle, cond-mat/0301106). The
 renormalized tip vertex then goes into the second-order formula. To first
-order in $J\rho_s$ this is exactly `order=3`.
+order in $J\rho_s$ this is exactly `order=3`. At $T>0$ the cutoff of each
+logarithm is averaged over the thermal window of the electrodes, with the
+same weight as the third order, so the first order is `order=3` at the same
+temperature, and the excited states of the sample are occupied as in
+`mode="ED"`.
 
 ```python
 sc = spinchain.Spin_Chain(["S=1/2"])
@@ -125,7 +129,7 @@ bare excitation energies. The derivation and its checks are in
 `docs/new_methods/kondo_leading_log/` in the repository.
 
 !!! note "Backends"
-    `order="LL"` works with `mode="ED"` and `T=0` only.
+    `order="LL"` works with `mode="ED"` only, at any temperature.
 
 ## ED and DMRG
 

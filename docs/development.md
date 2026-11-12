@@ -6288,8 +6288,12 @@ weight is missing (finding 14).
 `kondospectrumtk/leadinglog.py`, a method new in dmrgpy whose
 derivation, references and measured checks are in
 `docs/new_methods/kondo_leading_log/README.md`. The dispatch is
-deliberately narrow: the ED branch only, and only at `T=0`; `T>0` and
-`mode="DMRG"` raise `NotImplementedError` before any work. The DMRG
+deliberately narrow: the ED branch only, where `mode="DMRG"` raises
+`NotImplementedError` before any work. Since 2026-11-12 it runs at any
+`T`: at `T>0` `leading_log_dIdV` builds a `thermalkernel.ThermalKernel`,
+the cutoff kernel averaged over the thermal window of the third order, and
+hands it to `_joint_flow` as an argument, so the `T=0` path is the same
+code as before (README, section 8). The DMRG
 refusal is not a missing wire-up: the flow sums over every intermediate
 state and multiplies spin operators, and the TASK Krylov space built
 from `S_k|GS>` does not hold `S^a S^b|GS>`, so feeding it the

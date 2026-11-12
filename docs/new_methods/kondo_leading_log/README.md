@@ -170,8 +170,10 @@ potential term is odd.
   not yet included.
 - The populations are the equilibrium ones of the impurity, so there is
   no spin pumping by the tip.
-- T=0 only for now. At T>0 the kernel becomes its convolution with the
-  derivative of the thermal step, which is the next step.
+- At T>0 the cutoff kernel is its average over the thermal window of the
+  third order (section 8). Which kernel the on-shell flow takes, and
+  whether the amplitude or the rate is averaged, are choices beyond first
+  order; section 8 says which ones are taken.
 
 ## 5. Validation
 
@@ -385,7 +387,117 @@ within 10 D_stop of any energy difference of the spectrum is NaN, and
 on a dense spectrum this is every bias. This happens only when the
 Kondo scale is above Gamma0, where the method fails anyway.
 
-## 8. References
+## 8. Finite temperature
+
+We will now see how the flow is taken to a temperature T. One
+requirement fixes the construction: its first order in Jrho_s must be
+the thermal third order of `conductance.py`. That third order uses the
+thermal log F(x,T), the convolution of F0 with the weight
+w(u) = Theta'(u/kT)/kT of `stepfunctions.FBuilder`. So the cutoff kernel
+is replaced by its thermal average,
+
+    K_T(x,D) = int du w(u) K(x+u,D),   int_0^inf dD K_T(x,D) = F(x,T),
+
+and the Boltzmann populations p_i and the thermal step stay in the golden
+rule, as at third order:
+
+    dI/dV = 2 pi T0^2 sum_{i,f} p_i 4 sum_lam |A^lam_fi(eV)|^2 Theta_T(eV - eps_fi) + (s -> t).
+
+Nothing else of the flow changes. The kernel is
+`thermalkernel.ThermalKernel`, and `_joint_flow` takes it as an argument;
+`leading_log_dIdV` builds it whenever `ks.T > 0`. The construction was
+developed on 2026-11-11 in a project on 1T-TaSe2, as a script on top of
+dmrgpy, and moved here on 2026-11-12. On the same inputs the two agree to
+1e-15 (four models, both choices of the on-shell kernel, up to 16
+occupied states).
+
+Three things are not fixed by the first order. We say which choice is
+taken.
+
+- The kernel of the on-shell flow. By default (`onshell="thermal"`) K_T
+  is also used for G and A_on, so the sample coupling stops growing at
+  D ~ kT and not at Gamma0. `onshell="T0"` keeps the T=0 kernel there,
+  and then the tip vertex is exactly the T=0 one convolved in bias with
+  w. The two differ at second order in Jrho_s: in the TaSe2 project a
+  free-spin peak at Jrho_s=-0.05 was 5% higher with the thermal choice
+  (2.68 against 2.55 at 0.3 K).
+- Amplitude or rate. The amplitude is averaged, then squared and
+  multiplied by the thermal step, which is what `conductance.py` does at
+  third order. Averaging the rate instead would differ at second order
+  without a log. This was not computed.
+- Which transitions are open, for the check of the running tip coupling.
+  A thermal step is never zero, so at T>0 a transition is open when
+  p_i Theta is above `open_cut` = 1e-2 of the largest p. Only which biases
+  are warned or NaN depends on it.
+
+A free spin 1/2 at B=0 has a closed form. Every process is elastic and
+one coupling flows, and with the thermal kernel everywhere
+
+    dI/dV(0)/(2 pi) = (3/4)/(1 + g F(0,T))^2,   F(0,T) = ln(omega0/(c kT)),
+
+against (3/4)(1 - 2 g F(0,T)) at third order, with c = 1.30 for
+Gamma0 << kT << omega0. With the Kondo sign, g<0, the peak grows on
+cooling and diverges at kT_K = (omega0/c) exp(-1/|g|).
+
+How the kernel is computed is in the module docstring of
+`thermalkernel.py`: at each cutoff the even function x -> K_T(x,D) is
+tabulated once (K_T itself within 48 kT, the relative correction
+K_T/K - 1 beyond) and read from cubic splines; one table takes about
+2 ms. Two shortcuts fail. A fixed short quadrature in u misses the peak
+of K at u=-x once D and Gamma0 are below kT. And
+Gamma0 -> sqrt(Gamma0^2 + (c kT)^2) has the wrong first order: in the
+TaSe2 project the odd part of the difference to the third order dropped
+by 1.95 instead of 8 when g was halved.
+
+The checks are in `tests/test_kondo_leading_log_thermal.py`, in units of
+an exchange J with kB=1, omega0=20 and Gamma0=2.5e-4. The numbers below
+are measured with the same models.
+
+1. The kernel alone. The integral of K_T over D equals F(x,T), from a
+   direct quadrature of w F0, to 5e-11 relative at x = 0, Gamma0, kT and
+   10 kT, for kT = 0.025 and 0.3, both through the closed-form integral
+   of the tables and through K_T integrated over ln D. FBuilder differs
+   from the same quadrature by 8e-7 to 2e-6, which is its own accuracy.
+2. The limit T -> 0. With Jrho_s=-0.05 and U=0.25 on 12 biases the
+   thermal route goes to the T=0 flow as (kT/Gamma0)^2: 6.4e-7, 4.7e-9,
+   1.7e-10 and 2.3e-11 at kT/Gamma0 = 0.1 to 1e-4 for a spin 1/2 in a
+   field, 2.8e-6 to 3.4e-11 for the S=1 model of section 5.
+3. First order. Let D(g) be the leading-log result minus the second and
+   third order of `conductance.py` at the same T. Halving g from 0.01
+   divides the even part of D by 4.006 and the odd part by 8.011 (spin
+   1/2, B=1, kT=0.3, U=0.25), 4.006 and 8.010 for S=1. A mismatch at first
+   order would give 2 in the odd part. `onshell="T0"` gives 4.007 and
+   8.014, as it should, since the on-shell kernel enters at second order.
+4. The free spin. At Jrho_s=-0.05 the zero-bias peak follows the closed
+   form to 1e-10 at kT = 0.0015, 0.025, 0.3 and 1 (2.5496, 1.6270, 1.1672
+   and 1.0173, against 1.4365, 1.2316, 1.0476 and 0.9621 at third order),
+   with c = 1.41, 1.30, 1.26 and 1.18.
+5. The stop at the Kondo scale. A free spin at Jrho_s=-0.12 stops at
+   D = 0.0128262 at T=0. At kT = 1e-4 Gamma0 it stops at the same cutoff,
+   with the same NaN biases, and the finite ones agree to 1.6e-9. At
+   kT = 0.001 and 0.005 it stops higher, and at kT = 0.025 it does not
+   stop, since the temperature cuts the flow first.
+6. A field along y takes the complex route and gives the curve of the
+   same field along z to 7e-11, and three chunks of biases (`mem_gb`) give
+   the result of one flow to 1.5e-11.
+
+What it costs. The tip part is linear in the number of occupied states,
+the ones within ln(1/p_cut) kT of the ground state, and this is what T
+adds. Measured on d22, one core, through `leading_log_dIdV` on an open
+chain of 6 spins 1/2 with exchange 1 meV and a tilted field
+(0.3 meV along z, 0.1 meV along x on every site), Jrho_s=-0.05, U=0.25 and
+61 biases: 1.1 s at T=0; 2.9 s at 1 K with
+`p_cut=0.5`, so with the ground state only; 15 s at 1 K with its 27
+occupied states, and 35 s and 33 s at 3 K and 10 K with all 64. So the
+thermal kernel alone costs 2.6 times the T=0 one here, since its rows are
+read from splines on one core. The memory of one flow is
+`memory_model(d, m)`; `mem_gb` cuts the biases in chunks that fit, and
+each chunk solves the couplings again.
+
+What stays as at T=0: no Korringa broadening, no renormalized energies,
+equilibrium populations, and the method fails at the Kondo temperature.
+
+## 9. References
 
 - A. Rosch, J. Paaske, J. Kroha, P. Woelfle, PRL 90, 076804 (2003),
   cond-mat/0202404: frequency-dependent couplings, the cut by Gamma.
@@ -406,7 +518,8 @@ Kondo scale is above Gamma0, where the method fails anyway.
 2026-11-06: `leadinglog.py` implemented and validated on the ED
 `KondoSpectrum` at T=0 (section 5), and exposed as
 `get_kondo_spectrum(order="LL")` on `mode="ED"` with `T=0` (user guide,
-STM and Kondo spectra, "Leading logs"). Open: the thermal kernel (T>0), Korringa rates
+STM and Kondo spectra, "Leading logs"). 2026-11-12: the thermal kernel
+(section 8), at any T on `mode="ED"`. Open: Korringa rates
 in place of the fixed Gamma0, and the DMRG route. For the DMRG route
 the TASK spectrum has the right shape, but the sum over intermediate
 states is then truncated to the Krylov space, and the flow needs

@@ -218,18 +218,23 @@ def test_the_flow_stops_at_the_kondo_scale():
     assert np.all(np.isfinite(got[[0, 4]]))
 
 
-def test_finite_temperature_is_refused():
+def test_a_negative_temperature_and_an_unknown_onshell_are_refused():
+    """T>0 is the thermal route (tests/test_kondo_leading_log_thermal.py);
+    a negative T and a misspelled onshell raise."""
     S = _spin(0.5)
-    ks = SimpleNamespace(e=np.zeros(2), p=np.array([.5, .5]), dim=2, T=1.,
+    ks = SimpleNamespace(e=np.zeros(2), p=np.array([.5, .5]), dim=2, T=-1.,
                          kB=8.617333262e-5, Sx=S[0], Sy=S[1], Sz=S[2])
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValueError):
         leadinglog.leading_log_dIdV(ks, [1e-3], -0.05)
+    ks.T = 0.
+    with pytest.raises(ValueError):
+        leadinglog.leading_log_dIdV(ks, [1e-3], -0.05, onshell="thermic")
 
 
 def test_get_kondo_spectrum_order_LL():
     """order="LL" on a 3-site S=1 chain with anisotropy and a tilted field
-    is the module's result on the chain's KondoSpectrum, is close to
-    order=3 at small Jrho_s, and refuses T>0 and mode="DMRG"."""
+    is the module's result on the chain's KondoSpectrum, at T=0 and at
+    T>0, is close to order=3 at small Jrho_s, and refuses mode="DMRG"."""
     from dmrgpy import spinchain
     from dmrgpy.kondospectrumtk.edkondo import KondoSpectrum
     mub = 5.7883818060e-5
@@ -248,8 +253,10 @@ def test_get_kondo_spectrum_order_LL():
     _, o3 = sc.get_kondo_spectrum(eVs, site=0, Jrho_s=-0.002, U=0.25, T=0., order=3)
     _, o2 = sc.get_kondo_spectrum(eVs, site=0, Jrho_s=-0.002, U=0.25, T=0., order=2)
     assert np.max(np.abs(ll - o3)) < 0.05*np.max(np.abs(o3 - o2))
-    with pytest.raises(NotImplementedError):
-        sc.get_kondo_spectrum(eVs, site=0, Jrho_s=-0.05, T=1.0, order="LL")
+    _, got = sc.get_kondo_spectrum(eVs, site=0, Jrho_s=-0.05, U=0.25, T=1.0,
+                                   order="LL")
+    ref = leadinglog.leading_log_dIdV(KondoSpectrum(sc, 0, 1.0), eVs, -0.05, U=0.25)
+    assert np.max(np.abs(got - ref)) < 1e-12*np.max(np.abs(ref))
     with pytest.raises(NotImplementedError):
         sc.get_kondo_spectrum(eVs, site=0, Jrho_s=-0.05, T=0., order="LL", mode="DMRG")
     with pytest.raises(ValueError):

@@ -41,6 +41,13 @@ eigenbasis, as with a field along y, takes the complex route.
 An impurity with no spin gives the potential scattering of the tip alone,
 2*pi*T0^2*4*U^2 for dI/dV, without a warning: there is no exchange vertex
 to flow, and the result is the second order.
+
+At T>0 the cutoff kernel K(x,D) is replaced by its thermal average with
+the weight of stepfunctions.FBuilder (thermalkernel.ThermalKernel, passed
+to _joint_flow as an argument), so the first order is the thermal third
+order; the populations are the Boltzmann ones and the step is thermal, as
+in conductance.py. With no kernel argument the flow is the T=0 one, line
+for line. README, section 8.
 """
 import warnings
 
@@ -244,7 +251,8 @@ def _hole_call(Q, w, e, D, Dlow, omega0, Gamma0, out, tables):
         _hole_sum(Q, w, e, D, Dlow, omega0, Gamma0, out)
 
 
-def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0, tables=None):
+def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0, tables=None,
+                 kernel=None):
     """The bracket of _rate for the tip vertex at each incoming energy w[k],
     for the columns b in cols only (the initial states) and with the
     on-shell tip vertex Ab on the right-hand side, both vertices in block
@@ -255,19 +263,30 @@ def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0, tables=None):
     Only matrix-vector work: d^2 per bias and column, where the full
     vertex needs d^3. Real vertices (a real block form) take the real
     route: no imaginary halves, half the columns in the exchange sum.
-    tables, from _hole_tables, is used by the exchange sum when Dlow < 0."""
+    tables, from _hole_tables, is used by the exchange sum when Dlow < 0.
+    kernel, a thermalkernel.ThermalKernel, replaces K and its integral in
+    both sums (the tables are then not used)."""
     d, m, n = len(e), len(cols), len(w)
     G4 = Gb.reshape(2, d, 2, d)
     A4 = Ab.reshape(2, d, 2, d)
     # direct: sum_c G[a,c] A[c,b] K(w-(e_c-e_b)); P[j,(i,a,n),c]
     P = np.einsum('iakc,kcnj->jianc', G4, A4[:, :, :, cols]).reshape(m, 4*d, d)
     x = w[None, None, :] - (e[None, :, None] - e[cols][:, None, None]) # [j,c,k]
-    if Dlow < 0.: Kp = _kernel(x, D, omega0, Gamma0)
-    else: Kp = _kernel_integral(x, Dlow, D, omega0, Gamma0)
+    if kernel is not None:
+        Kp = kernel(x, D, Dlow)
+
+        def hole_of(Qr, out):
+            kernel.hole_sum(Qr, w, e, D, Dlow, out)
+    else:
+        if Dlow < 0.: Kp = _kernel(x, D, omega0, Gamma0)
+        else: Kp = _kernel_integral(x, Dlow, D, omega0, Gamma0)
+
+        def hole_of(Qr, out):
+            _hole_call(Qr, w, e, D, Dlow, omega0, Gamma0, out, tables)
     if not (np.iscomplexobj(Gb) or np.iscomplexobj(Ab)):
         Q = np.einsum('kanc,ickj->ainjc', A4, G4[:, :, :, cols]).reshape(d, 4*m, d)
         hole = np.empty((n, d, 4*m))
-        _hole_call(np.ascontiguousarray(Q), w, e, D, Dlow, omega0, Gamma0, hole, tables)
+        hole_of(np.ascontiguousarray(Q), hole)
         part = np.matmul(P, Kp).reshape(m, 2, d, 2, n).transpose(4, 1, 2, 3, 0)
         return part - hole.reshape(n, d, 2, 2, m).transpose(0, 2, 1, 3, 4)
     part = (np.matmul(np.ascontiguousarray(P.real), Kp)
@@ -277,7 +296,7 @@ def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0, tables=None):
     Q = np.einsum('kanc,ickj->ainjc', A4, G4[:, :, :, cols]).reshape(d, 4*m, d)
     Qr = np.ascontiguousarray(np.concatenate([Q.real, Q.imag], axis=1))
     hole = np.empty((n, d, 8*m))
-    _hole_call(Qr, w, e, D, Dlow, omega0, Gamma0, hole, tables)
+    hole_of(Qr, hole)
     hole = (hole[:, :, :4*m] + 1j*hole[:, :, 4*m:]).reshape(n, d, 2, 2, m)
     return part - hole.transpose(0, 2, 1, 3, 4)
 
@@ -417,7 +436,7 @@ def _integrate(rhs, y0, Dmax, Dmin, sample_coupling, ref, rtol, atol):
 
 
 def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
-                pole_threshold):
+                pole_threshold, kernel=None, onshell_kernel=None):
     """One flow from Dmax to Dmin of the sample vertex G, of the on-shell
     tip vertex A_on and of the tip vertex at each incoming energy
     omegas[k], the last one for the columns cols only, all at U=0.
@@ -435,9 +454,16 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
     state is the complex (4,d,d) matrices of the vertices. The two give
     the same equations: the numbers differ by the integrator's step
     sequence, 1e-11 of dI/dV. max_coupling is in units of the bare S/2,
-    and is 0 for an impurity with no spin."""
+    and is 0 for an impurity with no spin.
+
+    kernel, a thermalkernel.ThermalKernel, is the cutoff kernel of the tip
+    vertex at a finite temperature, and onshell_kernel that of the flow of
+    G and A_on; None is the T=0 kernel K(x,D) (see leading_log_dIdV)."""
     if not Gamma0 > 0.:
         raise ValueError("Gamma0 must be positive, it cuts the logs")
+    for k in (kernel, onshell_kernel):
+        if k is not None and (k.omega0 != omega0 or k.Gamma0 != Gamma0):
+            raise ValueError("the thermal kernel was built for another omega0 or Gamma0")
     S = _spin_ops(ks)
     d = S.shape[-1]
     e = np.ascontiguousarray(ks.e, dtype=float)
@@ -448,8 +474,13 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
     Dmax, Dmin = _energy_range(ks, omega0, w, Gamma0)
     smax = np.max(np.abs(S))/2.
     ref = pole_threshold*smax
-    tables = _hole_tables(w, e, omega0, Gamma0)
+    tables = _hole_tables(w, e, omega0, Gamma0) if kernel is None else None
     real = _block_is_real(S)
+
+    def kon(D): # the kernel of the on-shell flow at the energy differences
+        if onshell_kernel is None:
+            return _kernel(dE, D, omega0, Gamma0)
+        return onshell_kernel(dE, D)
     A_bare = _bare_vertex(S, 1., 0.)
     Ab0 = _block(A_bare)
     T0 = Ab0.reshape(2, d, 2, d)[:, :, :, cols]
@@ -466,12 +497,12 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
             D = np.exp(s)
             X = couplings(y)
             Gb, Ab = X[0], X[1]
-            GKb = Gb*np.tile(_kernel(dE, D, omega0, Gamma0), (2, 2))
+            GKb = Gb*np.tile(kon(D), (2, 2))
             out = np.empty(len(y))
             out[:nb] = _bracket(Gb, GKb).ravel()
             out[nb:2*nb] = _bracket(GKb, Ab).ravel()
             out[2*nb:] = _tip_bracket(Gb, Ab, cols, w, e, D, -1., omega0, Gamma0,
-                                      tables).ravel()
+                                      tables, kernel).ravel()
             out *= -D
             return out
 
@@ -486,7 +517,8 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
         Tb = y[2*nb:].reshape(n, 2, d, 2, m)
         if D_stop is not None and D_stop > Dmin:
             X = couplings(y)
-            Tb = Tb + _tip_bracket(X[0], X[1], cols, w, e, D_stop, Dmin, omega0, Gamma0)
+            Tb = Tb + _tip_bracket(X[0], X[1], cols, w, e, D_stop, Dmin, omega0, Gamma0,
+                                   kernel=kernel)
     else:
         nx = 8*d*d # complex entries of G and A_on
         y0 = np.concatenate([_bare_vertex(S, SIGN*Jrho_s, 0.).ravel(), A_bare.ravel(),
@@ -498,13 +530,13 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
         def rhs(s, y):
             D = np.exp(s)
             X = couplings(y)
-            Kf = _kernel(dE, D, omega0, Gamma0)
+            Kf = kon(D)
             Gb, GKb, Ab = _block(X[0]), _block(X[0]*Kf), _block(X[1])
             out = np.empty(len(y)//2, dtype=complex)
             out[:nx//2] = _unblock(_bracket(Gb, GKb)).ravel()
             out[nx//2:nx] = _unblock(_bracket(GKb, Ab)).ravel()
             out[nx:] = _tip_bracket(Gb, Ab, cols, w, e, D, -1., omega0, Gamma0,
-                                    tables).ravel()
+                                    tables, kernel).ravel()
             out *= -D
             return out.view(float)
 
@@ -517,13 +549,14 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
         if D_stop is not None and D_stop > Dmin:
             X = couplings(y)
             Tb = Tb + _tip_bracket(_block(X[0]), _block(X[1]), cols, w, e, D_stop,
-                                   Dmin, omega0, Gamma0)
+                                   Dmin, omega0, Gamma0, kernel=kernel)
     return _cut_columns(Tb), {"D_stop": D_stop,
                               "max_coupling": float(max_coupling/(smax if smax > 0. else 1.))}
 
 
 def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
-               atol=1e-14, pole_threshold=1.0, cols=None):
+               atol=1e-14, pole_threshold=1.0, cols=None, kernel=None,
+               onshell_kernel=None):
     """The tip vertex A(omega) at D -> 0 for each incoming energy
     omegas[k], with bare potential scattering Us[k]; shape (n,4,d,d), or
     (n,4,d,m) for the columns (initial states) cols only, which is what
@@ -532,7 +565,8 @@ def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
 
     The potential scattering of the tip does not flow: its direct and
     exchange terms cancel exactly at every cutoff. So the flow is solved
-    once at U=0, and Us[k] is added to the mu=0 vertex at the end."""
+    once at U=0, and Us[k] is added to the mu=0 vertex at the end.
+    kernel and onshell_kernel: see _joint_flow (None is T=0)."""
     omegas = np.asarray(omegas, dtype=float)
     Us = np.broadcast_to(np.asarray(Us, dtype=float), omegas.shape)
     d = len(ks.e)
@@ -540,43 +574,27 @@ def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
     # a symmetric bias grid asks for each energy twice
     w, inverse = np.unique(omegas, return_inverse=True)
     A, info = _joint_flow(ks, w, cols, Jrho_s, omega0, Gamma0, rtol, atol,
-                          pole_threshold)
+                          pole_threshold, kernel, onshell_kernel)
     A = A[inverse]
     A[:, 0, cols, np.arange(len(cols))] += Us[:, None]
     return A, info
 
 
-def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
-                     Gamma0=5e-6, p_cut=P_CUT, rtol=1e-10, atol=1e-14,
-                     pole_threshold=1.0, stop_margin=10.0, return_info=False):
-    """dI/dV with the leading logs summed to all orders, in the units of
-    conductance.py (2*pi*e^2*T0^2/hbar). At first order in Jrho_s it is
-    second_order_dIdV + third_order_kondo_dIdV + third_order_potential_dIdV
-    exactly; see docs/new_methods/kondo_leading_log/README.md.
+def memory_model(d, m):
+    """Bytes one flow of _joint_flow holds for an impurity of d states and
+    m occupied columns, as (fixed, per incoming energy): the DOP853 solver
+    keeps about 24 copies of the state, the couplings are 8 d^2 complex
+    numbers and the tip vertex 4 d m per energy, and one right-hand side of
+    _tip_bracket adds three arrays of 4 m d^2 complex numbers. For 9 spins
+    1/2 at T=0 (d=512, m=4, 1642 energies) it gives 7.0 GB, and 6.67 GB were
+    measured."""
+    return 16*24*8*d*d + 192*m*d*d, 64*28*m*d
 
-    T=0 only (ks.T must be 0). Two checks of validity, per bias:
-      - the running tip coupling, |Jrho_s| times the largest ratio of the
-        flowed to the bare spin vertex over the transitions out of occupied
-        states that are open at this bias, the ones that enter dI/dV
-        there, with the bare vertex bounded below by BARE_FLOOR. Above
-        WARN_COUPLING it warns, at pole_threshold the bias is NaN.
-      - if the sample coupling reaches pole_threshold during the flow (the
-        Kondo scale is above Gamma0), the flow stops at that cutoff D_stop,
-        and every bias within stop_margin*D_stop of zero or of any energy
-        difference e_x - e_y of the spectrum is NaN, with a warning.
 
-    A site with no spin on any state of the impurity has no exchange
-    vertex: the flow does nothing, dI/dV is the potential scattering
-    2*pi*T0^2*4*U^2 of the second order, and there is no warning.
-
-    return_info=True also returns a dict with D_stop, max_coupling (the
-    largest running sample coupling, Jrho_s itself at the start) and
-    coupling (the running tip coupling at each bias)."""
-    if ks.T != 0.:
-        raise NotImplementedError("leading_log_dIdV is T=0 only for now; "
-                                  "see docs/new_methods/kondo_leading_log")
-    eVs = np.asarray(eVs, dtype=float)
-    occ = _occupied_states(ks, p_cut)
+def _ll_piece(ks, eVs, Jrho_s, U, T0, omega0, Gamma0, occ, rtol, atol,
+              pole_threshold, kernel, onshell_kernel, open_cut):
+    """dI/dV and the running tip coupling at the biases eVs, from one
+    flow; the body of leading_log_dIdV."""
     p = ks.p[occ]
     e = np.asarray(ks.e, dtype=float)
     n = len(eVs)
@@ -586,8 +604,7 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     # A[k,lam,f,i], i over the occupied states only
     A, info = tip_vertex(ks, omegas, Us, Jrho_s, omega0=omega0, Gamma0=Gamma0,
                          rtol=rtol, atol=atol, pole_threshold=pole_threshold,
-                         cols=occ)
-    D_stop = info["D_stop"]
+                         cols=occ, kernel=kernel, onshell_kernel=onshell_kernel)
     # W[k,f,i] = 4 sum_lam |A^lam_fi(omega_k)|^2
     W = 4.*np.sum(np.abs(A)**2, axis=1)
     eps_if = e[:, None] - e[occ][None, :] # [f,i] = e_f - e_i
@@ -601,11 +618,104 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     bare = np.sqrt(np.sum(np.abs(S[:, :, occ]/2.)**2, axis=0)) # [f,i]
     bare = np.maximum(bare, BARE_FLOOR*np.max(bare))
     flow = np.sqrt(np.sum(np.abs(A[:, 1:])**2, axis=1)) # [k,f,i]
+    # a thermal step is never zero, so at T>0 a transition is open when
+    # its weight p_i Theta is above open_cut of the largest population
+    if ks.T > 0.:
+        is_open = p[None, None, :]*Th > open_cut*np.max(p)
+    else:
+        is_open = Th > 0.
     # a zero bare vertex (a site with no spin) has nothing to compare with
-    ratio = np.max(np.where(Th > 0., flow/np.where(bare > 0., bare, np.inf)[None], 0.),
+    ratio = np.max(np.where(is_open, flow/np.where(bare > 0., bare, np.inf)[None], 0.),
                    axis=(1, 2))
     coupling = abs(Jrho_s)*np.maximum(ratio[:n], ratio[n:])
-    info["coupling"] = coupling
+    return dIdV, coupling, info
+
+
+def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
+                     Gamma0=5e-6, p_cut=P_CUT, rtol=1e-10, atol=1e-14,
+                     pole_threshold=1.0, stop_margin=10.0, return_info=False,
+                     onshell="thermal", open_cut=1e-2, mem_gb=None):
+    """dI/dV with the leading logs summed to all orders, in the units of
+    conductance.py (2*pi*e^2*T0^2/hbar). At first order in Jrho_s it is
+    second_order_dIdV + third_order_kondo_dIdV + third_order_potential_dIdV
+    exactly, at the temperature ks.T; see
+    docs/new_methods/kondo_leading_log/README.md.
+
+    At T>0 (ks.T > 0, with ks.p the Boltzmann weights) the cutoff kernel is
+    its thermal average with the weight of stepfunctions.FBuilder
+    (thermalkernel.ThermalKernel), so the first order is the thermal third
+    order, and the amplitude is averaged and then squared and multiplied by
+    the thermal step, as conductance.py does at third order. onshell sets
+    the kernel of the flow of the sample vertex and of the on-shell tip
+    vertex: "thermal" (the default) uses the thermal one there too, so the
+    sample coupling stops growing at D ~ kT; "T0" keeps the T=0 kernel
+    there. The two differ at second order in Jrho_s. At T=0 onshell has no
+    effect.
+
+    Two checks of validity, per bias:
+      - the running tip coupling, |Jrho_s| times the largest ratio of the
+        flowed to the bare spin vertex over the transitions out of occupied
+        states that are open at this bias, the ones that enter dI/dV
+        there, with the bare vertex bounded below by BARE_FLOOR. Above
+        WARN_COUPLING it warns, at pole_threshold the bias is NaN. At T>0 a
+        transition is open when p_i Theta is above open_cut of the largest
+        p, since a thermal step is never zero.
+      - if the sample coupling reaches pole_threshold during the flow (the
+        Kondo scale is above Gamma0 and kT), the flow stops at that cutoff
+        D_stop, and every bias within stop_margin*D_stop of zero or of any
+        energy difference e_x - e_y of the spectrum is NaN, with a warning.
+
+    A site with no spin on any state of the impurity has no exchange
+    vertex: the flow does nothing, dI/dV is the potential scattering
+    2*pi*T0^2*4*U^2 of the second order, and there is no warning.
+
+    mem_gb: None solves every bias in one flow. A number cuts the biases
+    in chunks so that one flow stays below about mem_gb (memory_model), at
+    the cost of solving the couplings again in each chunk; it raises when
+    not even 8 biases fit. At T>0 the occupied states are the ones within
+    ln(1/p_cut) kT of the ground state, and the tip part costs d^2 per
+    energy and per occupied state.
+
+    return_info=True also returns a dict with D_stop, max_coupling (the
+    largest running sample coupling, Jrho_s itself at the start), coupling
+    (the running tip coupling at each bias), n_occ and n_chunks."""
+    if onshell not in ("thermal", "T0"):
+        raise ValueError("onshell must be \"thermal\" or \"T0\", got %r" % (onshell,))
+    if not ks.T >= 0.:
+        raise ValueError("T must be >= 0, got %r" % (ks.T,))
+    eVs = np.asarray(eVs, dtype=float)
+    occ = _occupied_states(ks, p_cut)
+    e = np.asarray(ks.e, dtype=float)
+    n = len(eVs)
+    kernel = onshell_kernel = None
+    if ks.T > 0.:
+        from .thermalkernel import ThermalKernel
+        span = (np.max(e) - np.min(e)) + (np.max(np.abs(eVs)) if n else 0.)
+        kernel = ThermalKernel(ks.kB*ks.T, omega0, Gamma0, max(1.05*span, 10*omega0))
+        if onshell == "thermal":
+            onshell_kernel = kernel
+    if mem_gb is None:
+        pieces = [np.arange(n)]
+    else:
+        fixed, per_w = memory_model(len(e), len(occ))
+        nb = int((mem_gb*1e9 - fixed)//(2*per_w))
+        if nb < 8:
+            raise ValueError("leading_log_dIdV: %d occupied states of %d need %.2g GB "
+                             "for 8 biases, above mem_gb=%g; raise mem_gb, or p_cut to "
+                             "keep fewer states" % (len(occ), len(e),
+                                                    (fixed + 16*per_w)/1e9, mem_gb))
+        pieces = [np.arange(i, min(n, i + nb)) for i in range(0, n, nb)] or [np.arange(0)]
+    dIdV, coupling = np.empty(n), np.empty(n)
+    D_stop, max_coupling = None, 0.
+    for idx in pieces:
+        dIdV[idx], coupling[idx], piece = _ll_piece(
+            ks, eVs[idx], Jrho_s, U, T0, omega0, Gamma0, occ, rtol, atol,
+            pole_threshold, kernel, onshell_kernel, open_cut)
+        max_coupling = max(max_coupling, piece["max_coupling"])
+        if piece["D_stop"] is not None:
+            D_stop = piece["D_stop"] if D_stop is None else max(D_stop, piece["D_stop"])
+    info = {"D_stop": D_stop, "max_coupling": max_coupling, "coupling": coupling,
+            "n_occ": len(occ), "n_chunks": len(pieces)}
     bad = coupling >= pole_threshold
     if np.any(coupling >= WARN_COUPLING):
         warnings.warn("leading_log_dIdV: the running coupling reaches %.2g at "
@@ -618,10 +728,11 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
         near = np.min(np.abs(np.abs(eVs)[:, None] - thr[None]), axis=1) < stop_margin*D_stop
         if np.any(near):
             warnings.warn("leading_log_dIdV: the sample coupling reached order "
-                          "one at D = %.3g (the Kondo scale is above Gamma0); "
+                          "one at D = %.3g (the Kondo scale is above Gamma0%s); "
                           "%d bias points within %g*D of an energy difference "
                           "of the spectrum are not leading-log results and are "
-                          "returned as NaN" % (D_stop, int(np.sum(near)), stop_margin))
+                          "returned as NaN" % (D_stop, " and kT" if ks.T > 0. else "",
+                                               int(np.sum(near)), stop_margin))
         bad = bad | near
     dIdV = np.where(bad, np.nan, dIdV)
     if return_info:

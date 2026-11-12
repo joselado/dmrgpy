@@ -268,12 +268,30 @@ O(g^2) without a log; do not go back to it); the smooth
 kernel 1/(D+r_x) - 1/(D+omega0+|x|) integrates exactly to F0, so its first
 order IS `conductance.py`'s third order (tested as g^2 and odd-part g^3
 scaling), and `SIGN=+1` maps g to `Jrho_s`. G(0) is not Hermitian; do not
-symmetrize it. T=0 only, fixed Gamma0, no level renormalization; NaN plus a
+symmetrize it. Fixed Gamma0, no level renormalization; NaN plus a
 warning when the sample coupling or the per-bias tip coupling
 (`info["coupling"]`) reaches order one, a warning above 0.5.
 `tests/test_kondo_leading_log.py`. Public as `get_kondo_spectrum(order="LL")`,
-`mode="ED"` and `T=0` only; `mode="DMRG"` raises because the TASK space does
+`mode="ED"` only, at any T; `mode="DMRG"` raises because the TASK space does
 not close under the products of spin operators the flow needs.
+
+**The leading-log flow at T>0 (2026-11-12)** replaces the cutoff kernel by
+its thermal average with the weight of `FBuilder`,
+`thermalkernel.ThermalKernel`, passed to `_joint_flow` as `kernel` (tip)
+and `onshell_kernel` (G and A_on); with neither the flow is the T=0 code
+line for line, hole tables included. Its first order is the thermal third
+order (odd part 8.011 when g is halved, against 1.95 for the shortcut
+Gamma0 -> sqrt(Gamma0^2+(c kT)^2): do NOT replace the kernel by a broader
+Gamma0). The amplitude is averaged and then squared, the on-shell flow is
+thermal by default (`onshell="thermal"`; "T0" differs at second order), and
+at T>0 a transition is open for the coupling check when p_i Theta is above
+`open_cut` = 1e-2 of the largest p. The kernel rows of the exchange sum are
+filled on one core, like `_hole_sum`, which makes the kernel 2.6 times the
+T=0 one on 6 spins; what T really adds is occupied states, linear in their
+number (`p_cut`), and memory (`memory_model`, `mem_gb` chunks the biases).
+It came from a script on top of dmrgpy in a 1T-TaSe2 project (`llT.py`) and
+agrees with it to 1e-15. README section 8,
+`tests/test_kondo_leading_log_thermal.py`.
 
 **The leading-log flow is one solve on the occupied columns (2026-11-11).**
 `leadinglog._joint_flow` integrates G, A_on and the tip vertex at every

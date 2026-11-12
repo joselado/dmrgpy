@@ -9,5 +9,6 @@ describes a method only once its checks pass and it is exposed in the
 public API.
 
 - `kondo_leading_log/`: the leading-log resummation of the third-order
-  STM Kondo spectrum for an impurity with any spectrum, in
-  `kondospectrumtk/leadinglog.py`.
+  STM Kondo spectrum for an impurity with any spectrum, at any
+  temperature, in `kondospectrumtk/leadinglog.py` and
+  `kondospectrumtk/thermalkernel.py`.
