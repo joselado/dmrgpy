@@ -362,7 +362,8 @@ operand of 4 d^2 numbers per occupied column), and "block" applies the
 kernel to the vertex and does one product per bias for all the occupied
 columns, twice the arithmetic but the exchange kernel built once per bias
 and nothing that grows with their number. "auto" takes "block" from
-`BLOCK_FROM` occupied columns. With `mem_gb` the biases are chunked by
+`BLOCK_FROM` occupied columns, which is set out of reach: on the A2000 the
+column form won every case measured, also at 223 occupied columns. With `mem_gb` the biases are chunked by
 `leadinglog_device.memory_model` on the device. The exchange sum runs on
 the card there, which does not touch the author's one-core rule for
 `_hole_sum` on the host.

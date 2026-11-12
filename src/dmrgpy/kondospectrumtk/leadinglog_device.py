@@ -51,9 +51,12 @@ CHUNK_BYTES = 512e6
 # 4 d^2 numbers per occupied column and the exchange kernel built again for
 # every chunk of columns; "block" applies the kernel to the vertex and does
 # one product per bias for all the columns, with twice the arithmetic.
-# "auto" takes "columns" up to BLOCK_FROM - 1 occupied columns.
+# "auto" takes "columns" up to BLOCK_FROM - 1 occupied columns. On the RTX
+# A2000 of d22 the column form was faster in every case measured (41 s
+# against 78 s at 9 spins and one column, 164 s against 308 s at 8 spins and
+# 223 columns), so "auto" is the column form until a card shows otherwise.
 TIP_FORM = "auto"
-BLOCK_FROM = 4
+BLOCK_FROM = 10**9
 
 # scipy.integrate._ivp.rk
 SAFETY, MIN_FACTOR, MAX_FACTOR = 0.9, 0.2, 10.
