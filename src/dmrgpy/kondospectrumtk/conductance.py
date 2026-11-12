@@ -1,5 +1,5 @@
 import numpy as np
-from .stepfunctions import Theta, Theta0, FBuilder, F0
+from .stepfunctions import Theta, Theta0, FBuilder, F0, cached_fbuilder
 
 # Second- and third-order dI/dV for the STM/Kondo perturbation theory of
 # Ternes, New J. Phys. 17 063016 (2015), arXiv:1505.04430, assembled from
@@ -147,7 +147,7 @@ def _get_F(ks, omega0, Gamma0, Fb):
     if ks.T == 0.:
         return lambda x: F0(x, omega0=omega0, Gamma0=Gamma0)
     if Fb is None:
-        return FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
+        return cached_fbuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
     return Fb
 
 

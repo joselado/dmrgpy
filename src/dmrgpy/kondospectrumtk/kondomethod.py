@@ -266,7 +266,7 @@ class KondoSpectrumMixin():
                                 Gamma0, order, kB):
         from .edkondo import KondoSpectrum
         from . import conductance
-        from .stepfunctions import FBuilder
+        from .stepfunctions import cached_fbuilder
         ks = KondoSpectrum(self, site, T, kB=kB)
         if order == "LL":
             from .leadinglog import leading_log_dIdV
@@ -274,9 +274,11 @@ class KondoSpectrumMixin():
                                         omega0=omega0, Gamma0=Gamma0)
         dIdV = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
         if order == 3:
-            # shared between both calls below: building it tabulates F
-            # once (~0.4 s, see FBuilder)
-            Fb = FBuilder(T, omega0=omega0, Gamma0=Gamma0, kB=kB) if T>0. else None
+            # shared between both calls below, and kept across calls at
+            # the same T, omega0, Gamma0 and kB: building it tabulates F
+            # (0.2 to 0.6 s, see FBuilder)
+            Fb = (cached_fbuilder(T, omega0=omega0, Gamma0=Gamma0, kB=kB)
+                  if T > 0. else None)
             dIdV = dIdV + conductance.third_order_kondo_dIdV(
                     ks, eV, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0, Fb=Fb)
             if U != 0.0:
@@ -333,8 +335,9 @@ class KondoSpectrumMixin():
             Fb = None
             if T > 0. and order == 3:
                 # the thermal Kondo log, tabulated once for every member
-                from .stepfunctions import FBuilder
-                Fb = FBuilder(T, omega0=omega0, Gamma0=Gamma0, kB=kB)
+                # and kept across calls at the same T, omega0, Gamma0, kB
+                from .stepfunctions import cached_fbuilder
+                Fb = cached_fbuilder(T, omega0=omega0, Gamma0=Gamma0, kB=kB)
             def terms():
                 from .taskkondo import TaskKondoSpectrum
                 from . import conductance

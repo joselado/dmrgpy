@@ -4,7 +4,7 @@ evaluates F0 only outside its table, cached_fbuilder shares one object,
 and the sparse eigenbasis spin operator equals the old dense formula."""
 import numpy as np
 import pytest
-import mpmath as mp
+mp = pytest.importorskip("mpmath") # not a dependency of dmrgpy
 
 from dmrgpy import spinchain, fermionchain
 from dmrgpy.algebra import algebra
@@ -93,3 +93,32 @@ def test_eigenbasis_spin_operator_hubbard_sector():
     fc.set_hamiltonian(h)
     fc.set_conserved_sector(Nf=3)
     _check(fc)
+
+
+def test_get_kondo_spectrum_builds_the_thermal_table_once(monkeypatch):
+    """dispatch-1: two T>0 calls with the same T, omega0, Gamma0 and kB
+    share one FBuilder through cached_fbuilder, and give the same curve."""
+    sf._cached_fbuilder.cache_clear()
+    built = []
+    class Counting(sf.FBuilder):
+        def __init__(self, *a, **k):
+            built.append(1)
+            super().__init__(*a, **k)
+    monkeypatch.setattr(sf, "FBuilder", Counting)
+    sc = spinchain.Spin_Chain(["S=1/2"]*3)
+    h = 0
+    for i in range(2):
+        h = h + 1e-3*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1]
+                      + sc.Sz[i]*sc.Sz[i+1])
+    h = h + 2e-4*sc.Sz[0]
+    sc.set_hamiltonian(h)
+    eV = np.linspace(-3e-3, 3e-3, 7)
+    kw = dict(Jrho_s=-0.05, U=0.1, T=1.0, order=3, omega0=20e-3,
+              Gamma0=5e-6, mode="ED")
+    a = sc.get_kondo_spectrum(eV, **kw)[1]
+    b = sc.get_kondo_spectrum(eV, **kw)[1]
+    assert len(built) == 1
+    assert np.array_equal(a, b)
+    sc.get_kondo_spectrum(eV, **dict(kw, omega0=10e-3))
+    assert len(built) == 2
+    sf._cached_fbuilder.cache_clear()
