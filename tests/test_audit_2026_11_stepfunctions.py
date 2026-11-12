@@ -4,7 +4,6 @@ evaluates F0 only outside its table, cached_fbuilder shares one object,
 and the sparse eigenbasis spin operator equals the old dense formula."""
 import numpy as np
 import pytest
-mp = pytest.importorskip("mpmath") # not a dependency of dmrgpy
 
 from dmrgpy import spinchain, fermionchain
 from dmrgpy.algebra import algebra
@@ -13,6 +12,9 @@ from dmrgpy.kondospectrumtk.edkondo import KondoSpectrum
 
 
 def _tp_exact(x):
+    # mpmath is not a dependency of dmrgpy: without it only the tests that
+    # need a 50-digit reference skip, not the whole file
+    mp = pytest.importorskip("mpmath")
     mp.mp.dps = 50
     x = mp.mpf(float(x))
     h = x/2

@@ -13,12 +13,12 @@ that build (193 passed, `julia_live` not run, and 8 of 8 `julia_live` Kondo
 tests passed separately).
 
 Five hunters ran, one per lens, and every repro was executed. They returned
-19 candidates, 11 of them about cost and 8 about wrong behaviour. Eight
+19 candidates, 10 of them about cost and 9 about wrong behaviour. Eight
 reviewers, each briefed to refute, took one unit of one to four candidates
 whose fixes touch the same files, and judged each candidate separately.
 This is fewer reviewers than one per candidate, chosen to keep the workflow
 small; every verdict below is still per candidate. The reviewers refuted 2,
-confirmed 7 and narrowed 10. What they struck stays visible in the
+confirmed 6 and narrowed 11. What they struck stays visible in the
 reviewer paragraphs. A speedup counted only with a profile of the public
 call at a realistic size, a prototype, old against new on the same inputs,
 and a median of three timed runs, and the reviewers measured it again.
