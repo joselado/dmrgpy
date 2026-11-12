@@ -216,7 +216,18 @@ class TaskKondoSpectrum():
         sum_k |<a|S_k|GS>|^2 in that window they carry; and "step", the
         largest of their weights over the total weight, which is the size
         of the largest step of the second-order dI/dV whose position is
-        not converged, relative to its largest value."""
+        not converged, relative to its largest value. At T>0 a step is
+        smooth, and a pole that moves by d changes the curve by about
+        d/(THERMAL_WIDTH kT) of its weight, so there each weight in "step"
+        is scaled by min(1, d/(THERMAL_WIDTH kT)), with d = min(r, r^2/g)
+        the distance from a Ritz energy with residual r to an eigenvalue
+        of PHP, g being the distance to the nearest other Ritz energy.
+        Measured against nkry=300 on one state at nkry=100: on a gapped
+        20-site chain the size went from 4.1e-3 to 3.0e-5 at 0.1 K (true
+        change 6.5e-8) and to 1.1e-4 at 0.05 K (7.0e-7), so the warning no
+        longer fires; on a uniform 24-site chain it went from 3.7e-2 to
+        1.5e-2 at 0.05 K (8.7e-4) and still fires. In both it stays above
+        the true change."""
         w = sum(np.abs(M[:, 0]) ** 2 for M in (self.Sx, self.Sy, self.Sz))
         total = max(float(np.sum(w)), 1e-300)
         width = max(float(np.max(np.abs(self.e))), 1e-300)
@@ -233,10 +244,29 @@ class TaskKondoSpectrum():
                               for x in self.e])
             loose &= apart > THERMAL_WIDTH * self.kB * self.T
         inside = max(float(np.sum(w[window])), 1e-300)
+        step = w[loose]
+        if self.T > 0. and loose.any():
+            step = step * self._thermal_shift_factor(np.flatnonzero(loose))
         return {"poles": int(np.sum(window)),
                 "unconverged": int(np.sum(loose)),
                 "weight": float(np.sum(w[loose])) / inside,
-                "step": float(np.max(w[loose])) / total if loose.any() else 0.}
+                "step": float(np.max(step)) / total if loose.any() else 0.}
+
+    def _thermal_shift_factor(self, rows):
+        """For the Ritz states in rows, min(1, d/(THERMAL_WIDTH kT)): the
+        part of its weight by which a thermal step moves when the pole
+        moves by d. A Ritz energy with residual r is within r of an
+        eigenvalue of PHP, and within r^2/g when the distance g to the
+        nearest other Ritz energy is larger than r, so d = min(r, r^2/g).
+        A Ritz energy degenerate with another one gets d = r."""
+        es = np.sort(self.e)
+        r = self.residual[rows]
+        g = np.array([np.sort(np.abs(es - self.e[k]))[1] if len(es) > 1
+                      else np.inf for k in rows])
+        quad = np.full(len(rows), np.inf)
+        np.divide(r ** 2, g, out=quad, where=g > 0.)
+        d = np.minimum(r, quad)
+        return np.minimum(1., d / (THERMAL_WIDTH * self.kB * self.T))
 
     def warn_unconverged(self, emax, stacklevel=5):
         """Warn when a pole below emax whose position is not converged
@@ -257,7 +287,8 @@ class TaskKondoSpectrum():
             % (c["unconverged"], c["poles"], emax, self.nkry, c["weight"],
                "At T=0 every pole is a sharp step of dI/dV" if self.T == 0.
                else "At T=%g the thermal step is narrower than their "
-               "spacing" % self.T, c["step"]),
+               "spacing and than how far they can still move" % self.T,
+               c["step"]),
             RuntimeWarning, stacklevel=stacklevel)
         return c
 
