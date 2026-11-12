@@ -64,8 +64,7 @@ reconstruction (`_paper_form`) and pins the code's own values separately.
 Do NOT "restore" eq. 25 to get back on the figure. The two-time DMRG/ED
 route cannot express the new argument along G's t2 axis, so it builds a
 second, sheared function Gx(s,tau) = G(-s,tau+s) =
-<psi_l(-s-tau)|Sk|psi_j(-s)> from checkpoints of the same trajectories (1.5x
-the TDVP cost), and `kondo_term_from_two_time` takes (t, G, Gx) triples with
+<psi_l(-s-tau)|Sk|psi_j(-s)> from checkpoints of the same trajectories, and `kondo_term_from_two_time` takes (t, G, Gx) triples with
 the one-sided kernel `K_F` (K_W is gone; the s->t direction reuses
 conj(K_F), since its cell-averaged quadratures were most of the cost).
 
@@ -93,8 +92,10 @@ arXiv:2510.07279) and feeds it to `conductance.py` unchanged, so every
 prefactor and the exchange-diagram argument are inherited from the ED route
 rather than reimplemented. Exact at saturation (`cutoff=0`) once the Krylov
 space is exhausted (2e-11 on a 10-site S=1 impurity chain at `nkry=400`);
-`itensor_version="python"` and 3 (v3 exports its site tensors to the same
-Python code, `taskdmrg.session_spectrum`), the default on both; the near-zero Ritz energies are snapped
+`itensor_version="python"`, 3 and `"julia_live"` (`taskdmrg.BACKENDS`;
+v3 exports its site tensors to the same Python code,
+`taskdmrg.session_spectrum`), the default on all three, and the correlator
+route (order=2 only) on v2; the near-zero Ritz energies are snapped
 to 0 or the zero-bias point is rounding-dependent on a degenerate ground
 state. It is in `_N_GS_SUBMODES`, checked on a Kramers doublet. A Ritz
 energy below the snapping window means the state handed over is not the
@@ -158,11 +159,54 @@ within 1e-3 kT of zero as the manifold of `n_gs` and raises when there
 are more than `n_gs`-1 (a truncated partner sits at 1.5e-9 eV, not at 0),
 and raises on a reached pole below the state. Keep all three. At T>0 the warning counts a pole only when its third nearest pole
 is further than 5.4 kT (`THERMAL_WIDTH`), a rule fitted on one 24-site
-chain. The other DMRG submodes still raise at T>0. In `_overlap_columns`,
+chain, and weighs it by min(1, d/(5.4 kT)), with d = min(r, r^2/g) the
+distance a Ritz energy with residual r can still move, g being the
+distance to the nearest other Ritz energy (2026-11-12, the author's pick
+after the 2026-11 hunt: a gapped 20-site chain at 0.1 K warned of 4.1e-3
+for a true change of 6.5e-8; now 3.0e-5). Measured on two chains, the
+size stays between the true change and the old size, and a uniform
+24-site chain still warns where the true change is near 1e-3. T=0 is
+unchanged; there the size is that of one step and the whole curve on
+pole-resolved biases can move more (0.34 against 6.4e-3 on the gapped
+chain), which is left as it is. The other DMRG submodes still raise at T>0. In `_overlap_columns`,
 `row_overlaps` and `project_rows` a real store is never multiplied by a
 complex array directly, since NumPy then copies the store as complex
 (4.7 GB against 1.9 GB on 40 sites at bond dimension 100).
 `tests/test_kondo_task_convergence.py`.
+
+**The 2026-11 hunt (2026-11-12)**, `docs/audit_2026_11_hole_hunt.md`,
+left these rules. `conductance.second_order_dIdV` sums over the occupied
+initial states with the relative `P_CUT` of the third-order terms
+(`p_cut=0` is the full sum) and builds its Theta arrays per block of
+`CHUNK_ENTRIES`; it was O(n_eV dim^2) in time and memory (6.5 GB at 904
+TASK states and 241 biases). `third_order_kondo_dIdV` builds its
+coefficient tensor per block of occupied states under `COEFF_BYTES`, with
+BOTH tunnelling directions inside each block and the exchange diagram
+accumulated per group of biases under `EXCHANGE_BYTES`: one block is the
+old code path, and building the blocks once per direction cost 36 to 46%,
+so do NOT split them by direction. `FBuilder.__call__` evaluates F0 only
+outside its table; `Theta_prime` is a series below |x|=0.05, where the
+closed form lost every digit; the table is accurate for omega0 >~ kT only
+(2e-4 of F off for omega0 << kT, outside the paper's regimes, left as it
+is, since widening it moves numbers); `stepfunctions.cached_fbuilder`
+keeps the last four tables across calls, shared, so never mutate one. The
+ED eigenbasis spin operator is sparse times dense. The leading-log flow
+runs in real block arithmetic when the block form of the bare vertex is
+real to `REAL_TOL` (the complex code stays for a field along y), and
+`_hole_sum` reads r and omega0+|x| from tables built once per flow, up to
+`HOLE_TABLE_BYTES` (256 MB), so the 9-spin call with 241 biases is the
+same as before; still one core. A site with no spin gives the potential
+scattering 2*pi*4*U^2 on the LL route, as on order 2 and 3: the stop needs
+a strict crossing and a zero bare vertex gives a coupling ratio of 0. The
+two-time G comes from three bra trajectories of S_l|GS> run once, so a t2
+row costs only the three trajectories of Gx; below saturation this moves
+the term by the TDVP truncation error (up to 1.8e-3 of the ED peak at
+`maxm=4`), with the error against ED the same size as before. The grid of
+the two-time term is validated before any TDVP step, and the correlator
+route warns when `es` cuts the elastic line or stops below max|eV|. In
+`get_kondo_spectrum` the mode is validated first, and `n_gs` before
+anything is built. Not applied: computing Sz once for the second-order
+and potential terms of the correlator route (4% of the call).
 
 **Spinful fermion chains (2026-10-22).** `get_kondo_spectrum` lives on
 `kondospectrumtk/kondomethod.py::KondoSpectrumMixin`, inherited by

@@ -6134,7 +6134,14 @@ the docstrings), now pixel-digitized in
 `tests/test_kondo_spectrum_paper_fig7.py`. On the ED side the
 third-order sums are restricted to thermally occupied initial states
 (`conductance.P_CUT`, O(n_occ dim^2) instead of dim^3) and F is
-tabulated once per `FBuilder`.
+tabulated once per `FBuilder`. Since 2026-11-12 the second-order sum is
+restricted the same way, and both sums work in blocks under the byte
+budgets at the top of `conductance.py` (`CHUNK_ENTRIES` for the Theta
+arrays, `COEFF_BYTES` for the third-order coefficients of a block of
+initial states, `EXCHANGE_BYTES` for the exchange diagram of a group of
+biases), so their memory does not grow with the number of biases or of
+occupied states. `stepfunctions.cached_fbuilder` keeps the last four
+tables across calls (`docs/audit_2026_11_hole_hunt.md`).
 
 **`mode="DMRG"`** (`T=0` only) is a second, independent route through
 this same feature that *does* stay within `itensor_version=3`, never
@@ -6176,7 +6183,12 @@ requires:
   the same interface via exact ED eigenbasis time evolution, used both
   as the development-time reference this construction was validated
   against and as a fast, exact ground truth for `dmrgtwotime.py`'s own
-  test.
+  test. Since 2026-11-12 `G` is built the other way round: the three bra
+  trajectories `exp(+iH tau) Sl|GS>` run once, before the `t2` loop, and
+  each branch is overlapped with them, so a `t2` row runs only the three
+  trajectories of `Gx` instead of nine. Below saturation this moves the
+  term by the TDVP truncation error, not more
+  (`docs/audit_2026_11_hole_hunt.md`, finding 11).
 
 `dmrgtwotime.py` was written against this codebase's existing, verified
 DMRG API and validated once a compiled ITensor v3 backend became

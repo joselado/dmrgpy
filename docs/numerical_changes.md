@@ -1502,3 +1502,43 @@ in a field at `Jrho_s=-0.15` had none and has 3, near its first step,
 where the only open transition is the elastic one, which the old check
 did not read because its bare vertex is zero. The finite values are the
 same as before.
+
+
+## The 2026-11 Kondo hole hunt
+
+`docs/audit_2026_11_hole_hunt.md` has the evidence. Most of its fixes make
+the Kondo routes faster or smaller and leave their numbers alone. Five move
+numbers.
+
+- `mode="ED"` at $T>0$: the second-order term now drops the initial states
+  with a Boltzmann weight below 1e-12 of the largest one, as the
+  third-order terms already did (`P_CUT`). On 10 spins 1/2 at 1 K and 41
+  biases the curve moves by 9.8e-15 relative; at $T=0$ by roundoff. On
+  `submode="TASK"` nothing changes, since only the ground state is
+  occupied. `p_cut=0` gives the old sum back.
+- At $T>0$, on every route that uses the thermal Kondo log: `Theta_prime`
+  keeps its digits for small arguments, which moves the table nodes
+  between 1e-2 and 0.05 kT. On 10 spins 1/2 at 1 K the curve moves by
+  7.6e-13 relative.
+- `get_kondo_spectrum(order="LL")` on a real Hamiltonian runs in real
+  arithmetic, and the adaptive integrator then takes other steps. The
+  curve moves by 1.2e-12 (6 spins 1/2) and 2.7e-11 (7 spins 1/2) relative,
+  inside the integration tolerance. A field along y keeps the old route,
+  up to roundoff.
+- `get_kondo_spectrum(order="LL")` on a tip site with no spin on its
+  occupied states returned NaN at every bias, with a warning that the
+  Kondo scale is above Gamma0. It now returns the potential scattering
+  $2\pi\cdot 4U^2$ (1.5708 at U=0.25), as `order=2` and `order=3` do.
+- The two-time Kondo term of the correlator route (`order=3` with
+  `submode="KPM"` or another correlator submode) builds G from bra
+  trajectories evolved backward instead of ket trajectories evolved
+  forward. At saturation the term moves by 3.5e-11 (v3) and 3.4e-13
+  (`"python"`) relative. Below saturation the two are different TDVP
+  approximations, and the term moves by up to 8.7e-4 of the ED peak on v3
+  (8 sites, `maxm=4`), 7.3e-5 (`maxm=8`), and 1.8e-3 and 1.5e-4 on
+  `"python"` (10 sites). The error against the exact term is the same size
+  before and after.
+
+The `submode="TASK"` warning about unconverged poles fires less often at
+$T>0$: it now weighs each pole by how far it can still move against the
+width of the thermal step. The returned curves do not change.
