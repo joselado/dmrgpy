@@ -6317,6 +6317,19 @@ takes any `KondoSpectrum`-shaped object (`e, p, dim, Sx, Sy, Sz, T`), so
 a DMRG route plugs in at that interface once a space that closes under
 those products exists. `tests/test_kondo_leading_log.py`.
 
+The flow has a device route since 2026-11-12. `_joint_flow` hands it to
+`leadinglog_device.joint_flow` when the array backend of pyitensor is JAX
+(`leadinglog._on_device()`, which reads `pyitensor.backend` only if it is
+already imported, so a NumPy process never pays the import). The route is
+a port: `_DeviceFlow` is the right-hand side of `_joint_flow` in jax.numpy
+with the same layout of the state, and `_Dop853` is SciPy's DOP853 with the
+state on the device, so the two routes give the same numbers to roundoff.
+Any change to the equations of `_joint_flow` or `_tip_bracket` has to go
+into `_DeviceFlow` as well; `tests/test_kondo_leading_log_device.py`
+compares the two routes case by case. `mem_gb` reads
+`leadinglog_device.memory_model` on this route. Measurements are in the
+method's README, section 7.
+
 ### 4.8d Kondo screening on a Wilson chain (`wilsonchain.py`, `kondoscreening.py`)
 
 This is the NRG-MPS method of Stocker and Zilberberg, arXiv:2501.10746,
@@ -7796,6 +7809,13 @@ quietly became a CPU run is worse than a failure.
 Measured speedups, the crossover, the primitive-by-primitive table and the
 benchmarking pitfalls are in `docs/gpu_cpu_performance.md`; the port's
 design history is in `docs/pyitensor_gpu_port_plan.md`.
+
+The same switch moves one calculation outside pyitensor to the device: the
+leading-log Kondo flow (`kondospectrumtk/leadinglog_device.py`, see the
+STM/Kondo section, 4.8c). It is a whole-flow port for the same reason as above, since the
+state of the flow is up to 20 copies of 8 d^2 numbers and must not cross
+the bus per step. Its scalars (the step control of DOP853, the stop of the
+flow) and the tables of the thermal kernel stay on the host.
 
 ## 6. Directory reference
 

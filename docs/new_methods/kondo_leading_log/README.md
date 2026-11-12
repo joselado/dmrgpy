@@ -284,11 +284,13 @@ of the BLAS library (0.12 s on six cores). The exchange sum runs on one
 core. With numba threads it took 0.04 s on six cores; this is not in
 the code, since it would not follow the BLAS thread settings.
 
-The GPU does not help here. On the RTX A2000 of d22, in float64, the
-four products take 0.235 s, slower than six cores, and the exchange sum
-0.060 s, slower than the threaded sum. In complex64 the products take
-3 ms, but the bracket is then 3e-4 off, far above the tolerance of the
-flow.
+The two kernels alone do not gain on a weak GPU. On the RTX A2000 of
+d22, in float64, the four products take 0.235 s, slower than six cores,
+and the exchange sum 0.060 s, slower than the threaded sum. In complex64
+the products take 3 ms, but the bracket is then 3e-4 off, far above the
+tolerance of the flow. What does gain is the whole flow on the card,
+since then the exchange sum and the integrator do not run on one core:
+see "The flow on a GPU" at the end of this section.
 
 **Real arithmetic and a table for the exchange sum (2026-11-11).** For
 a real Hamiltonian every vertex is a real 2d x 2d matrix in block form.
@@ -386,6 +388,75 @@ What stays as it was: when the sample flow stops at D_stop, every bias
 within 10 D_stop of any energy difference of the spectrum is NaN, and
 on a dense spectrum this is every bias. This happens only when the
 Kondo scale is above Gamma0, where the method fails anyway.
+
+**The flow on a GPU (2026-11-12).** With
+`pyitensor.backend.set_backend("jax")` before the call, `_joint_flow`
+hands the flow to `leadinglog_device.py`, and it runs on a GPU when JAX
+has one. This is a port, not a new method. The right-hand side is the
+same, written in jax.numpy, with the same layout of the state. The
+integrator is SciPy's DOP853, with its coefficients, its initial step,
+its error norm and its step control, but with the state on the device.
+So every array of the size of the state stays on the card, and the host
+keeps only the scalars of the integrator and the tables of the thermal
+kernel.
+
+The numbers are the NumPy ones to roundoff: below 1.1e-15 relative on
+JAX's CPU device, on the real and the complex route, at T>0 with both
+on-shell kernels, at a stop and with chunks
+(`tests/test_kondo_leading_log_device.py`), and below 8e-15 on the
+A2000 of d22 against one core, on chains of 4 to 8 spins. The step sizes
+agree only to about 1e-7 of themselves. The error estimate of DOP853 is
+a difference of nearly equal stages, and its last digits depend on the
+order of the sum. This moves the curve far below the tolerance.
+
+Measured on d22, on the chain of section 8 (open chain of spins 1/2,
+exchange 1 meV, a field of 0.3 meV along z and 0.1 meV along x on every
+site), Jrho_s=-0.05, U=0.25 and 61 biases. The six-core runs shared the
+host with two other jobs.
+
+| case | one core | six cores | RTX A2000 |
+|---|---|---|---|
+| 8 spins, T=0 | 26 s | 15 s | 12.6 s |
+| 9 spins, T=0 | 160 s | 119 s | 41 s |
+| 10 spins, T=0 | | 532 s | 283 s |
+| 9 spins, field along y (complex route) | 475 s | | 116 s |
+| 8 spins, T=2 K (223 occupied states) | 1179 s | | 164 s |
+
+So even a card with weak double precision gains, by 2 to 4 against six
+cores at 9 and 10 spins. The products alone are not faster there. What
+it gains is the rest of the right-hand side and the integrator, which
+run on one core in the NumPy route. The gain falls with size on this
+card (2.9 at 9 spins, 1.9 at 10), since the products, where it is
+slower than six cores, grow as d^3. A card with full double precision
+(V100, A100, H100, H200) is the one for large impurities.
+
+The memory on the device is `leadinglog_device.memory_model(d, m,
+real)`. It counts about 20 copies of the state, against about 24 for
+SciPy's DOP853. The couplings are 8 d^2 numbers, and the tip vertex is
+4 d m per energy. It also counts about ten 2d x 2d matrices of the
+right-hand side and three chunks of the tip part. It gives 6.1 GB for
+the T=2 K run above, where 6.15 GB were measured, and it is the model
+`mem_gb` uses on this route. For 13 spins 1/2 (d=8192) on the real route
+it gives about 110 GB before the first bias, so only a 141 GB card holds
+it. Each energy then adds 5.2 MB per occupied state.
+
+The tip part has two forms (`TIP_FORM`). "columns" is `_tip_bracket`
+line for line: the electron index is summed before the kernel is applied,
+so each chunk of occupied columns has operands of 4 d^2 numbers per
+column, and it builds the exchange kernel again. "block" applies the
+kernel to the vertex and does one product per bias for all the occupied
+columns. It has twice the arithmetic, but the kernel is built once per
+bias. On the A2000 the column form was faster in every case: 41 s
+against 78 s at 9 spins, 283 s against 364 s at 10 spins, 116 s against
+185 s on the complex route, and 164 s against 308 s with 223 occupied
+states. So "auto" takes the column form.
+
+What is not done. The tip vertex is integrated as part of the state, so
+its 13 stages are kept like those of the couplings. It does not enter
+any right-hand side, so a quadrature that accumulates its stages would
+need about 6 copies instead of 20, which matters when the number of
+biases times the number of occupied states is large. The flow is in
+float64 only.
 
 ## 8. Finite temperature
 
@@ -534,3 +605,8 @@ The tip coupling check reads the open transitions only, with a floor
 on the bare vertex (end of section 7); this changes which biases are
 NaN or warned, not the values. The exchange sum stays on one core, by
 the author's choice on this date.
+
+2026-11-12: the flow runs on a GPU through JAX (`leadinglog_device.py`,
+end of section 7), with the numbers of the NumPy route to roundoff. On
+the RTX A2000 of d22 it is 2 to 4 times faster than six cores at 9 and
+10 spins. The H200 timing at 11 to 13 spins is pending.

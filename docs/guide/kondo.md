@@ -129,7 +129,14 @@ bare excitation energies. The derivation and its checks are in
 `docs/new_methods/kondo_leading_log/` in the repository.
 
 !!! note "Backends"
-    `order="LL"` works with `mode="ED"` only, at any temperature.
+    `order="LL"` works with `mode="ED"` only, at any temperature. It runs
+    on a GPU, with the same numbers, when the array backend is JAX:
+    `from dmrgpy.pyitensor import backend` and `backend.set_backend("jax")`
+    before the call. The memory grows as the square of the number of
+    states, so a large impurity needs a card with much memory and full
+    double precision: 13 spins 1/2 take about 110 GB. Above 2000 states
+    the full diagonalization is refused unless
+    `dmrgpy.algebra.algebra.maxsize` is raised first.
 
 ## ED and DMRG
 

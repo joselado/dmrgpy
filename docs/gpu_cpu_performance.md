@@ -767,7 +767,30 @@ reported quantity kept in float64 -- and that is a research port with an
 unmeasured payoff, not a dtype flag. On this laptop it would also be
 competing against a CPU that already wins.
 
-## Device compatibility, calculation by calculation
+## The leading-log Kondo flow: a weak card still gains
+
+The leading-log flow of the STM Kondo spectrum
+(`kondospectrumtk/leadinglog_device.py`) is not a pyitensor calculation,
+but it takes the same switch, `backend.set_backend("jax")`, and the whole
+flow then runs on the device. Its d^3 part is four dense 2d x 2d products
+per right-hand side, d the number of states of the impurity, in float64.
+On the RTX A2000 of d22 (FP64 at about 1/64 of FP32) these products alone
+are slower than six cores. The flow still gains, because on the host the
+exchange sum of the tip vertex and the DOP853 integrator run on one core,
+while on the card they do not.
+
+| chain of spins 1/2, 61 biases | one core | six cores | RTX A2000 |
+|---|---|---|---|
+| 9 spins, T=0 | 160 s | 119 s | 41 s |
+| 10 spins, T=0 | | 532 s | 283 s |
+| 8 spins, T=2 K, 223 occupied states | 1179 s | | 164 s |
+
+The gain against six cores falls with size on this card (2.9 at 9 spins,
+1.9 at 10), as the products grow as d^3. The table, the memory model and
+the agreement with NumPy are in
+`docs/new_methods/kondo_leading_log/README.md`, section 7. The H200
+measurement at 11 to 13 spins is pending.
+
 
 Everything above is about *speed*. This section is about whether a
 calculation runs on the JAX backend at all, whether it gives the NumPy
