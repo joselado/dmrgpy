@@ -12,3 +12,7 @@ public API.
   STM Kondo spectrum for an impurity with any spectrum, at any
   temperature, in `kondospectrumtk/leadinglog.py` and
   `kondospectrumtk/thermalkernel.py`.
+- `kondo_krylov_thermal/`: the thermal third-order STM Kondo spectrum
+  without full diagonalization, from one block Krylov space per occupied
+  state, in `kondospectrumtk/krylovkondo.py`
+  (`get_kondo_spectrum(mode="ED", submode="KRYLOV")`).

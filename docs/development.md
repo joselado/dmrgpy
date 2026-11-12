@@ -6143,6 +6143,21 @@ biases), so their memory does not grow with the number of biases or of
 occupied states. `stepfunctions.cached_fbuilder` keeps the last four
 tables across calls (`docs/audit_2026_11_hole_hunt.md`).
 
+**`mode="ED", submode="KRYLOV"`** (2026-11-12) is the one submode of
+`mode="ED"`, and the only one it accepts: any other `submode` stays in the
+list of unknown keywords and raises `TypeError` as before, and `nkry`,
+`p_cut` and `su2` are read only under it. It does not diagonalize the
+whole Hamiltonian (`kondospectrumtk/krylovkondo.py`): the initial states
+come from `EDchain.get_hamiltonian()` through a sparse eigensolver, and
+each one gets one block Krylov space started from `S_x|i>`, `S_y|i>`,
+`S_z|i>` together, orthogonal to `|i>`, so that `[i] + Ritz states` is an
+orthonormal basis. In that basis it builds a `KondoSpectrum`-shaped object
+with `p` one-hot on `i` (`krylovkondo.StateSpectrum`), as
+`TaskKondoSpectrum` does, and the three sums of `conductance.py` run
+unchanged and are added with the Boltzmann weights. `order="LL"` with it
+raises `NotImplementedError`. The derivation and the checks are in
+`docs/new_methods/kondo_krylov_thermal/README.md`.
+
 **`mode="DMRG"`** (`T=0` only) is a second, independent route through
 this same feature that *does* stay within `itensor_version=3`, never
 diagonalizing beyond the ground state -- viable because at `T=0` both

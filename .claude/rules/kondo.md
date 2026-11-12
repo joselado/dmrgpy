@@ -255,6 +255,29 @@ is exact only for a singlet, so L even at N = L; `half_filling=True`
 `"python"` at L = 40. `tests/test_kondo_cloud.py`, `docs/development.md`
 4.8d.
 
+**The thermal Krylov route (2026-11-12)**, `get_kondo_spectrum(mode="ED",
+submode="KRYLOV")` in `kondospectrumtk/krylovkondo.py`, asked for by the
+TaSe2 session and moved from its scripts (`edk_thermal.py`,
+`si13_cmf.py`): the initial states are the low states of the sparse ED
+Hamiltonian, down to the relative Boltzmann weight `p_cut` (1e-8), and
+each one gets ONE block Krylov space from S_x|i>, S_y|i>, S_z|i> of the
+tip site, orthonormalized as a whole. Do NOT split it into three Lanczos
+spaces: once Sz is not conserved they overlap and double count, 2.7
+relative error on 5 spins in a 120 degree field (pinned by
+`test_three_separate_spaces_double_count_with_a_field`). The space is kept
+orthogonal to |i>, so [i] + Ritz states is orthonormal, and a
+`StateSpectrum` with p one-hot on i feeds the three sums of
+`conductance.py` UNCHANGED; do not reimplement them (the TaSe2 version had
+U=0 only). Ritz energies within the degeneracy tolerance of E_i are
+snapped to it, as on TASK. Exact once each space is exhausted: 1e-15 to
+1e-12 against ED on every model of `tests/test_kondo_krylov.py`.
+`su2=True` takes one member per multiplet with weight 2S+1 in the sector
+of the smallest |Sz_tot|, checks [H, S_tot]=0 on a random state and
+raises otherwise. mode="ED" accepts no other submode (it stays an unknown
+keyword, TypeError), and order="LL" with it raises. Full ED refuses
+above 2000 states (`algebra.maxsize`), so above 10 spins 1/2 this is the
+only ED route. README: `docs/new_methods/kondo_krylov_thermal/`.
+
 **Leading-log resummation (2026-11-06)**, `kondospectrumtk/leadinglog.py`,
 is a new method documented in `docs/new_methods/kondo_leading_log/README.md`
 (derivation, references, measured checks): one-loop poor man's scaling with

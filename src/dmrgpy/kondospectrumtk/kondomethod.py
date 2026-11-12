@@ -82,6 +82,21 @@ class KondoSpectrumMixin():
               used to be dropped silently and leave that parameter at
               its default (Jrho= for Jrho_s= returned the order=2
               curve).
+              mode="ED" with submode="KRYLOV" (order 2 and 3, any T)
+              does not diagonalize the whole Hamiltonian: the initial
+              states are its lowest eigenstates from a sparse solver,
+              down to a relative Boltzmann weight p_cut (default 1e-8),
+              and the final and intermediate states of each one are the
+              Ritz states of one block Krylov space started from
+              S_x|i>, S_y|i>, S_z|i> of the tip site, of at most 3*nkry
+              states (nkry, default 100). The sums are those of
+              mode="ED", and they are exact once each Krylov space is
+              exhausted. su2=True (default False) takes one member per
+              spin multiplet with the weight 2S+1, for a Hamiltonian
+              that commutes with the total spin (checked, and it raises
+              otherwise). order="LL" needs the full eigenbasis and
+              raises there. See
+              docs/new_methods/kondo_krylov_thermal/README.md.
               "DMRG" instead uses this chain's own itensor_version
               (3 or "python", i.e. either the compiled ITensor v3
               extension or the pure-Python pyitensor backend -- both
@@ -239,19 +254,44 @@ class KondoSpectrumMixin():
             # at the default instead, e.g. exactly the order=2 curve for
             # the Jrho typo (development.md 4.10's "**kwargs with no
             # consumer"). No allow-list for the mode="DMRG" keywords
-            # either: delta=/submode=/es= would then be inert here, the
-            # same hole one level down.
+            # either: delta=/es= would then be inert here, the same hole
+            # one level down. The one submode of mode="ED" is "KRYLOV",
+            # and its keywords are read only under it; any other submode
+            # is a mode="DMRG" keyword and stays in the list below.
+            submode = None
+            krylov = {}
+            if kwargs.get("submode") == "KRYLOV":
+                submode = kwargs.pop("submode")
+                for k in ("nkry", "p_cut", "su2"):
+                    if k in kwargs:
+                        krylov[k] = kwargs.pop(k)
             if kwargs:
                 raise TypeError(
-                    "get_kondo_spectrum(mode=\"ED\") got unexpected keyword "
-                    "argument(s): "+", ".join(sorted(kwargs))+". They are "
-                    "either mode=\"DMRG\" parameters (submode, delta, es, "
-                    "dt2, n_t2_half, dtau, n_tau_half, nkry, n_gs and the "
+                    "get_kondo_spectrum(mode=\"ED\"%s) got unexpected keyword "
+                    "argument(s): " % (", submode=\"KRYLOV\"" if submode else "")
+                    +", ".join(sorted(kwargs))+". They are "
+                    "either mode=\"DMRG\" parameters (submode other than "
+                    "\"KRYLOV\", delta, es, "
+                    "dt2, n_t2_half, dtau, n_tau_half, n_gs and the "
                     "dynamical-correlator keywords), which the exact "
                     "full-spectrum route does not use -- its T=0 already "
-                    "averages a degenerate ground manifold -- or not "
+                    "averages a degenerate ground manifold -- or "
+                    "parameters of submode=\"KRYLOV\" (nkry, p_cut, su2), "
+                    "which need that submode, or not "
                     "parameters of this method at all (check the spelling "
                     "of Jrho_s, U, T, T0, omega0, Gamma0, order, kB)")
+            if submode == "KRYLOV" and order == "LL":
+                # the flow sums products of spin operators between any two
+                # states, so it needs the full eigenbasis, not the Krylov
+                # spaces of the thermal states
+                raise NotImplementedError(
+                    "order=\"LL\" needs the full eigenbasis and is not "
+                    "available with submode=\"KRYLOV\"; use mode=\"ED\" "
+                    "without a submode")
+            if submode == "KRYLOV":
+                return self._get_kondo_spectrum_krylov(eV, site, Jrho_s, U, T,
+                                                       T0, omega0, Gamma0, order,
+                                                       kB, **krylov)
             return self._get_kondo_spectrum_ed(eV, site, Jrho_s, U, T, T0,
                                                 omega0, Gamma0, order, kB)
         elif mode == "DMRG":
@@ -260,6 +300,18 @@ class KondoSpectrumMixin():
             return self._get_kondo_spectrum_dmrg(eV, site, Jrho_s, U, T0,
                                                   omega0, Gamma0, order,
                                                   T=T, kB=kB, **kwargs)
+    def _get_kondo_spectrum_krylov(self, eV, site, Jrho_s, U, T, T0, omega0,
+                                    Gamma0, order, kB, nkry=100, p_cut=None,
+                                    su2=False):
+        from . import krylovkondo
+        if not T >= 0.:
+            raise ValueError("T must be >= 0, got %r" % (T,))
+        p_cut = krylovkondo.P_CUT if p_cut is None else p_cut
+        kks = krylovkondo.KrylovKondoSpectrum(self, site, T, kB=kB, nkry=nkry,
+                                              p_cut=p_cut, su2=bool(su2))
+        return eV, krylovkondo.krylov_kondo_dIdV(kks, eV, Jrho_s, U=U, T0=T0,
+                                                 omega0=omega0, Gamma0=Gamma0,
+                                                 order=order)
     def _get_kondo_spectrum_ed(self, eV, site, Jrho_s, U, T, T0, omega0,
                                 Gamma0, order, kB):
         from .edkondo import KondoSpectrum

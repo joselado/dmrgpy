@@ -231,6 +231,49 @@ panel of the figure in [Third order](#third-order), and
 `examples/kondo/kondo_third_order_task_VS_ED`. The tip couples to one
 site only; several sites with independent couplings are not implemented.
 
+## Larger clusters at finite temperature
+
+`mode="ED"` diagonalizes the whole Hamiltonian, so it stops at about 10
+spins 1/2. At a temperature $T$ only the states within a few $k_BT$ of the
+ground state are occupied. An occupied state $i$ reaches, through the spin
+of the tip site, only the states in the span of $S_a|i\rangle$ and of $H$
+applied to them. `submode="KRYLOV"` uses both facts. It finds the occupied
+states with a sparse eigensolver. For each one it builds a single Krylov
+space started from $S_x|i\rangle$, $S_y|i\rangle$ and $S_z|i\rangle$
+together, and it runs the sums of `mode="ED"` over the states of that
+space. It works with any Hamiltonian, also when $S_z$ is not conserved,
+for example in a field that turns from site to site:
+
+```python
+n = 8
+sc = spinchain.Spin_Chain(["S=1/2"]*n)
+h = 0
+for i in range(n-1):
+    h = h + 1e-3*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
+for i in range(n):
+    h = h + 2e-4*(np.cos(2*np.pi*i/3)*sc.Sx[i] + np.sin(2*np.pi*i/3)*sc.Sz[i])
+sc.set_hamiltonian(h)
+eV = np.linspace(-4e-3, 4e-3, 101) + 1e-5
+eV, dIdV = sc.get_kondo_spectrum(eV, site=1, Jrho_s=-0.05, U=0.2, T=1.0,
+               submode="KRYLOV", nkry=100)
+```
+
+The result is the one of `mode="ED"` once every Krylov space holds all
+the states that the spin reaches, apart from the occupied states that are
+dropped. On this chain the two differ by about $10^{-8}$ of the peak at 1 K.
+
+- `nkry`: each Krylov space holds at most `3*nkry` states (default 100).
+  Increase it until the spectrum stops changing.
+- `p_cut`: occupied states whose Boltzmann weight is below `p_cut` times
+  that of the ground state are dropped (default $10^{-8}$), and $dI/dV$
+  changes by about that much.
+- `su2`: for a Hamiltonian that conserves the total spin, `True` takes one
+  member of each spin multiplet with the weight $2S+1$, which needs fewer
+  occupied states. It raises when $H$ does not conserve the total spin.
+
+The route is third order. `order="LL"` needs every eigenstate and raises
+with `submode="KRYLOV"`. See `examples/kondo/kondo_krylov_thermal_VS_ED`.
+
 ## Hubbard chains
 
 The same method works on the spinful fermion chains,
