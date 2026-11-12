@@ -315,6 +315,35 @@ core) is what is left; numba threads gave 0.38 s to 0.04 s and were not
 added, since they do not follow the BLAS thread settings. The author
 chose to leave it on one core (2026-11-11); do not thread it unasked.
 
+**The leading-log flow on a device (2026-11-12)**, `leadinglog_device.py`,
+is the same flow with the state on a GPU, taken by `_joint_flow` when
+`pyitensor.backend.set_backend("jax")` is on (`leadinglog._on_device`,
+which reads the backend module only if it is already imported, since
+importing the pyitensor package costs 0.8 s). It is a port, not a new
+method: the right-hand side in jax.numpy with the layout of the state of
+`_joint_flow` (real block form or complex (4,d,d)), and SciPy's DOP853 as
+`_Dop853` with the state on the device (13 stages, at most 20 copies
+against about 24 in SciPy; the scalars, the brentq of the stop and the
+thermal tables stay on the host). So the numbers are the NumPy ones to
+roundoff: below 1.1e-15 on JAX's CPU device and 8e-15 on the RTX A2000
+against one core. The step sizes agree only to about 1e-7 of themselves,
+since the DOP853 error estimate is a difference of nearly equal stages and
+its last digits depend on the order of the sum; do not test the device
+integrator for identical steps. Keep the two right-hand sides in step: a
+change to the equations of `_joint_flow` or `_tip_bracket` goes into
+`_DeviceFlow` too, and `tests/test_kondo_leading_log_device.py` compares
+them on the real and complex routes, at T>0 with both on-shell kernels, at
+a stop and with chunks. The tip part has two forms (`TIP_FORM`): "columns"
+is `_tip_bracket` line for line (the electron index summed first, an
+operand of 4 d^2 numbers per occupied column), and "block" applies the
+kernel to the vertex and does one product per bias for all the occupied
+columns, twice the arithmetic but the exchange kernel built once per bias
+and nothing that grows with their number. "auto" takes "block" from
+`BLOCK_FROM` occupied columns. With `mem_gb` the biases are chunked by
+`leadinglog_device.memory_model` on the device. The exchange sum runs on
+the card there, which does not touch the author's one-core rule for
+`_hole_sum` on the host.
+
 **The tip coupling check reads open transitions, with a floor
 (2026-11-11).** `info["coupling"]` is |Jrho_s| times the largest
 flowed/bare ratio over the transitions that are open at the bias

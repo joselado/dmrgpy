@@ -49,6 +49,7 @@ order; the populations are the Boltzmann ones and the step is thermal, as
 in conductance.py. With no kernel argument the flow is the T=0 one, line
 for line. README, section 8.
 """
+import sys
 import warnings
 
 import numpy as np
@@ -404,6 +405,15 @@ def _block_is_real(S, tol=REAL_TOL):
     return bool(np.max(np.abs(B.imag)) <= tol*max(np.max(np.abs(B)), 1e-300))
 
 
+def _on_device():
+    """True when the array backend of pyitensor is JAX, so that the flow runs
+    on the device. The backend module is read only when it is imported:
+    set_backend("jax") imports it, so a process that never did is on NumPy,
+    and importing the pyitensor package here would cost most of a second."""
+    b = sys.modules.get(__name__.rsplit(".", 2)[0] + ".pyitensor.backend")
+    return b is not None and b.backend_name() == "jax"
+
+
 def _integrate(rhs, y0, Dmax, Dmin, sample_coupling, ref, rtol, atol):
     """DOP853 in ln D from Dmax to Dmin, stopped where sample_coupling(y)
     crosses ref from below (located inside the step by brentq on the dense
@@ -464,6 +474,11 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
     for k in (kernel, onshell_kernel):
         if k is not None and (k.omega0 != omega0 or k.Gamma0 != Gamma0):
             raise ValueError("the thermal kernel was built for another omega0 or Gamma0")
+    if _on_device():
+        # the same flow with the state on the device (leadinglog_device.py)
+        from .leadinglog_device import joint_flow
+        return joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
+                          pole_threshold, kernel, onshell_kernel)
     S = _spin_ops(ks)
     d = S.shape[-1]
     e = np.ascontiguousarray(ks.e, dtype=float)
@@ -670,7 +685,8 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     2*pi*T0^2*4*U^2 of the second order, and there is no warning.
 
     mem_gb: None solves every bias in one flow. A number cuts the biases
-    in chunks so that one flow stays below about mem_gb (memory_model), at
+    in chunks so that one flow stays below about mem_gb (memory_model, or
+    leadinglog_device.memory_model on the device), at
     the cost of solving the couplings again in each chunk; it raises when
     not even 8 biases fit. At T>0 the occupied states are the ones within
     ln(1/p_cut) kT of the ground state, and the tip part costs d^2 per
@@ -697,7 +713,11 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     if mem_gb is None:
         pieces = [np.arange(n)]
     else:
-        fixed, per_w = memory_model(len(e), len(occ))
+        if _on_device():
+            from .leadinglog_device import memory_model as device_model
+            fixed, per_w = device_model(len(e), len(occ), _block_is_real(_spin_ops(ks)))
+        else:
+            fixed, per_w = memory_model(len(e), len(occ))
         nb = int((mem_gb*1e9 - fixed)//(2*per_w))
         if nb < 8:
             raise ValueError("leading_log_dIdV: %d occupied states of %d need %.2g GB "
