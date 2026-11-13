@@ -584,7 +584,24 @@ state is real only to the accuracy of the solve (2.5e-7 at 20 sweeps).
 The hand-over basis needs about 150 states (m = 4, maxm >= 160): 64
 states were 3% low on 3 spins, and with keep 1600 on both sides head and
 tail agree with the exact route to 8e-4 (keep 800 against 1600 gave the
-1.5 to 1.9% of the first comparison: compare at equal keep). Keeping
+1.5 to 1.9% of the first comparison: compare at equal keep). On 7 and 8
+spins (2026-11-14, Triton) 150 is not enough: the bases of m = 4 (160 to
+210 states) were 2 to 20% off, and m = 5 and 6 (290 to 420 states)
+converge to 0.4% and agree with the exact route at 7 spins to 1.6%;
+the exact route needs keep 3200 at 7 spins and does not converge at 8
+even at 6400 (16% off 3200). The depth floor of N2 is the MPO, not the
+state: v3's svdMPO drops a squared singular value below an absolute
+1e-13 at unit scale, so the Wilson hoppings below about 3e-7 of the unit
+of H lose their channels and the sites after them are nearly decoupled;
+the block levels leave NRG at that scale for every maxm, cutoff and
+number of sweeps (shell 21 at Lambda = 4, 32 at 2.5, 17 at 6). Do NOT
+look for the cause in maxm or the sweeps. `nrgmps.lost_wilson_bonds`
+reads the dropped bonds off the MPO and `head_tail_poles` warns for a
+hand-over whose block holds one; "python" loses channels one bond
+earlier, and its 30-site head failed `real_gauge` (the decoupled sites
+keep the complex random start). A per-bond MPO cutoff would remove it;
+it is the open bond-local truncation of the 2026-09-25 audit
+(`tests/test_nrgmps.py`). Keeping
 only the lowest states of the bare spin chain as the impurity is
 uncontrolled (42 times too narrow a resonance on 3 spins); `project=`
 exists for that test only. The exact route needs keep 800 up to 4 spins

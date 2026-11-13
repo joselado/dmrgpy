@@ -10,14 +10,23 @@ states of the block well enough that the head and the tail give the exact
 NRG of 3 spins to the 2% two NRG runs differ by, while 64 states were 3%
 low. The exact route works up to at least 6 spins, with keep = 1600 1.5%
 of the peak away from 3200 there, so the estimate of section 4 was about
-right; where it stops was not measured. The depth floor of N2 (the
-deepest hand-over at which the DMRG block spectrum agrees with NRG in
-relative terms) was not measured either. Ladder step 9 is open: at 7 and 8 spins the head
-route runs and gives the expected physics, but maxm = 256 was not enough
-to converge it (6% and 15% changes from 128). A flip-symmetric hand-over
-for a head with a moment is open too. The measurements are in
-`docs/new_methods/kondo_nrg_mps/README.md`; what follows is the plan as
-written.
+right.
+
+**Status (2026-11-14), from runs on Triton.** The exact route holds at 7
+spins with keep = 3200 (1% or less of the peak off keep = 6400) and stops
+at 8, where 3200 is still 16% off 6400. Ladder step 9 is converged at 7
+and 8 spins: with a hand-over basis of 290 to 420 states (m = 5 and 6 head
+sites after the hand-over, maxm 512 and 768) the two largest bases agree
+to 0.4% of the peak or better, and at 7 spins head and tail agree with
+the exact route to 1.6% of the peak below w_join/3. The depth floor of N2
+is a scale and not a number of sites: the MPO of the head loses the
+Wilson hoppings below about 3e-7 of the unit of H (svdMPO's absolute
+cutoff on v3), and the block levels leave NRG at that scale for every
+maxm, cutoff and number of sweeps; `head_tail_poles` warns for a
+hand-over past it. A flip-symmetric hand-over for a head with a moment is
+still open. The measurements are in
+`docs/new_methods/kondo_nrg_mps/README.md` (sections 3, 6 and 9); what
+follows is the plan as written.
 
 **Decision (2026-11-13): the bath on one spin.** The target is the
 one-channel geometry of `spin_chain_on_metal`, milestones N0 to N4 and N7.

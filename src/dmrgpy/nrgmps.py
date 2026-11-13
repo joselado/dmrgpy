@@ -452,6 +452,38 @@ def tail_chain(fc, n_tail=None):
     return eps, t
 
 
+def lost_wilson_bonds(fc):
+    """The Wilson bonds k (between the Wilson sites k and k+1) whose
+    channels the MPO of H on fc's backend has dropped: those whose link
+    dimension in the MPO is below that of the first Wilson bond. The last
+    bond is left out, since its link dimension is smaller at any |t| (the
+    end of the MPO). On v3, ITensor's svdMPO cuts a squared singular value
+    below an absolute 1e-13 at unit scale, so a hopping below about 3e-7 of
+    the unit of H leaves the MPO and the deeper Wilson sites are nearly
+    decoupled from the chain (measured on 1 spin at rho JK = 0.15: link
+    dimension 7 down to |t| = 4.8e-7, 6 at 3.0e-7 to 3.5e-7, 3 from 1.5e-7
+    on, at Lambda = 2.5, 4 and 6; README section 9). "python" truncates the
+    return sweep of its builder at a relative 1e-14 and loses channels one
+    bond earlier at Lambda = 4. The MPO is built again from fc.hamiltonian
+    with the session's own builder. Returns a sorted list, empty when every
+    Wilson bond is whole."""
+    from .pyitensor import task
+    ns, wil = _layout(fc)
+    if len(wil) < 3:
+        return []
+    s = fc._session
+    terms = fc.hamiltonian.to_terms()
+    if fc.itensor_version == "python":
+        W = task.mpo_arrays(s._mpo(terms))
+    elif fc.itensor_version == 3:
+        W = s.mpo_site_arrays(s.build_operator(terms))
+    else:
+        raise NotImplementedError("lost_wilson_bonds: itensor_version=\"python\" "
+                                  "or 3, got %r" % (fc.itensor_version,))
+    link = [np.shape(W[ns + k])[-1] for k in range(len(wil) - 2)]
+    return [k for k in range(len(link)) if link[k] < link[0]]
+
+
 def _check_prefix(eps, t, eps_h, t_h):
     if len(eps) < len(eps_h) or \
             np.max(np.abs(eps[:len(eps_h)] - eps_h), initial=0.0) > 1e-12 or \
@@ -498,7 +530,10 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     the scale of the hand-over shell) and keeps the tail below it. T > 0
     applies to the tail only: TASK is a T = 0 method, so T has to be far
     below w_join (a RuntimeWarning above w_join/10). pad_bonds goes to
-    handover_shell ("full" completes the hand-over basis, for tests).
+    handover_shell ("full" completes the hand-over basis, for tests). It
+    warns when the hand-over basis holds fewer than MIN_HANDOVER states, and
+    when the MPO of H has dropped a Wilson bond inside the hand-over block
+    (lost_wilson_bonds, README section 9).
     Returns a HeadTailSpectrum."""
     import warnings
     from .ysr import tunneling_operators
@@ -528,6 +563,15 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     Lambda = wp.get("Lambda", abs(t[0]/t[2]) if len(t) > 2 else 4.0)
     sh, ex = handover_shell(c, k0, U=U, Lambda=Lambda, pad_bonds=pad_bonds)
     omega_k0 = sh.omega
+    lost = [k for k in lost_wilson_bonds(c) if k < k0]
+    if lost:
+        warnings.warn("head_tail_poles: the MPO of H on this backend has dropped "
+                      "channels of the Wilson bond %d (|t| = %.3g), inside the "
+                      "block that hands over at the Wilson site %d, so that block "
+                      "is not the one of the tail (lost_wilson_bonds; on v3 a "
+                      "hopping below about 3e-7 of the unit of H is cut); hand "
+                      "over at k0 <= %d" % (lost[0], abs(t_h[lost[0]]), k0, lost[0]),
+                      RuntimeWarning, stacklevel=2)
     if sh.info["chi"] < MIN_HANDOVER:
         warnings.warn("head_tail_poles: the hand-over basis at the Wilson site "
                       "%d holds %d states, below the about %d the tail needs "

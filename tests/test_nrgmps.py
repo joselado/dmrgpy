@@ -237,3 +237,39 @@ def test_a_small_handover_basis_warns():
     fc.maxm, fc.nsweeps = 64, 10
     with pytest.warns(RuntimeWarning, match="hand-over basis"):
         nrgmps.head_tail_poles(fc, m=2, keep=100, task=False, n_tail=20)
+
+
+@pytest.mark.parametrize("version,first", [("python", 20), (3, 21)])
+def test_the_mpo_drops_the_deep_wilson_bonds(version, first):
+    """The depth floor of README section 9: on 30 Wilson sites at Lambda =
+    4, v3's svdMPO (a squared singular value below 1e-13 is cut) drops
+    channels of the hoppings from t_21 = 3.0e-7 on (link dimension 7, then
+    6, then 3), and the block levels of DMRG leave those of NRG from the
+    Wilson site 22 on, for every maxm and cutoff; "python" (a relative
+    1e-14 on its return sweep) from t_20 on. 12 sites keep every bond."""
+    if version == 3 and not cppext.available(3):
+        pytest.skip("ITensor v3 not compiled")
+    J = 0.3*ysr.lambda_factor(4.0)
+    deep = ysr.spin_chain_on_metal(1, 30, Js=0.01, JK=J, Lambda=4.0,
+                                   itensor_version=version)
+    assert nrgmps.lost_wilson_bonds(deep) == list(range(first, 28))
+    short = ysr.spin_chain_on_metal(1, 12, Js=0.01, JK=J, Lambda=4.0,
+                                    itensor_version=version)
+    assert nrgmps.lost_wilson_bonds(short) == []
+
+
+def test_a_handover_past_a_lost_bond_warns(monkeypatch):
+    """A hand-over whose block holds a Wilson bond the MPO dropped is not
+    the block of the tail, and head_tail_poles says so; one at or above
+    the lost bond does not."""
+    J = 0.4*ysr.lambda_factor(4.0)
+    fc = ysr.spin_chain_on_metal(1, 6, JK=J, Lambda=4.0,
+                                 itensor_version="python")
+    fc.maxm, fc.nsweeps = 64, 10
+    monkeypatch.setattr(nrgmps, "lost_wilson_bonds", lambda c: [1, 2, 3, 4])
+    with pytest.warns(RuntimeWarning, match="dropped channels of the Wilson bond 1"):
+        nrgmps.head_tail_poles(fc, m=2, keep=100, task=False, n_tail=20)
+    monkeypatch.setattr(nrgmps, "lost_wilson_bonds", lambda c: [3, 4])
+    with pytest.warns(RuntimeWarning) as record:
+        nrgmps.head_tail_poles(fc, m=2, keep=100, task=False, n_tail=20)
+    assert not any("dropped channels" in str(w.message) for w in record)
