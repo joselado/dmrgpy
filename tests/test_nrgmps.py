@@ -121,3 +121,108 @@ def test_block_matrix_refuses_an_operator_outside_the_block():
     ex = nrgmps.Export(c)
     with pytest.raises(ValueError):
         ex.block_matrix(c.Nup[4], 2)
+
+
+def test_submode_nrg_exact_head_is_the_exact_start_shell():
+    """get_stm_spectrum(submode="NRG", head="exact") on a kondo_chain is
+    chain_poles with the chain's own parameters, continued past its end."""
+    J = 0.4*ysr.lambda_factor(4.0)
+    fc = ysr.kondo_chain(8, J=J, Lambda=4.0, z=0.3, itensor_version="python")
+    es = np.array([0.0, 1e-4, 1e-2, -0.3])
+    _, A, rs = ysr.get_stm_spectrum(fc, es, submode="NRG", head="exact",
+                                    keep=200, return_poles=True)
+    eps, t = nrgmps.tail_chain(fc)
+    r = nrgspectral.chain_poles(ns=1, n=len(eps), JK=J, Lambda=4.0,
+                                wilson=(eps, t), keep=200, stop_tol=1e-4,
+                                stop_extra=6)
+    assert rs[0].nshells == r.nshells
+    ref = nrgspectral.curve(es, r.omega, r.weight, omega_N=r.omega_n[-1],
+                            b=0.8)
+    assert np.max(np.abs(A - ref)) < 1e-12*np.max(np.abs(ref))
+
+
+def test_submode_nrg_refusals():
+    fc = ysr.kondo_chain(6, J=0.4, Lambda=4.0, itensor_version="python")
+    es = np.array([0.1])
+    for kw in (dict(imp=0), dict(site=1), dict(delta=0.1), dict(mode="ED"),
+               dict(head="ED")):
+        with pytest.raises(ValueError):
+            ysr.get_stm_spectrum(fc, es, submode="NRG", **kw)
+    sc = ysr.kondo_chain(6, J=0.4, Delta=0.1, Lambda=4.0,
+                         itensor_version="python")
+    with pytest.raises(ValueError):
+        ysr.get_stm_spectrum(sc, es, submode="NRG", head="exact")
+
+
+def test_twin_chain_is_the_same_model():
+    """The twist of fc itself rebuilt by twin_chain has the ED ground
+    energy of fc, for a spin chain on a metal and for a kondo_chain."""
+    fc = ysr.spin_chain_on_metal(2, 3, site=0, Js=0.3, JK=0.5, B=0.01,
+                                 Lambda=4.0, z=0.25, itensor_version="python")
+    c = nrgmps.twin_chain(fc, 0.25)
+    assert c.gs_energy(mode="ED") == pytest.approx(fc.gs_energy(mode="ED"),
+                                                   abs=1e-12)
+    kc = ysr.kondo_chain(3, J=0.4, B=0.02, Lambda=4.0, z=0.5,
+                         itensor_version="python")
+    c = nrgmps.twin_chain(kc, 0.5)
+    assert c.gs_energy(mode="ED") == pytest.approx(kc.gs_energy(mode="ED"),
+                                                   abs=1e-12)
+
+
+def test_head_tail_join_carries_the_sum_rule():
+    """With a complete hand-over basis the tail misses nothing (roundoff).
+    With the basis of the DMRG state it misses the part of X^dag|GS>
+    outside it, at high energy (1.4% here, half of the weight on a head of
+    10 sites with 59 states), and the tail poles below w_join with the TASK
+    poles of the head above it add up to the sum rule of the head state to
+    2% (one spin, a head of 7 Wilson sites, measured 1.1% at nkry = 80):
+    nothing conserves the weight across the cut."""
+    J = 0.4*ysr.lambda_factor(4.0)
+    fc = ysr.spin_chain_on_metal(1, 7, JK=J, Lambda=4.0,
+                                 itensor_version="python")
+    fc.maxm, fc.nsweeps = 64, 20
+    r = nrgmps.head_tail_poles(fc, m=4, keep=200, nkry=80, pad_bonds="full",
+                               task=False)
+    assert r.k0 == 2 and r.chi == 4**4
+    assert abs(r.missing_weight) < 1e-12
+    r = nrgmps.head_tail_poles(fc, m=4, keep=200, nkry=80)
+    assert r.tail.total == pytest.approx(r.tail.sum_rule - r.missing_weight,
+                                         abs=1e-12)
+    assert r.missing_weight > 1e-3*r.sum_rule
+    assert abs(np.sum(r.weight) - r.sum_rule) < 0.02*r.sum_rule
+
+
+def test_real_gauge_with_tiny_schmidt_values():
+    """A 6-site "python" state whose smallest Schmidt values are 1e-6: the
+    weighted real gauge gives a residual at the accuracy of the solve, where
+    the unweighted one found 3.7e-4 (independent review), and the hand-over
+    works."""
+    c, e0 = _head(1, 6, "python")
+    ex = nrgmps.Export(c)
+    assert ex.real_residual < 1e-5
+    sh, _ = nrgmps.handover_shell(c, 0, export=ex, Lambda=4.0)
+    assert sh.info["chi"] == 8 # the spin and the Wilson site 0
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+def test_head_state_takes_the_lower_zeeman_member(version):
+    """With B > 0 on the spins and an odd number of electrons the head is
+    the 2Sz = -1 member, the ground state, and not the 2Sz = +1 one."""
+    eps, t = _wilson(6)
+    fc = ysr.spin_chain_on_metal(1, 6, JK=JK, Js=JS, B=0.05, Lambda=4.0,
+                                 wilson=(eps, t), itensor_version=version)
+    fc.maxm, fc.nsweeps = 64, 20
+    c, e0 = nrgmps.head_state(fc)
+    assert c.head_sector == dict(Nf=7, Sz=-1)
+    assert e0 == pytest.approx(fc.gs_energy(mode="ED"), abs=1e-8)
+
+
+def test_tail_chain_stays_above_the_broken_end():
+    """The tail chain ends before its scale falls below 1e-30, where
+    wilson_chain loses its precision (99 sites at Lambda = 4)."""
+    assert nrgmps.max_sites(4.0) == 99
+    fc = ysr.kondo_chain(6, J=0.4, Lambda=4.0, itensor_version="python")
+    eps, t = nrgmps.tail_chain(fc)
+    assert len(eps) == 99
+    assert np.max(np.abs(eps)/np.abs(np.append(t, t[-1]))) < 1.0
+    assert abs(t[-1]) < 1e-28

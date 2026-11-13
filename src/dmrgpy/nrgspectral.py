@@ -95,7 +95,7 @@ from . import wilsonchain
 from .nrgthermo import _NLOC, _S2LOC, _CLOC, _components, _block_hamiltonian
 
 LOG4 = np.log(4.0)
-DEG_TOL = 1e-8 # ground manifold at T = 0: within DEG_TOL*omega_N
+DEG_TOL = 1e-4 # ground manifold at T = 0: within DEG_TOL*omega_N (module docstring)
 MAX_START_SPINS = 10 # the start shell is dense, 4*2^ns states
 
 
@@ -415,8 +415,8 @@ def iterate(start, eps, t, keep=400, flip=False, stop_tol=None, stop_nlev=16,
                          " got %r" % (keep,))
     e0 = min(v[0] for v in start.E.values() if len(v))
     erel = {lab: np.asarray(v) - e0 for lab, v in start.E.items()}
-    sh = _Shell(e=erel, e0=e0, nk=_truncate(erel, keep, start.omega), U=None,
-                comps=None, ops=start.ops, omega=start.omega)
+    sh = _Shell(e=erel, e0=e0, de=0.0, nk=_truncate(erel, keep, start.omega),
+                U=None, comps=None, ops=start.ops, omega=start.omega)
     shells = [sh]
     F = start.F
     conv, countdown, why = [], None, "chain"
@@ -446,7 +446,7 @@ def iterate(start, eps, t, keep=400, flip=False, stop_tol=None, stop_nlev=16,
                     if nk.get(key[0], 0) > 0 and nk.get(key[1], 0) > 0}
             ops[name] = _carry(kept, nk, comps, U, start.shift[name])
         F = _site_f(comps, U, nk_new)
-        sh = _Shell(e=erel, e0=sh.e0 + e0, nk=nk_new, U=U, comps=comps,
+        sh = _Shell(e=erel, e0=sh.e0 + e0, de=e0, nk=nk_new, U=U, comps=comps,
                     ops=ops, omega=omega)
         shells.append(sh)
         if stop_omega is not None and omega <= stop_omega:
@@ -482,12 +482,18 @@ def density_matrices(shells, T=0.0, deg_tol=DEG_TOL):
     N = len(shells) - 1
     RD = []
     if T > 0.0:
+        # the ground energy of shell n relative to that of the last shell,
+        # a sum of the small increments of the later shells, so that it
+        # keeps a relative precision at low T (the absolute energies would
+        # carry 1e-16 of the energy of the first shell into exp(-E/T))
+        de = np.array([getattr(sh, "de", 0.0) for sh in shells])
+        rel = -np.concatenate([np.cumsum(de[::-1])[::-1][1:], [0.0]])
         logs = []
         for n, sh in enumerate(shells):
             d = {}
             for lab, e in sh.e.items():
                 k = sh.nk[lab] if n < N else 0
-                d[lab] = (N - n)*LOG4 - (e[k:] + sh.e0)/T
+                d[lab] = (N - n)*LOG4 - (e[k:] + rel[n])/T
             RD.append(d)
             logs += [v for v in d.values() if len(v)]
         logZ = _logsumexp(np.concatenate(logs))
@@ -654,9 +660,14 @@ def spectral_poles(start, eps, t, keep=400, T=0.0, flip=None,
                        nshells=len(shells))
 
 
-def _flip_symmetric(start, tol=1e-10):
-    """True when every block (Q, 2Sz) of the start shell has the spectrum
-    of (Q, -2Sz)."""
+def _flip_symmetric(start, tol=1e-13):
+    """Whether the spectra of (Q, 2Sz) and (Q, -2Sz) may be averaged: when
+    the start shell records its field (info["B"], set by
+    spin_cluster_shell and nrgmps.handover_shell), exactly when B == 0;
+    otherwise when every block of the start shell has the spectrum of its
+    partner to tol relative to its largest energy."""
+    if "B" in start.info:
+        return start.info["B"] == 0.0
     scale = max(1.0, max(float(np.max(np.abs(e))) for e in start.E.values()))
     for (q, s2), e in start.E.items():
         p = start.E.get((q, -s2))
@@ -693,35 +704,120 @@ def chain_poles(ns=1, n=20, site=None, Js=0.5, JK=0.2, Lambda=4.0, D=1.0,
     return r
 
 
+TINY = 1e-150 # w = 0 is the mean of the limits from both sides (TINY^2 > 0)
+
+
+def broaden(es, omega, weight, b=0.6, omega0=None):
+    """ysrtk.zaverage.broaden_poles at gap 0, except at es == 0, where
+    broaden_poles gives 0 and this gives the mean of the limits from
+    w > 0 and w < 0."""
+    from .ysrtk.zaverage import broaden_poles
+    es = np.asarray(es, dtype=float)
+    A = broaden_poles(es, omega, weight, b=b, omega0=omega0)[0]
+    z = es == 0.0
+    if np.any(z):
+        side = broaden_poles(np.array([TINY, -TINY]), omega, weight, b=b,
+                             omega0=omega0)[0]
+        A[z] = 0.5*(side[0] + side[1])
+    return A
+
+
+# the window and the grid of the thermal convolution, in units of T
+THERMAL_WINDOW = 40.0 # -f' is below 4e-18 of its peak beyond 40 T
+THERMAL_POINTS = 16 # points per T
+THERMAL_FAR = 60.0 # |V| beyond this, in units of T: dI/dV = A_b(V)
+
+
+def thermal_didv(es, omega, weight, T, b=0.6, omega0=None):
+    """dI/dV(V) = int dw A_b(w) [-f'(w - V)] at the biases es: the poles
+    broadened by broaden (b, omega0, default T/4) and convolved with the
+    derivative of the Fermi function of a normal tip at the temperature
+    T, which is what STM measures at T > 0. Within |w| < T the NRG at
+    T > 0 has the right weight but not its shape (the module docstring),
+    and the convolution averages over that window. For |V| above
+    THERMAL_FAR*T, where A_b changes on the scale b|V|, the convolution is
+    left out (its correction is of order (T/V)^2)."""
+    es = np.asarray(es, dtype=float)
+    if T <= 0.0:
+        raise ValueError("thermal_didv needs T > 0")
+    if omega0 is None:
+        omega0 = T/4.0
+    out = broaden(es, omega, weight, b=b, omega0=omega0)
+    m = int(THERMAL_WINDOW*THERMAL_POINTS)
+    x = (np.arange(-m, m) + 0.5)*(T/THERMAL_POINTS) # never w - V = 0
+    k = 1.0/(4.0*T*np.cosh(x/(2.0*T))**2)
+    dx = x[1] - x[0]
+    for i in np.where(np.abs(es) < THERMAL_FAR*T)[0]:
+        out[i] = np.sum(broaden(es[i] + x, omega, weight, b=b,
+                                omega0=omega0)*k)*dx
+    return out
+
+
 def stm_spectrum(es, ns=1, n=40, nz=4, b=0.6, omega0=None,
                  continuum_norm=True, Lambda=4.0, mesh="mean", T=0.0,
-                 **kwargs):
+                 tip_fermi=True, **kwargs):
     """A(w) at the energies es, z-averaged over nz meshes (z = k/nz): the
-    poles of chain_poles for each mesh, broadened by
-    ysrtk.zaverage.broaden_poles with width b and crossover omega0
-    (default: the scale omega_N of the last shell at T = 0, T at T > 0),
-    and averaged. With continuum_norm the result is multiplied by
-    ysr.lambda_factor(Lambda) on mesh="mean" (1 on "zp"), so that it
-    stands for the continuum, as in zaverage_stm_spectrum. Extra
-    keywords go to chain_poles. Returns (es, A, info) with info["A_z"],
-    info["results"] (the NRGSpectrum of each mesh), info["z"] and
-    info["dos_factor"]."""
-    from .ysrtk.zaverage import twists, broaden_poles
+    poles of chain_poles for each mesh, broadened by broaden (the kernel
+    of ysrtk.zaverage.broaden_poles) with width b and crossover omega0
+    (default: the scale omega_N of the last shell at T = 0), and
+    averaged; at T = 0, |w| below FLOOR times the largest omega_N is read
+    there (curve). At T > 0 with tip_fermi (the default) the result is dI/dV,
+    the poles convolved with -f' of a normal tip at T (thermal_didv,
+    omega0 default T/4); with tip_fermi=False it is A(w) itself, broadened
+    with omega0 default T, whose shape within |w| < omega0 is that of the
+    kernel and not of the spectrum. At T > 0 the chain stops at the first
+    shell below T/100 unless stop_omega is given. With continuum_norm
+    the result is multiplied by ysr.lambda_factor(Lambda) on mesh="mean"
+    (1 on "zp"), so that it stands for the continuum, as in
+    zaverage_stm_spectrum. Extra keywords go to chain_poles. Returns
+    (es, A, info) with info["A_z"], info["results"] (the NRGSpectrum of
+    each mesh), info["z"] and info["dos_factor"]."""
+    from .ysrtk.zaverage import twists
     from .ysr import lambda_factor
     es = np.asarray(es, dtype=float)
     norm = lambda_factor(Lambda) if (continuum_norm and mesh == "mean") else 1.0
-    if not continuum_norm:
-        norm = 1.0
+    if T > 0.0:
+        kwargs.setdefault("stop_omega", T/100.0)
     A = np.zeros(len(es))
-    info = dict(z=twists(nz), A_z=[], results=[], dos_factor=norm)
-    for z in info["z"]:
-        r = chain_poles(ns=ns, n=n, z=z, Lambda=Lambda, mesh=mesh, T=T,
-                        **kwargs)
-        w0 = omega0
-        if w0 is None:
-            w0 = r.omega_n[-1] if T == 0.0 else T
-        Az = broaden_poles(es, r.omega, r.weight, b=b, omega0=w0)[0]*norm
+    info = dict(z=twists(nz), A_z=[], dos_factor=norm)
+    info["results"] = [chain_poles(ns=ns, n=n, z=z, Lambda=Lambda, mesh=mesh,
+                                   T=T, **kwargs) for z in info["z"]]
+    floor = FLOOR*max(r.omega_n[-1] for r in info["results"])
+    for r in info["results"]:
+        Az = curve(es, r.omega, r.weight, T=T, omega_N=r.omega_n[-1], b=b,
+                   omega0=omega0, tip_fermi=tip_fermi, floor=floor)*norm
         A = A + Az
         info["A_z"].append(Az)
-        info["results"].append(r)
     return es, A/nz, info
+
+
+FLOOR = 30.0 # at T = 0, |w| below FLOOR*omega_N is read at FLOOR*omega_N
+
+
+def curve(es, omega, weight, T=0.0, omega_N=None, b=0.6, omega0=None,
+          tip_fermi=True, floor=None):
+    """The broadened spectrum of the poles. At T = 0: broaden with omega0
+    (default omega_N, the scale of the last shell), and every |w| below
+    floor (default FLOOR*omega_N) read at sign(w)*floor (w = 0 as the
+    mean of both sides), since below the last shell the curve is that of
+    the kernel, while past the fixed point (the stop rule of iterate) the
+    spectrum no longer changes. A twist average has to pass one floor
+    for all its meshes, or each mesh is read at the same place of its own
+    comb. At T > 0: thermal_didv with omega0 (default T/4) when
+    tip_fermi, else broaden with omega0 (default T)."""
+    es = np.asarray(es, dtype=float)
+    if T > 0.0 and tip_fermi:
+        return thermal_didv(es, omega, weight, T, b=b, omega0=omega0)
+    if omega0 is None:
+        omega0 = omega_N if T == 0.0 else T
+    if T > 0.0 or omega_N is None:
+        return broaden(es, omega, weight, b=b, omega0=omega0)
+    lo = FLOOR*omega_N if floor is None else float(floor)
+    low = np.abs(es) < lo
+    ev = np.where(low, np.sign(es)*lo, es)
+    A = broaden(ev, omega, weight, b=b, omega0=omega0)
+    z = es == 0.0
+    if np.any(z):
+        side = broaden(np.array([lo, -lo]), omega, weight, b=b, omega0=omega0)
+        A[z] = 0.5*(side[0] + side[1])
+    return A

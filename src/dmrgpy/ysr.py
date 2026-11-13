@@ -825,8 +825,31 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0,
     With Dz != 0 the same holds within a degenerate pair +-Sz, since the
     spin-summed correlator conserves Sz and the two members differ in Sz.
     imp and site are as in tunneling_operators: for S > 1/2 the impurity
-    spin is the total spin of the 2S impurity sites."""
+    spin is the total spin of the 2S impurity sites.
+
+    submode="NRG" (spin_chain_on_metal, or a spin-1/2 kondo_chain at
+    Delta = 0) is the numerical renormalization group of nrgmps instead,
+    on the mesh of fc: a DMRG head and an NRG tail (head="dmrg", the
+    default), or the exact start shell of the spins and the first Wilson
+    site (head="exact", up to nrgspectral.MAX_START_SPINS spins), with
+    the poles broadened on a logarithmic mesh rather than by delta; T > 0
+    is allowed there. The tip is on fc.tip_spin and the first Wilson
+    site, so imp and site must be None. See nrgmps.get_stm_spectrum."""
     es = np.asarray(es, dtype=float)
+    if submode == "NRG":
+        if imp is not None or site is not None:
+            raise ValueError("get_stm_spectrum: submode=\"NRG\" puts the tip "
+                             "on fc.tip_spin and the first Wilson site; imp "
+                             "and site must be None")
+        if mode != "DMRG":
+            raise ValueError("get_stm_spectrum: submode=\"NRG\" takes no "
+                             "mode=; use head=\"exact\" for the exact start "
+                             "shell")
+        if delta is not None:
+            raise ValueError("get_stm_spectrum: submode=\"NRG\" broadens on "
+                             "a logarithmic mesh, with b=, not delta=")
+        from . import nrgmps
+        return nrgmps.get_stm_spectrum(fc, es, U=U, **kwargs)
     if delta is None:
         delta = 0.02*(np.max(es) - np.min(es))
     Jc = getattr(fc, "J_chain", None) # a number, or one per spin (surrogate)

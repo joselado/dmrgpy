@@ -61,7 +61,9 @@ from . import nrgspectral
 
 GRADE_TOL = 1e-8 # the eigenvalues of N_p and 2 S^z_p must be integers to this
 IDENTITY_TOL = 1e-10 # an MPO tensor right of the block is c*identity to this
-BLOCK_TOL = 1e-6 # the block Hamiltonian couples two labels by at most this
+BLOCK_TOL = 1e-4 # the block Hamiltonian couples two labels by at most this
+# (first order in the error of the state, whose energies it moves at second
+# order; the size dropped is kept as info["off_block"] of the shell)
 
 
 def _layout(fc):
@@ -90,7 +92,10 @@ def head_state(fc, Nf=None, Sz=None):
     and promoted to dense indices, so that its left bases are graded.
     The default is half filling, Nf = number of sites (one electron on
     every spin site and on average one per Wilson site), and Sz = Nf mod 2,
-    the smallest |2S^z|. On itensor_version=3 the solve starts from the
+    the smallest |2S^z|, which holds a member of the ground multiplet at
+    B = 0. Sz="auto" solves every 2S^z from -(ns+1) to ns+1 of the parity
+    of Nf and keeps the lowest (the default when the spins are in a
+    field, fc.B_imp != 0). On itensor_version=3 the solve starts from the
     warm solve of ysr._seed_impurity_charge, since no term moves charge
     onto a spin site; every solved state is checked to hold one electron
     on every spin site. Returns (chain, E0)."""
@@ -102,7 +107,19 @@ def head_state(fc, Nf=None, Sz=None):
     if Nf is None:
         Nf = ns + len(wil)
     if Sz is None:
-        Sz = Nf % 2
+        Sz = "auto" if getattr(fc, "B_imp", 0.0) != 0.0 else Nf % 2
+    if isinstance(Sz, str):
+        if Sz != "auto":
+            raise ValueError("Sz must be an integer (2S^z) or \"auto\", got %r"
+                             % (Sz,))
+        best = None
+        for s2 in range(-(ns + 1), ns + 2):
+            if (Nf - s2) % 2:
+                continue
+            c, e = head_state(fc, Nf=Nf, Sz=s2)
+            if best is None or e < best[1] - 1e-12*max(1.0, abs(e)):
+                best = (c, e)
+        return best
     if (Nf - Sz) % 2:
         raise ValueError("Nf and 2Sz must have the same parity, got %r and %r"
                          % (Nf, Sz))
@@ -113,6 +130,7 @@ def head_state(fc, Nf=None, Sz=None):
     e0 = float(np.real(c.gs_energy()))
     ysr._check_impurity_charge(c, ns, "DMRG")
     c.promote_to_dense()
+    c.head_sector = dict(Nf=int(Nf), Sz=int(Sz))
     return c, e0
 
 
@@ -139,10 +157,15 @@ class Export(object):
             Ms = s.mps_site_arrays(s.gs_wavefunction())
             self._mpo = lambda terms: s.mpo_site_arrays(
                 s.build_operator(terms))
-        As, _, _ = task.mixed_gauge([np.asarray(M) for M in Ms],
-                                    pad_bonds=pad_bonds)
+        As, _, Cs = task.mixed_gauge([np.asarray(M) for M in Ms])
         As = [np.asarray(backend.to_host(A)) for A in As]
-        self.As, self.real_residual = real_gauge(As)
+        Cs = [np.asarray(backend.to_host(C)) for C in Cs]
+        As, self.real_residual = real_gauge(As, Cs)
+        if pad_bonds is not None: # padded after the real gauge, so in reals
+            As, _, _ = task.mixed_gauge(As, pad_bonds=pad_bonds)
+            As = [np.ascontiguousarray(np.real(backend.to_host(A)))
+                  for A in As]
+        self.As = As
         self.L = len(self.As)
 
     def mpo(self, op):
@@ -182,20 +205,34 @@ class Export(object):
         return np.ascontiguousarray(M)
 
 
-REAL_TOL = 1e-8 # the left basis is closed under complex conjugation to this
+REAL_TOL = 1e-4 # the weighted left basis is closed under conjugation to this
 
 
-def real_gauge(As, tol=REAL_TOL):
+def real_gauge(As, Cs=None, tol=REAL_TOL):
     """The left isometries As of a state that is real up to a global
-    phase, in a real gauge: at every bond a real orthonormal basis of the
-    span of the left basis (the left singular vectors of [Re M, Im M], M
-    the isometry of that bond in the gauge of the bonds before), and the
-    unitary that relates the two moved into the next tensor; the last
-    tensor loses the global phase. The "python" backend returns such a
-    state in a complex gauge. Returns (real As, residual), the residual
-    the largest relative singular value beyond the bond dimension (zero
-    for a span closed under conjugation) and, last, the imaginary part
-    left on the last tensor. Raises above tol."""
+    phase, in a real gauge: at every bond a real orthonormal basis close
+    to the span of the left basis, and the matrix that relates the two
+    moved into the next tensor; the last tensor loses the global phase.
+    The "python" backend returns such a state in a complex gauge.
+
+    The basis is the leading left singular vectors of [Re M, Im M], M the
+    left basis of the bond written in the real gauge of the bonds before
+    and weighted by the bond matrix of the state (Cs, the site-centre
+    tensors of task.mixed_gauge, None for no weight). The weight matters:
+    a direction with a Schmidt value of 1e-6 is fixed by the state only to
+    about 1e-15/1e-6, and without it such directions fail the test below
+    (residual 3.7e-4 on a 6-site chain whose state is real to 1e-15).
+
+    Returns (real As, residual): the residual is the largest relative
+    singular value beyond the bond dimension (zero for a weighted span
+    closed under conjugation) and, last, the imaginary part left on the
+    last tensor. It measures how far the state is from real, which for a
+    solved state is the accuracy of the solve: the exact ground state of a
+    real H in its sector is real, and a 7-site "python" solve at 20
+    sweeps was real to 2.5e-7 with a residual of 1.1e-6. The real basis
+    is the closest one to the weighted span, so it moves the left basis by
+    about as much. Raises above tol (1e-4), which no converged state
+    reaches."""
     if all(not np.iscomplexobj(A) or not np.any(A.imag) for A in As):
         return [np.ascontiguousarray(np.real(A)) for A in As], 0.0
     out, res = [], 0.0
@@ -212,7 +249,12 @@ def real_gauge(As, tol=REAL_TOL):
             res = max(res, float(np.max(np.abs(M.imag))/np.max(np.abs(M))))
             out.append(np.ascontiguousarray(M.real.reshape(a, d, b)))
             break
-        U, S, _ = np.linalg.svd(np.concatenate([M.real, M.imag], axis=1),
+        Mw = M
+        if Cs is not None: # the bond matrix: C_j = A_j Lambda_j
+            A2 = A.reshape(-1, b)
+            Lam = A2.conj().T @ np.asarray(Cs[j]).reshape(-1, Cs[j].shape[2])
+            Mw = M @ Lam
+        U, S, _ = np.linalg.svd(np.concatenate([Mw.real, Mw.imag], axis=1),
                                 full_matrices=False)
         if len(S) > b and S[0] > 0:
             res = max(res, float(S[b]/S[0]))
@@ -372,24 +414,34 @@ def handover_shell(fc, k0, U=0.0, imp=None, export=None, pad_bonds=None,
     sh = nrgspectral._shell_from_dense(H, labels, c, ops, shift, om,
                                        anti=anti, block_tol=BLOCK_TOL,
                                        info=dict(k0=k0, p=p, chi=ex.chi(p),
-                                                 U=U))
+                                                 U=U, B=getattr(fc, "B_imp",
+                                                                0.0)))
     return sh, ex
 
 
 N_MAX = 120 # the longest Wilson chain the tail is given, before its stop rule
+OMEGA_MIN = 1e-30 # and the chain ends before its hoppings fall below this
+
+
+def max_sites(Lambda, D=1.0):
+    """The longest tail chain: N_MAX sites, or fewer, so that its scale
+    D Lambda^(-n/2) stays above OMEGA_MIN. wilsonchain.wilson_chain loses
+    its precision below a scale of about 1e-35 (at Lambda = 4 the
+    120-site chain is broken from site 113 on, |eps|/t grows to 8e8)."""
+    return int(min(N_MAX, 2.0*np.log(D/OMEGA_MIN)/np.log(Lambda)))
 
 
 def tail_chain(fc, n_tail=None):
     """The Wilson chain the tail runs on: n_tail sites (default N_MAX) of
     the mesh of fc (fc.wilson_params), whose first sites must be the
-    Wilson chain of fc itself."""
+    Wilson chain of fc itself. The default is max_sites(Lambda, D)."""
     from . import wilsonchain
     wp = getattr(fc, "wilson_params", None)
     eps_h, t_h = wilson_parameters(fc)
     if wp is None:
         raise ValueError("the head was built with wilson= by hand; pass the "
                          "tail chain as wilson_tail=(eps, t)")
-    n = N_MAX if n_tail is None else int(n_tail)
+    n = max_sites(wp["Lambda"], wp["D"]) if n_tail is None else int(n_tail)
     if n < len(eps_h):
         raise ValueError("n_tail=%d is shorter than the head (%d Wilson sites)"
                          % (n, len(eps_h)))
@@ -410,7 +462,7 @@ def _check_prefix(eps, t, eps_h, t_h):
 class HeadTailSpectrum(object):
     """Result of head_tail_poles: omega, weight (the joined poles: the tail
     below w_join, TASK above), tail (the NRGSpectrum of the tail), task
-    (the TASK poles of the head, a dict of zaverage.stm_poles, or None),
+    (the TASK poles of the head, the dict of head_task_poles, or None),
     w_join, omega_k0 (the scale of the hand-over shell), k0, chi (the
     size of the hand-over basis), E0 (of the head), sum_rule (sum over
     sigma of <{X, X^dag}> on the head state), missing_weight (sum_rule
@@ -423,10 +475,10 @@ class HeadTailSpectrum(object):
         self.__dict__.update(kw)
 
 
-def head_tail_poles(fc, m=2, k0=None, n_tail=None, keep=400, T=0.0, U=0.0,
-                    nkry=300, w_join=None, stop_tol=1e-4, stop_extra=6,
+def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
+                    nkry=60, w_join=None, stop_tol=1e-4, stop_extra=6,
                     wilson_tail=None, task=True, Nf=None, Sz=None,
-                    window=None, solved=False):
+                    window=None, solved=False, pad_bonds=None):
     """Poles of the STM spectrum A(w) of ysr.py on the chain fc (a
     ysr.spin_chain_on_metal, or a spin-1/2 ysr.kondo_chain at Delta = 0),
     with a DMRG head and an NRG tail (docs/nrg_mps_kondo_plan.md, N3
@@ -441,11 +493,12 @@ def head_tail_poles(fc, m=2, k0=None, n_tail=None, keep=400, T=0.0, U=0.0,
     shell. At T = 0 it stops stop_extra shells after the fixed point
     (stop_tol, nrgspectral.iterate); at T > 0 at the first shell below
     T/100. task=True adds the TASK poles of the head state
-    (zaverage.stm_poles with nkry) above w_join (default omega_k0, the
-    scale of the hand-over shell) and keeps the tail below it. T > 0
+    (head_task_poles, nkry blocks of four) above w_join (default omega_k0,
+    the scale of the hand-over shell) and keeps the tail below it. T > 0
     applies to the tail only: TASK is a T = 0 method, so T has to be far
-    below w_join (a RuntimeWarning above w_join/10). Returns a
-    HeadTailSpectrum."""
+    below w_join (a RuntimeWarning above w_join/10). pad_bonds goes to
+    handover_shell ("full" completes the hand-over basis, for tests).
+    Returns a HeadTailSpectrum."""
     import warnings
     from .ysr import tunneling_operators
     from .ysrtk import zaverage
@@ -472,7 +525,7 @@ def head_tail_poles(fc, m=2, k0=None, n_tail=None, keep=400, T=0.0, U=0.0,
     _check_prefix(eps, t, eps_h, t_h)
     wp = getattr(c, "wilson_params", None) or {}
     Lambda = wp.get("Lambda", abs(t[0]/t[2]) if len(t) > 2 else 4.0)
-    sh, ex = handover_shell(c, k0, U=U, Lambda=Lambda)
+    sh, ex = handover_shell(c, k0, U=U, Lambda=Lambda, pad_bonds=pad_bonds)
     omega_k0 = sh.omega
     if w_join is None:
         w_join = omega_k0
@@ -495,7 +548,7 @@ def head_tail_poles(fc, m=2, k0=None, n_tail=None, keep=400, T=0.0, U=0.0,
     om, wt = [r.omega[sel]], [r.weight[sel]]
     p = None
     if task:
-        p = zaverage.stm_poles(c, U=U, nkry=nkry, parity=False)
+        p = head_task_poles(c, U=U, nkry=nkry)
         selp = np.abs(p["omega"]) >= w_join
         om.append(p["omega"][selp])
         wt.append(p["weight"][selp])
@@ -516,6 +569,200 @@ def head_tail_poles(fc, m=2, k0=None, n_tail=None, keep=400, T=0.0, U=0.0,
                             tail=r, task=p, w_join=w_join, omega_k0=omega_k0,
                             k0=k0, chi=sh.info["chi"], E0=e0,
                             sum_rule=sum_rule,
-                            missing_weight=sum_rule - r.total,
+                            missing_weight=r.sum_rule - r.total,
                             overlap=ov, window=(lo, hi), chain=c, T=T,
                             omega_N=r.omega_n[-1])
+
+
+def stm_spectrum(es, ns=1, n_head=12, site=None, Js=0.5, JK=0.2, Lambda=4.0,
+                 D=1.0, B=0.0, mesh="mean", nz=4, b=0.6, omega0=None, U=0.0,
+                 m=4, keep=800, T=0.0, nkry=60, maxm=256, nsweeps=30,
+                 cutoff=1e-12, itensor_version=3, continuum_norm=True,
+                 task=True, tip_fermi=True, **kwargs):
+    """A(w) at the energies es with a DMRG head and an NRG tail, z-averaged
+    over nz meshes (z = k/nz): for each mesh, ysr.spin_chain_on_metal(ns,
+    n_head, site, Js, JK, Lambda, D, B, z, mesh) solved by DMRG
+    (itensor_version, maxm, nsweeps, cutoff), its head_tail_poles (m,
+    keep, T, U, nkry, task and the extra keywords), the poles broadened by
+    nrgspectral.curve with b and omega0 (at T = 0 the default is the
+    scale of the last shell of the tail; at T > 0 with tip_fermi the
+    result is dI/dV with the Fermi function of the tip), and the meshes
+    averaged. With continuum_norm the result is multiplied by
+    ysr.lambda_factor(Lambda) on mesh="mean" (1 on "zp"), as in
+    nrgspectral.stm_spectrum. Returns (es, A, info): info["A_z"],
+    info["results"] (the HeadTailSpectrum of every mesh, without its
+    chain), info["z"] and info["dos_factor"]."""
+    from .ysr import spin_chain_on_metal, lambda_factor
+    from .ysrtk.zaverage import twists
+    es = np.asarray(es, dtype=float)
+    norm = lambda_factor(Lambda) if (continuum_norm and mesh == "mean") else 1.0
+    A = np.zeros(len(es))
+    info = dict(z=twists(nz), A_z=[], results=[], dos_factor=norm)
+    for z in info["z"]:
+        fc = spin_chain_on_metal(ns, n_head, site=site, Js=Js, JK=JK,
+                                 Lambda=Lambda, D=D, B=B, z=z, mesh=mesh,
+                                 itensor_version=itensor_version)
+        fc.maxm, fc.nsweeps, fc.cutoff = maxm, nsweeps, cutoff
+        r = head_tail_poles(fc, m=m, keep=keep, T=T, U=U, nkry=nkry,
+                            task=task, **kwargs)
+        r.chain = None
+        info["results"].append(r)
+    floor = nrgspectral.FLOOR*max(r.omega_N for r in info["results"])
+    for r in info["results"]:
+        Az = nrgspectral.curve(es, r.omega, r.weight, T=T, omega_N=r.omega_N,
+                               b=b, omega0=omega0, tip_fermi=tip_fermi,
+                               floor=floor)*norm
+        A = A + Az
+        info["A_z"].append(Az)
+    return es, A/nz, info
+
+
+def twin_chain(fc, z):
+    """A chain with the model of fc on the mesh of twist z: a
+    ysr.spin_chain_on_metal with fc's spins, Js, J_chain, B_imp, tip_spin,
+    Wilson length and mesh (fc.wilson_params), and fc's backend, maxm,
+    nsweeps, cutoff and noise. A spin-1/2 kondo_chain becomes the
+    spin_chain_on_metal of one spin, the same Hamiltonian."""
+    from .ysr import spin_chain_on_metal
+    ns, wil = _layout(fc)
+    wp = getattr(fc, "wilson_params", None)
+    if wp is None:
+        raise ValueError("the chain was built with wilson= by hand, so its "
+                         "twists cannot be rebuilt; use nz=1")
+    c = spin_chain_on_metal(ns, len(wil), site=getattr(fc, "tip_spin", ns - 1),
+                            Js=getattr(fc, "Js", 0.0), JK=fc.J_chain,
+                            Lambda=wp["Lambda"], D=wp["D"],
+                            B=getattr(fc, "B_imp", 0.0), z=z, mesh=wp["mesh"],
+                            itensor_version=fc.itensor_version)
+    for key in ("maxm", "nsweeps", "cutoff", "noise"):
+        if hasattr(fc, key):
+            setattr(c, key, getattr(fc, key))
+    return c
+
+
+def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
+                     T=0.0, keep=800, m=4, k0=None, n_tail=None, nkry=60,
+                     stop_tol=1e-4, stop_extra=6, tip_fermi=True,
+                     return_poles=False):
+    """ysr.get_stm_spectrum(fc, es, submode="NRG"): A(w) at the energies es,
+    in the units of the TASK route (the chain's own normalization;
+    multiply by fc.dos_factor for the continuum), averaged over nz twists
+    of the mesh, z = fc's twist + k/nz (twin_chain builds the others from
+    the parameters fc stores, with fc's solver settings).
+
+    head="dmrg" (the default) is head_tail_poles(fc, m, k0, n_tail, keep,
+    T, U, nkry, stop_tol, stop_extra) for every twist: the DMRG head (fc's
+    own maxm, nsweeps and cutoff), the NRG tail and the TASK poles of the
+    head above the scale of the hand-over. head="exact" skips DMRG: the
+    spins and the first Wilson site are the exact start shell
+    (nrgspectral.spin_cluster_shell with fc's Js, J_chain, B_imp and
+    tip_spin) and the NRG runs on the Wilson chain continued to n_tail
+    sites, with the same stop rule. The poles are broadened by
+    nrgspectral.curve with b (default 0.8 for one mesh at Lambda = 4, 0.4
+    for nz of 4 or more, 0.6 in between) and omega0 (default: the last
+    shell's scale at T = 0), all meshes read with one floor. At T > 0
+    with tip_fermi (the default) the result is dI/dV with the Fermi
+    function of a normal tip at T (nrgspectral.thermal_didv), else A(w).
+    With return_poles the result also holds the list of the
+    HeadTailSpectrum or NRGSpectrum of every twist, as (es, A, results)."""
+    from .ysrtk.zaverage import twists
+    if head not in ("dmrg", "exact"):
+        raise ValueError("head must be \"dmrg\" or \"exact\", got %r"
+                         % (head,))
+    if getattr(fc, "Delta_sc", 0.0) != 0.0:
+        raise ValueError("submode=\"NRG\": a normal metal only (Delta = 0)")
+    if b is None:
+        b = 0.8 if nz == 1 else (0.6 if nz < 4 else 0.4)
+    ns, wil = _layout(fc)
+    es = np.asarray(es, dtype=float)
+    z0 = (getattr(fc, "wilson_params", None) or {}).get("z", 0.0)
+    results, scales = [], []
+    for k, dz in enumerate(twists(nz)):
+        c = fc if k == 0 else twin_chain(fc, (z0 + dz) % 1.0)
+        if head == "exact":
+            eps, t = tail_chain(c, n_tail)
+            wp = c.wilson_params
+            om_start = np.sqrt(wp["Lambda"])*abs(t[0]) if len(t) else wp["D"]
+            start = nrgspectral.spin_cluster_shell(
+                ns=ns, site=getattr(c, "tip_spin", ns - 1),
+                Js=getattr(c, "Js", 0.0), JK=c.J_chain,
+                B=getattr(c, "B_imp", 0.0), U=U, eps0=eps[0], omega=om_start)
+            r = nrgspectral.spectral_poles(
+                start, eps[1:], t, keep=keep, T=T,
+                stop_tol=stop_tol if T == 0.0 else None, stop_extra=stop_extra,
+                stop_omega=T/100.0 if T > 0.0 else None)
+            scales.append(r.omega_n[-1])
+        else:
+            r = head_tail_poles(c, m=m, k0=k0, n_tail=n_tail, keep=keep, T=T,
+                                U=U, nkry=nkry, stop_tol=stop_tol,
+                                stop_extra=stop_extra)
+            scales.append(r.omega_N)
+        results.append(r)
+    floor = nrgspectral.FLOOR*max(scales)
+    A = np.zeros(len(es))
+    for r, wN in zip(results, scales):
+        A = A + nrgspectral.curve(es, r.omega, r.weight, T=T, omega_N=wN, b=b,
+                                  omega0=omega0, tip_fermi=tip_fermi,
+                                  floor=floor)
+    A = A/len(results)
+    if return_poles:
+        return es, A, results
+    return es, A
+
+
+def _session_arrays(c, ops):
+    """The ground state, H and the MPO of every MultiOperator of ops as
+    site arrays, on "python" and on 3, as taskdmrg exports them."""
+    from . import taskdmrg
+    from .pyitensor import task
+    taskdmrg.ground_state(c)
+    s = c._session
+    if c.itensor_version == "python":
+        from .pyitensor.chain import _mps_arrays_lpr
+        Ms = _mps_arrays_lpr(s.wf0)
+        Ws = task.mpo_arrays(s.H)
+        Wo = [task.mpo_arrays(s._mpo(op.to_terms())) for op in ops]
+    else:
+        Ms = s.mps_site_arrays(s.gs_wavefunction())
+        Ws = s.mpo_site_arrays(s.hamiltonian_mpo())
+        Wo = [s.mpo_site_arrays(s.build_operator(op.to_terms()))
+              for op in ops]
+    return Ms, Ws, Wo
+
+
+def head_task_poles(c, U=0.0, nkry=60):
+    """TASK poles of the STM spectrum of the head state c (a solved chain,
+    one of definite parity), from one block Krylov space
+    (pyitensor.task.block_krylov, nkry blocks) started from P X^dag_sigma
+    |GS> and P X_sigma|GS> of both tip spins, so that four starts share one
+    basis and every application of H acts on a block of four. Returns a
+    dict with "omega" (the electron poles at +w, the hole poles at -w),
+    "weight", "missing_weight" (the sum rule <{X, X^dag}> minus the
+    weights: the part of X^dag|GS> outside the one-site tangent space and
+    the Krylov space) and "dimension" (of the Krylov basis). Only the
+    column <alpha|O|GS> is computed, not the operator between Ritz states
+    that task.projected_spectrum also builds."""
+    from .ysr import tunneling_operators
+    from .pyitensor import task, backend
+    Xd = tunneling_operators(c, U=U, site=len(c.impurity))
+    X = [x.get_dagger() for x in Xd]
+    Ms, Ws, Wo = _session_arrays(c, Xd + X)
+    ts = task.TangentSpace(Ms, Ws)
+    starts = [ts.project_operator(task.compress_mpo(W)) for W in Wo]
+    store, n, Hq = task.block_krylov(ts, starts, int(nkry))
+    ws, V = np.linalg.eigh(Hq)
+    Vh = V.conj().T
+    om, wt = [], []
+    for k, b in enumerate(starts):
+        amp = Vh @ backend.to_host(backend.row_overlaps(store, ts.flat(b),
+                                                        n))[:n]
+        sign = 1.0 if k < len(Xd) else -1.0 # electron at +w, hole at -w
+        om.append(sign*ws)
+        wt.append(np.abs(amp)**2)
+    om, wt = np.concatenate(om), np.concatenate(wt)
+    total = 0.0
+    for x in Xd:
+        xd = x.get_dagger()
+        total += float(np.real(c.vev(x*xd + xd*x)))
+    return dict(omega=om, weight=wt, missing_weight=total - float(np.sum(wt)),
+                dimension=n)

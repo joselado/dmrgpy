@@ -191,15 +191,85 @@ def test_unitary_limit_of_the_kondo_resonance():
     with b = 0.4, is 1 to 1% from 1e-9 to 1e-4 and falls through 1/2 near
     3 T_K (measured 0.9938 to 1.0097 on that window, 0.593 at 1e-2)."""
     J = 0.4*A4
-    es = np.array([1e-9, 1e-7, 1e-6, 1e-5, 1e-4, 1e-2])
+    es = np.array([1e-9, 1e-7, 1e-6, 1e-5, 1e-4, 1e-2, 0.0])
     _, A, info = nrgspectral.stm_spectrum(es, ns=1, n=40, nz=4, b=0.4, JK=J,
                                           Lambda=4.0, keep=400)
     tw = np.pi**2*0.5*(J/A4)**2*A/2.0
     assert np.max(np.abs(tw[:5] - 1.0)) < 0.015
     assert 0.5 < tw[5] < 0.7
+    assert tw[6] == pytest.approx(1.0, abs=0.01) # w = 0, read at the floor
     _, Am, _ = nrgspectral.stm_spectrum(-es, ns=1, n=40, nz=4, b=0.4, JK=J,
                                         Lambda=4.0, keep=400)
     assert np.max(np.abs(Am - A)) < 1e-10*np.max(A) # particle-hole symmetric
+
+
+def test_free_spin_at_finite_temperature():
+    """J = 0 at T > 0: the spectrum does not depend on T. The NRG keeps the
+    weight inside |w| < T but not its shape (250 times too much weight
+    below 1e-7 at T = 3.5e-4), and the Fermi function of the tip averages
+    over that window: dI/dV of the poles equals that of the exact density
+    of states of the same chains, to 0.3% (measured 0.994 to 1.002)."""
+    from dmrgpy.ysrtk.zaverage import bdg_poles, twists
+    T = 3.5e-4
+    es = np.array([0.0, 1e-5, 1e-4, 3.5e-4, 1e-3, 3e-3, 1e-2])
+    _, A, info = nrgspectral.stm_spectrum(es, ns=1, n=60, nz=2, b=0.4,
+                                          JK=0.0, Lambda=4.0, keep=400, T=T,
+                                          operators="ldos")
+    ref = np.zeros(len(es))
+    for z, r in zip(twists(2), info["results"]):
+        assert r.stop == "omega" and r.omega_n[-1] <= T/100
+        assert r.total == pytest.approx(r.sum_rule, abs=1e-12)
+        eps, t = wilsonchain.wilson_chain(60, Lambda=4.0, band=(-1.0, 1.0), z=z)
+        w, wt = bdg_poles(eps, t, 0.0)
+        ref += nrgspectral.thermal_didv(es, w, 2*wt, T, b=0.4)*A4/2
+    assert np.max(np.abs(A/ref - 1.0)) < 0.005
+
+
+def test_kondo_resonance_at_finite_temperature():
+    """rho J = 0.2: dI/dV at zero bias, as the T-matrix of the continuum,
+    falls from the unitary value with T (measured 1.001 at T = 0, 0.989 at
+    0.1 T_K and 0.720 at T_K, Wilson's T_K = 3.489e-3)."""
+    J, TK = 0.4*A4, 3.489e-3
+    es = np.array([0.0])
+    vals = []
+    for T in (0.0, 0.1*TK, TK):
+        _, A, _ = nrgspectral.stm_spectrum(es, ns=1, n=60, nz=4, b=0.4, JK=J,
+                                           Lambda=4.0, keep=400, T=T,
+                                           stop_tol=1e-4 if T == 0 else None)
+        vals.append(np.pi**2*0.5*(J/A4)**2*A[0]/2.0)
+    assert vals[0] == pytest.approx(1.0, abs=0.01)
+    assert vals[1] == pytest.approx(0.989, abs=0.01)
+    assert vals[2] == pytest.approx(0.720, abs=0.02)
+
+
+def test_stop_rule_at_the_fixed_point():
+    """The tail stops stop_extra shells after two consecutive shells agree
+    with the shells two sites before (30 of 80 sites here), and the
+    spectrum is that of the full chain to the precision of one mesh: on
+    one mesh at Lambda = 4 and keep = 300 the T = 0 spectrum at a fixed
+    energy moves by up to 0.7% with the length of the chain (measured on
+    26 to 80 sites, both parities), since the density matrix is the
+    ground manifold of the last shell."""
+    J = 0.4*A4
+    r = nrgspectral.chain_poles(ns=1, n=80, JK=J, Lambda=4.0, keep=300,
+                                stop_tol=1e-4, stop_extra=4)
+    assert r.stop == "fixed point" and 10 < r.nshells < 80
+    full = nrgspectral.chain_poles(ns=1, n=80, JK=J, Lambda=4.0, keep=300)
+    es = np.array([1e-8, 1e-6, 1e-4])
+    a = nrgspectral.broaden(es, r.omega, r.weight, b=0.8,
+                            omega0=r.omega_n[-1])
+    f = nrgspectral.broaden(es, full.omega, full.weight, b=0.8,
+                            omega0=full.omega_n[-1])
+    assert np.max(np.abs(a/f - 1.0)) < 1.5e-2
+
+
+def test_stm_spectrum_passes_the_number_of_spins():
+    _, A1, i1 = nrgspectral.stm_spectrum(np.array([1e-3]), ns=1, n=10, nz=1,
+                                         JK=0.4, keep=100)
+    _, A3, i3 = nrgspectral.stm_spectrum(np.array([1e-3]), ns=3, n=10, nz=1,
+                                         Js=0.1, JK=0.4, keep=100)
+    assert i1["results"][0].nkept[0] == 8
+    assert i3["results"][0].nkept[0] == 32
 
 
 def test_validation():
@@ -215,3 +285,35 @@ def test_validation():
         nrgspectral.chain_poles(n=4, T=-1.0)
     with pytest.raises(ValueError):
         nrgspectral.chain_poles(n=4, wilson=(np.zeros(3), np.ones(2)))
+
+
+@pytest.mark.parametrize("T", [1e-12, 1e-14])
+def test_low_temperature_does_not_see_a_constant(T):
+    """A constant added to the start shell does not move the result at low
+    T: the Boltzmann weights use the ground energies relative to the last
+    shell, sums of the small increments of the later shells, and not the
+    absolute energies, whose roundoff of 1e-16 enters as 1e-16/T (it moved
+    A by 1.3e-2 at T = 1e-14, found by an independent review)."""
+    eps, t = wilsonchain.wilson_chain(60, Lambda=4.0, band=(-1.0, 1.0))
+    es = np.array([-3.0, -1.0, 1.0, 3.0, 10.0])*T
+    A = []
+    for c in (0.0, 0.37, 100.0):
+        start = nrgspectral.spin_cluster_shell(ns=1, JK=0.3*A4, U=0.1,
+                                               eps0=eps[0], omega=2*abs(t[0]))
+        start.E = {lab: e + c for lab, e in start.E.items()}
+        r = nrgspectral.spectral_poles(start, eps[1:], t, keep=200, T=T)
+        A.append(nrgspectral.broaden(es, r.omega, r.weight, b=0.6, omega0=T))
+    assert np.max(np.abs(A[1]/A[0] - 1)) < 1e-8
+    assert np.max(np.abs(A[2]/A[0] - 1)) < 1e-8
+
+
+def test_a_tiny_field_is_not_averaged_away():
+    """The spectra of (Q, 2Sz) and (Q, -2Sz) are averaged only at B = 0
+    exactly, read off the start shell, not when they agree to a tolerance
+    (a field of 5e-11 used to be erased)."""
+    r = nrgspectral.chain_poles(ns=1, n=10, JK=-0.3*A4, B=5e-11, Lambda=4.0,
+                                keep=100)
+    assert r.flip is False
+    r = nrgspectral.chain_poles(ns=1, n=10, JK=-0.3*A4, B=0.0, Lambda=4.0,
+                                keep=100)
+    assert r.flip is True
