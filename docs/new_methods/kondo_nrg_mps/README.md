@@ -294,6 +294,15 @@ exact route does not hold, so there only the convergence of the head
 route is measured; the chain is a singlet and A vanishes below 1e-4, as
 it should.
 
+The same ladder on 10 spins, with the metal under the end spin and under
+its neighbour, converges more slowly with the neighbour: between the two
+largest hand-over bases (402 and 414 states, 327 and 333) A changes by
+0.47% and 1.35% of its peak, and the next ones (340, 292) are 0.78% and
+2.3% off. Both chains are singlets, and A vanishes at low energy (below
+1e-10 of its peak at 1e-9 and about 1e-5 at 1e-5), so these are runs
+without a Kondo resonance, and nothing beyond 7 spins checks the
+resonance itself. Each run of the head took 1.5 to 4.5 min on one core.
+
 ## 7. Checks
 
 - Untruncated, the poles are those of a dense diagonalization of the same
