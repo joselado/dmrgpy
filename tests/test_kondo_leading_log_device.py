@@ -112,12 +112,18 @@ def test_the_device_flow_is_the_numpy_flow(name, form, on_jax, monkeypatch):
 def test_chunks_give_one_chunk(form, on_jax, monkeypatch):
     """At T>0 there are 8 occupied columns; a tiny CHUNK_BYTES cuts the
     biases one by one in both sums of the tip vertex, and the columns one
-    by one in the column form."""
+    by one in the column form. The other sizes leave a last chunk smaller
+    than the others, which is padded: in the bias and column chunks of both
+    forms, on the real route and, with a field along y, on the complex one
+    (whose larger items move the chunk sizes, hence 23040 and 49152)."""
     monkeypatch.setattr(leadinglog_device, "TIP_FORM", form)
-    ks = _chain(3, T=2.)
-    ref = _ll(ks, {})
-    monkeypatch.setattr(leadinglog_device, "CHUNK_BYTES", 2e3)
-    _same(ref, _ll(ks, {}))
+    whole = leadinglog_device.CHUNK_BYTES
+    for ks in (_chain(3, T=2.), _chain(3, by=3e-5, T=2.)):
+        monkeypatch.setattr(leadinglog_device, "CHUNK_BYTES", whole)
+        ref = _ll(ks, {})
+        for size in (2e3, 2500, 12288, 23040, 30720, 49152):
+            monkeypatch.setattr(leadinglog_device, "CHUNK_BYTES", size)
+            _same(ref, _ll(ks, {}))
 
 
 def test_the_integrator_takes_the_steps_of_scipy(on_jax):

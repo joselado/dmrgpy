@@ -168,9 +168,14 @@ energies of the members are NOT the window: they agree to far below the
 their split still refused the call
 (`tests/test_audit_2026_11_13_reread.py`). At T>0 the warning counts a pole only when its third nearest pole
 is further than 5.4 kT (`THERMAL_WIDTH`), a rule fitted on one 24-site
-chain, and weighs it by min(1, d/(5.4 kT)), with d = min(r, r^2/g) the
-distance a Ritz energy with residual r can still move, g being the
-distance to the nearest other Ritz energy (2026-11-12, the author's pick
+chain, and weighs it by min(1, d/(5.4 kT)), with d = min(r, r^2/g) an
+estimate of the distance a Ritz energy with residual r can still move, g
+being the distance to the nearest other Ritz energy. It is NOT the
+Kato-Temple bound, which needs the gap to the rest of the spectrum of PHP:
+a loose pole can sit 5x further than r^2/g from its eigenvalue (3x3
+counterexample in the `_thermal_shift_factor` docstring, 2026-11-13
+re-read), so do not call it a bound or use it for anything but the size
+of the warning (2026-11-12, the author's pick
 after the 2026-11 hunt: a gapped 20-site chain at 0.1 K warned of 4.1e-3
 for a true change of 6.5e-8; now 3.0e-5). Measured on two chains, the
 size stays between the true change and the old size, and a uniform
@@ -215,7 +220,8 @@ the two-time term is validated before any TDVP step, and the correlator
 route warns when `es` cuts the elastic line or stops below max|eV|. In
 `get_kondo_spectrum` the mode is validated first, and `n_gs` before
 anything is built. Not applied: computing Sz once for the second-order
-and potential terms of the correlator route (4% of the call).
+and potential terms of the correlator route (8% of the call on HEAD, re-measured
+2026-11-13 after finding 11; 4% before it).
 
 **Spinful fermion chains (2026-10-22).** `get_kondo_spectrum` lives on
 `kondospectrumtk/kondomethod.py::KondoSpectrumMixin`, inherited by

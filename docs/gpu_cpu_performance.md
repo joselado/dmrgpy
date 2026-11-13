@@ -786,7 +786,8 @@ while on the card they do not.
 | 8 spins, T=2 K, 223 occupied states | 1179 s | | 164 s |
 
 The gain against six cores falls with size on this card (2.9 at 9 spins,
-1.9 at 10), as the products grow as d^3. The table, the memory model and
+1.9 at 10), as the products grow as d^3. The six-core runs shared the host
+with two other jobs, so against an idle host the gain is smaller. The table, the memory model and
 the agreement with NumPy are in
 `docs/new_methods/kondo_leading_log/README.md`, section 7.
 
@@ -797,6 +798,8 @@ the diagonalization on the host adds about 260 s on one thread. Note that
 JAX caps its allocator at 75% of the card by default, also without
 preallocation, so a 13-spin run sets `XLA_PYTHON_CLIENT_MEM_FRACTION=0.95`.
 
+
+## Device compatibility, calculation by calculation
 
 Everything above is about *speed*. This section is about whether a
 calculation runs on the JAX backend at all, whether it gives the NumPy

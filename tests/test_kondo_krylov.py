@@ -89,9 +89,18 @@ def test_sparse_eigensolver_finds_the_multiplets(monkeypatch):
     and a missing member would show here."""
     monkeypatch.setattr(krylovkondo, "DENSE_DIM", 16)
     monkeypatch.setattr(krylovkondo, "K0", 6)
+    calls = []
+    eigsh = krylovkondo.sla.eigsh
+    def counted(*a, **k):
+        calls.append(k.get("k"))
+        return eigsh(*a, **k)
+    monkeypatch.setattr(krylovkondo.sla, "eigsh", counted)
     sc = heisenberg(8)
     kks = krylovkondo.KrylovKondoSpectrum(sc, 1, 0.5, p_cut=1e-12)
-    assert 1 < len(kks.weights) < 40 # eigsh, not the dense fallback
+    # eigsh, not the dense fallback: the weight cut alone keeps the same
+    # states on both paths, so it cannot tell them apart
+    assert calls and max(calls) < 256//3
+    assert 1 < len(kks.weights) < 40
     assert compare(sc, 0.5, nkry=60, p_cut=1e-12) < 1e-10 # measured 2e-13
 
 

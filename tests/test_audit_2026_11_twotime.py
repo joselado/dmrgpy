@@ -112,12 +112,24 @@ def _chain(version, n=4, complex_field=False):
 
 @pytest.mark.parametrize("version", _BACKENDS)
 @pytest.mark.parametrize("complex_field", [False, True])
-def test_G_from_bra_trajectories_equals_ket_trajectories(version, complex_field):
+def test_G_from_bra_trajectories_equals_ket_trajectories(version, complex_field,
+                                                       monkeypatch):
     sc = _chain(version, complex_field=complex_field)
     sc.get_gs()
     args = (sc, 0, 500.0, 2, 300.0, 3)
+    count = {"old": 0, "new": 0}
+    def counted(key, f):
+        def g(*a, **k):
+            count[key] += 1
+            return f(*a, **k)
+        return g
+    monkeypatch.setitem(globals(), "_tdvp_trajectory", counted("old", _tdvp_trajectory))
+    monkeypatch.setattr(dt, "_tdvp_trajectory", counted("new", dt._tdvp_trajectory))
     rows_old = list(_old_batches(*args))
     rows_new = list(_levi_civita_coeff_G_batches_dmrg(*args))
+    # the saving of finding 11: three bra trajectories per row, not six ket
+    # ones (48 before)
+    assert count == {"old": 48, "new": 21}
     assert len(rows_old) == len(rows_new) == 5
     scale = max(np.abs(r[2]).max() for r in rows_old)
     assert scale > 0.1

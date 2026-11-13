@@ -49,6 +49,17 @@ def test_fbuilder_call_equals_old_overwrite_form():
     for x in (inner, outer, np.concatenate([outer[:2], inner, outer[2:]]),
               0.003):
         assert np.array_equal(fb(x), _old_call(fb, x))
+    # the saving of finding 4: F0 is evaluated only outside the table
+    calls = []
+    F0 = sf.F0
+    sf.F0 = lambda x, **k: (calls.append(np.size(x)), F0(x, **k))[1]
+    try:
+        fb(inner)
+        assert calls == []
+        fb(np.concatenate([outer, inner]))
+        assert calls == [len(outer)]
+    finally:
+        sf.F0 = F0
 
 
 def test_cached_fbuilder_is_shared_and_keyed():
@@ -72,6 +83,16 @@ def _check(chain):
     for name in ("Sx", "Sy", "Sz"):
         d = getattr(ks, name) - _old_eigenbasis(ks, name)
         assert np.max(np.abs(d)) < 1e-12
+    # the saving of finding 6: the sparse operator is never made dense
+    calls = []
+    todense = algebra.todense
+    algebra.todense = lambda m: (calls.append(1), todense(m))[1]
+    try:
+        for name in ("Sx", "Sy", "Sz"):
+            ks._eigenbasis_spin_operator(name)
+    finally:
+        algebra.todense = todense
+    assert calls == []
 
 
 def test_eigenbasis_spin_operator_spin_chain():

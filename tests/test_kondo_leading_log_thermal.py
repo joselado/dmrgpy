@@ -95,10 +95,23 @@ def test_the_kernel_integrates_to_the_thermal_log(kT):
         assert abs(I - F_T(x, kT)) < 1e-8*abs(I)
 
 
+@pytest.mark.parametrize("kT", [0.025, 0.3])
+def test_the_far_table_holds_where_the_thermal_part_is_not_negligible(kT):
+    """Beyond xnear = 48 kT the kernel is K (1 + a spline in ln|x|); at these
+    temperatures the thermal part there is 2e-5 to 1e-3 of F, so an error
+    of the far table shows (measured below 8e-10)."""
+    tk = ThermalKernel(kT, OM, G0, 10*OM)
+    for c in (47.9, 48.1, 60., 150., 500.):
+        x = c*kT
+        ref = F_T(x, kT)
+        assert abs(ref - F0(np.array([x]), OM, G0)[0]) > 1e-5*abs(ref)
+        assert abs(tk(np.array([x]), 1e10*OM, 0.)[0] - ref) < 1e-8*abs(ref)
+
+
 @pytest.mark.parametrize("model", [lambda T: half(1.0, T), spin1])
 def test_the_zero_temperature_limit(model):
-    """As kT/Gamma0 -> 0 the thermal route goes to the T=0 flow, as
-    (kT/Gamma0)^2."""
+    """As kT/Gamma0 -> 0 the thermal route goes to the T=0 flow: as
+    (kT/Gamma0)^2 over the first decade, more slowly below it."""
     eV = np.array([-2.3, -1.4, -0.6, -0.11, -0.012, 0.004, 0.03, 0.2, 0.55,
                    0.8, 1.7, 2.9])
     ref = ll(model(0.), eV, -0.05, U=0.25)

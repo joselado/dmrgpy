@@ -270,9 +270,16 @@ class TaskKondoSpectrum():
         """For the Ritz states in rows, min(1, d/(THERMAL_WIDTH kT)): the
         part of its weight by which a thermal step moves when the pole
         moves by d. A Ritz energy with residual r is within r of an
-        eigenvalue of PHP, and within r^2/g when the distance g to the
-        nearest other Ritz energy is larger than r, so d = min(r, r^2/g).
-        A Ritz energy degenerate with another one gets d = r."""
+        eigenvalue of PHP, a bound. It is within r^2/delta (Kato-Temple)
+        when delta is the gap to the rest of the spectrum of PHP, which is
+        not known here; d = min(r, r^2/g) takes for it the distance g to
+        the nearest other Ritz energy, which can be larger (a loose pole
+        standing for several eigenvalues), so d is an estimate and not a
+        bound: on diag(-1, 1, 5) from the two starts (e1+e2)/sqrt(2) and e3
+        it gives 0.2 for a true distance of 1. Measured on the 2026-11 hunt
+        chains it stayed above the true change; only the size of the
+        warning reads it, never dI/dV. A Ritz energy degenerate with
+        another one gets d = r."""
         es = np.sort(self.e)
         r = self.residual[rows]
         g = np.array([np.sort(np.abs(es - self.e[k]))[1] if len(es) > 1

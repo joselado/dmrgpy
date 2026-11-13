@@ -422,8 +422,10 @@ host with two other jobs.
 | 9 spins, field along y (complex route) | 475 s | | 116 s |
 | 8 spins, T=2 K (223 occupied states) | 1179 s | | 164 s |
 
-So even a card with weak double precision gains, by 2 to 4 against six
-cores at 9 and 10 spins. The products alone are not faster there. What
+So even a card with weak double precision gains, by 1.9 to 2.9 against six
+cores at 9 and 10 spins, against six cores that shared the host, so the
+gain over an idle host is smaller. Against one core it is 3.9 at 9 spins
+and 4.1 on the complex route. The products alone are not faster there. What
 it gains is the rest of the right-hand side and the integrator, which
 run on one core in the NumPy route. The gain falls with size on this
 card (2.9 at 9 spins, 1.9 at 10), since the products, where it is
@@ -445,7 +447,7 @@ thread and with 30 GB of host memory at 13 spins.
 | 13 spins, T=0.5 K, 24 occupied states | 3013 s | 632 s | 124.3 GB |
 
 So at 9 spins the H200 is 20 times faster than the A2000 and 57 times
-faster than six cores. The flow takes about 520 steps at 11 to 13 spins.
+faster than the six shared cores. The flow takes about 520 steps at 11 to 13 spins.
 We split the 13-spin times into a fixed part and a part per bias, by
 timing one right-hand side at 61 and at 201 biases. At T=0 in the column
 form it is about 400 s plus 0.85 s per bias. At 0.5 K in the block form
@@ -583,9 +585,13 @@ are measured with the same models.
    of the tables and through K_T integrated over ln D. FBuilder differs
    from the same quadrature by 8e-7 to 2e-6, which is its own accuracy.
 2. The limit T -> 0. With Jrho_s=-0.05 and U=0.25 on 12 biases the
-   thermal route goes to the T=0 flow as (kT/Gamma0)^2: 6.4e-7, 4.7e-9,
-   1.7e-10 and 2.3e-11 at kT/Gamma0 = 0.1 to 1e-4 for a spin 1/2 in a
-   field, 2.8e-6 to 3.4e-11 for the S=1 model of section 5.
+   thermal route goes to the T=0 flow: 6.4e-7, 4.7e-9, 1.7e-10 and 2.3e-11
+   at kT/Gamma0 = 0.1 to 1e-4 for a spin 1/2 in a field, 2.8e-6 to 3.4e-11
+   for the S=1 model of section 5. This is (kT/Gamma0)^2 over the first
+   decade only (a factor 137 from 0.1 to 1e-2); below it the difference
+   falls by 28 and then by 7 per decade. The integrator is not the floor:
+   rtol=1e-12 gives the same four numbers as the default 1e-10
+   (2026-11-13 re-read). The test pins the limit at 1e-4, not the law.
 3. First order. Let D(g) be the leading-log result minus the second and
    third order of `conductance.py` at the same T. Halving g from 0.01
    divides the even part of D by 4.006 and the odd part by 8.011 (spin
@@ -661,8 +667,8 @@ the author's choice on this date.
 
 2026-11-12: the flow runs on a GPU through JAX (`leadinglog_device.py`,
 end of section 7), with the numbers of the NumPy route to roundoff. On
-the RTX A2000 of d22 it is 2 to 4 times faster than six cores at 9 and
-10 spins.
+the RTX A2000 of d22 it is 1.9 to 2.9 times faster than six cores that
+shared the host with two other jobs, at 9 and 10 spins.
 
 2026-11-13: on an H200 the flow takes 455 s at 13 spins and T=0, and
 632 s at 0.5 K with 24 occupied states (section 7). "auto" takes the
