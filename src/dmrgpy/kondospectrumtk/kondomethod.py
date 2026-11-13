@@ -409,9 +409,12 @@ class KondoSpectrumMixin():
                     # when that is not the thermal state; a member of an
                     # n_gs manifold may sit up to Gamma0 off its partner,
                     # the split the n_gs average accepts below
+                    # order=2 reads the column of the ground state only,
+                    # so the tangent-tangent blocks are not built
                     ks = TaskKondoSpectrum(self, site, nkry=nkry, kB=kB,
                                            T=T, n_gs=n_gs,
-                                           manifold_window=Gamma0 if n_gs > 1 else 0.)
+                                           manifold_window=Gamma0 if n_gs > 1 else 0.,
+                                           order=order)
                     # the poles the Krylov space has not converged are
                     # steps at energies that move with nkry
                     if len(eV): ks.warn_unconverged(np.max(np.abs(eV)))

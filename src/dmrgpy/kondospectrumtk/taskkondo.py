@@ -64,20 +64,33 @@ class TaskKondoSpectrum():
     with the impurity Sx/Sy/Sz in that basis, in the shape of
     edkondo.KondoSpectrum at T=0. p is one-hot on the converged ground
     state, the DMRG route's own T=0 (get_kondo_spectrum's n_gs averages a
-    degenerate manifold on top of it)."""
+    degenerate manifold on top of it).
+
+    order=2 builds only row and column 0 of Sx, Sy and Sz, the transitions
+    out of the ground state, which is all conductance.second_order_dIdV
+    reads (p is one-hot on row 0); the tangent-tangent block is zero and
+    column_only is True, and the third-order sums refuse such a spectrum.
+    connected_to_ground_state then sees the direct transitions only, the
+    ones the second-order sum runs over. order=3 (the default) builds the
+    full matrices."""
     def __init__(self, chain, site, nkry=100, kB=8.617333262e-5,
-                 degeneracy_tol=1e-9, T=0., n_gs=1, manifold_window=0.):
+                 degeneracy_tol=1e-9, T=0., n_gs=1, manifold_window=0.,
+                 order=3):
         from .. import taskdmrg
         taskdmrg._check_backend(chain, "get_kondo_spectrum(mode=\"DMRG\")")
         if isinstance(nkry, bool) or not isinstance(nkry, (int, np.integer)) or nkry < 1:
             raise ValueError("nkry must be a positive integer, got %r" % (nkry,))
         if not T >= 0.:
             raise ValueError("T must be >= 0, got %r" % (T,))
+        if order not in (2, 3):
+            raise ValueError("order must be 2 or 3, got %r" % (order,))
         self.chain = chain
         self.site = site
         self.T = float(T)
         self.kB = kB
         self.manifold_window = float(manifold_window)
+        self.order = int(order)
+        self.column_only = self.order == 2
         taskdmrg.ground_state(chain) # no session on julia_live
         ops = []
         for name in ("Sx", "Sy", "Sz"):
@@ -85,7 +98,8 @@ class TaskKondoSpectrum():
             ops.append((op.to_terms(), op.get_dagger().to_terms()))
         self.nkry = int(nkry)
         e, mats, dim, res = taskdmrg.session_spectrum(chain, ops, int(nkry),
-                                                      residual=True)
+                                                      residual=True,
+                                                      column=self.column_only)
         e = np.asarray(e, dtype=float)
         self.residual = np.asarray(res, dtype=float)
         # A state degenerate with the ground state comes out of the Ritz

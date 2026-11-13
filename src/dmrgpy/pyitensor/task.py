@@ -1250,7 +1250,7 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
     return store, count, Hq
 
 
-def projected_spectrum(ts, ops, nkry, residual=False):
+def projected_spectrum(ts, ops, nkry, residual=False, column=False):
     """Energies and operator matrices in the basis {|GS>} + the Ritz states
     of P(H-E0)P on the block Krylov space started from P O|GS> and
     P O^dagger|GS> for every operator in `ops`.
@@ -1260,6 +1260,13 @@ def projected_spectrum(ts, ops, nkry, residual=False):
     energies relative to E0, and for each operator the matrix
     mats[k][a,b] = <a|O_k|b> in that basis, in which the O_k|GS> column is
     exact and the tangent-tangent block is the projection P O_k P.
+
+    With column=True only row and column 0 are built, <a|O_k|GS> and
+    <GS|O_k|a>, and the tangent-tangent block is left at zero: what a sum
+    over transitions out of the ground state reads (the second-order dI/dV),
+    without the n applications of every O_k and the n x n overlaps the
+    block costs. Everything else is the same code, so the column is the
+    one of the full build, bit for bit.
 
     With residual=True a third entry gives, for every state of the basis,
     the residual norm ||(P(H-E0)P - e)|a>|| of block_krylov: zero for the
@@ -1286,6 +1293,9 @@ def projected_spectrum(ts, ops, nkry, residual=False):
         M[0, 0] = ts.expectation(op)
         M[1:, 0] = Uh @ overlaps(ts.flat(bk))
         M[0, 1:] = (Uh @ overlaps(ts.flat(bdk))).conj()
+        mats.append(M)
+        if column:
+            continue
         G = np.zeros((n, n), dtype=complex)  # <q_i|O|q_j>
         nb = ts.batch_size(op)
         for j0 in range(0, n, nb):  # the basis in stacks, not vector by vector
@@ -1294,7 +1304,6 @@ def projected_spectrum(ts, ops, nkry, residual=False):
             G[:, j0:j1] = _overlap_columns(store, ys, n)
             del ys
         M[1:, 1:] = Uh @ G @ U
-        mats.append(M)
     if residual:
         return e, mats, res
     return e, mats
@@ -1336,16 +1345,19 @@ def correlator_poles(Ms, Ws, Wb, Wadag=None, nkry=100, variance=False,
 
 
 def spectrum_from_arrays(Ms, Ws, ops, nkry, pad_bonds=None,
-                         expand_bonds=None, expand_rounds=1, residual=False):
+                         expand_bonds=None, expand_rounds=1, residual=False,
+                         column=False):
     """projected_spectrum from site arrays: ops is a list of (MPO of O,
     MPO of O^dagger). Returns (e, mats, dim), and with residual=True the
     residual norm of every state as a fourth entry. pad_bonds and
     expand_bonds as in correlator_poles; the expansion is fed by every O
-    and O^dagger."""
+    and O^dagger. column=True builds row and column 0 only
+    (projected_spectrum)."""
     ts = TangentSpace(Ms, Ws, pad_bonds=pad_bonds, expand_bonds=expand_bonds,
                       expand_ops=[W for pair in ops for W in pair],
                       expand_rounds=expand_rounds)
-    e, mats, res = projected_spectrum(ts, ops, nkry, residual=True)
+    e, mats, res = projected_spectrum(ts, ops, nkry, residual=True,
+                                      column=column)
     if residual:
         return e, mats, ts.dimension(), res
     return e, mats, ts.dimension()

@@ -181,12 +181,15 @@ def _spectrum_key(Ms,Ws,ops,settings):
 
 
 def session_spectrum(self,ops_terms,nkry,pad_bonds=None,expand_bonds=None,
-        expand_rounds=1,residual=False):
+        expand_rounds=1,residual=False,column=False):
     """(e, mats, dim) of task.projected_spectrum on the chain's session,
     ops_terms a list of (terms of O, terms of O^dagger). pad_bonds and
     expand_bonds as in session_poles. With residual=True a fourth entry
     is the residual norm of every state (task.projected_spectrum), zero
-    for the ones the Krylov space has converged.
+    for the ones the Krylov space has converged. column=True builds row
+    and column 0 of every matrix only, the tangent-tangent block being
+    zero (task.projected_spectrum); it is kept under its own key, so a
+    full build is never served one of these.
 
     The result is kept on the chain under a digest of the arrays it was
     computed from (_spectrum_key), so a second call on the same state, the
@@ -213,14 +216,15 @@ def session_spectrum(self,ops_terms,nkry,pad_bonds=None,expand_bonds=None,
         Ws = s.mpo_site_arrays(s.hamiltonian_mpo())
         ops = [(_v3_arrays(s,t),_v3_arrays(s,td)) for t,td in ops_terms]
     key = _spectrum_key(Ms,Ws,ops,(int(nkry),pad_bonds,expand_bonds,
-            int(expand_rounds)))
+            int(expand_rounds),bool(column)))
     cache = self.__dict__.setdefault("_task_spectrum_cache",{})
     if key in cache:
         cache[key] = cache.pop(key) # most recent last
     else:
         cache[key] = task.spectrum_from_arrays(Ms,Ws,ops,nkry,
                 pad_bonds=pad_bonds,expand_bonds=expand_bonds,
-                expand_rounds=expand_rounds,residual=True)
+                expand_rounds=expand_rounds,residual=True,
+                column=bool(column))
         while len(cache)>SPECTRUM_CACHE_SIZE:
             cache.pop(next(iter(cache)))
     e,mats,dim,res = cache[key]

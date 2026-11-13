@@ -193,6 +193,19 @@ def _spin_matrix_elements_squared(ks, rows=None, cols=None):
     return 0.5*np.abs(Sminus)**2 + 0.5*np.abs(Splus)**2 + np.abs(Sz)**2
 
 
+def _require_full_matrices(ks, what):
+    """Refuse a spectrum that holds only the column of the ground state
+    (taskkondo.TaskKondoSpectrum at order=2, column_only): its
+    tangent-tangent block is zero, and a third-order sum on it would
+    return a plausible but wrong number."""
+    if getattr(ks, "column_only", False):
+        raise ValueError(
+            "%s: this spectrum was built for order=2 and holds only the "
+            "transitions out of the ground state (column_only); the "
+            "third-order sums need the full matrices, built with order=3"
+            % what)
+
+
 def _final_states(ks, occ, eVs):
     """Indices of the final states f whose step is open for at least one
     occupied initial state i and one bias of either tunneling direction:
@@ -426,6 +439,7 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     T/omega0/Gamma0 (e.g. Spin_Chain.get_kondo_spectrum) should build it
     once and pass it to both. Ignored at ks.T==0 (uses the closed-form F0
     instead)."""
+    _require_full_matrices(ks, "third_order_kondo_dIdV")
     eVs = np.asarray(eVs, dtype=float)
     occ = _occupied_states(ks, p_cut) # initial states i that carry weight
     fin = _final_states(ks, occ, eVs) # final states f whose step is open
@@ -595,6 +609,7 @@ def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
     Fb: see third_order_kondo_dIdV's docstring -- pass the same FBuilder
     to both to avoid rebuilding its expensive tabulation twice. Ignored at
     ks.T==0 (uses the closed-form F0 instead)."""
+    _require_full_matrices(ks, "third_order_potential_dIdV")
     eVs = np.asarray(eVs, dtype=float)
     occ = _occupied_states(ks, p_cut) # initial states i that carry weight
     p = ks.p[occ]
