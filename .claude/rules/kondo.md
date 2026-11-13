@@ -362,14 +362,17 @@ operand of 4 d^2 numbers per occupied column), and "block" applies the
 kernel to the vertex and does one product per bias for all the occupied
 columns, twice the arithmetic but the exchange kernel built once per bias
 and nothing that grows with their number. "auto" takes "block" when the
-column form needs `BLOCK_FROM` = 3 or more chunks of columns
-(`_DeviceFlow.column_chunks`). It is a rule on the size, not on the card.
+column form needs `BLOCK_FROM` = 3 or more chunks
+(`_DeviceFlow.column_chunks`) of at most `BLOCK_COLUMNS` = 8 columns each.
+It is a rule on the size, not on the card, and both halves are needed.
 Measured on 2026-11-13, the column form wins with one occupied column on
-both the A2000 and an H200, and in 2 chunks (d=256, 223 columns). The two
-tie in 3 chunks, and the block form wins from 15 chunks on, by up to 6.4
-on the A2000 (d=2048, 114 columns) and 4.8 on the H200 (d=8192, 24
-columns). Do not key it on the card again: an earlier rule put it out of
-reach after the A2000 runs, which had at most 2 chunks.
+both the A2000 and an H200. It also wins with 122 or 30 columns per chunk
+(d=256, 512), even in 18 chunks, by up to 1.45. With 7 per chunk (d=1024)
+the block form wins by about 1.1, and with 1 per chunk by 2.8 to 6.4 on
+the A2000 (d=2048) and 4.8 on the H200 (d=8192, 24 columns). Do not key
+it on the card: an earlier rule put the block form out of reach after the
+small A2000 runs, and a rule on chunks alone, committed for one hour,
+took it at d=512 where it loses.
 `tests/test_kondo_leading_log_device.py` pins the rule. With `mem_gb` the biases are chunked by
 `leadinglog_device.memory_model` on the device. The exchange sum runs on
 the card there, which does not touch the author's one-core rule for

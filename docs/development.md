@@ -6331,7 +6331,8 @@ compares the two routes case by case. `mem_gb` reads
 `leadinglog_device.allocator_budget()`, 0.95 of the limit of JAX's
 allocator, so a flow that would not fit is cut in chunks instead of failing
 with RESOURCE_EXHAUSTED. The tip part takes the block form when the column
-form needs `BLOCK_FROM` (3) or more chunks of occupied columns.
+form needs `BLOCK_FROM` (3) or more chunks of at most `BLOCK_COLUMNS` (8)
+occupied columns each.
 Measurements are in the method's README, section 7.
 
 ### 4.8d Kondo screening on a Wilson chain (`wilsonchain.py`, `kondoscreening.py`)

@@ -55,16 +55,19 @@ CHUNK_BYTES = 512e6
 # every chunk of columns; "block" applies the kernel to the vertex and does
 # one product per bias for all the columns, with twice the arithmetic.
 # "auto" takes "block" when the column form needs BLOCK_FROM or more chunks
-# of columns, so for many occupied states of a large impurity. Measured,
-# per right-hand side or per flow at 61 biases: the column form wins with
-# one occupied state (9 to 13 spins, on the RTX A2000 of d22 and on an
-# H200) and in 2 chunks (A2000, d=256, 223 columns: 164 s against 308 s);
-# the two tie in 3 chunks (A2000, d=1024: 1.10 s against 1.03 s); the
-# block form wins in 15 chunks (A2000, d=1024: 4.04 s against 3.42 s), in
-# 16 and 114 chunks (A2000, d=2048: 2.8 and 6.4 times) and in 24 chunks
-# (H200, d=8192, 24 columns: 3013 s against 632 s).
+# of at most BLOCK_COLUMNS columns each: many occupied states of an impurity
+# so large that a chunk holds few of them, since the column form builds the
+# exchange kernel again for every chunk. Measured on the RTX A2000 of d22,
+# one right-hand side at 61 biases, real route: with 122 or 30 columns per
+# chunk (d=256, 512) the column form wins in 3 to 18 chunks, by up to 1.45;
+# with 7 (d=1024) the block form wins by 1.07 in 3 chunks and 1.18 in 15;
+# with 1 (d=2048) by 2.8 in 16 chunks and 6.4 in 114. On an H200, d=8192
+# and 24 columns, the whole flow took 3013 s in the column form and 632 s in
+# the block form. With one occupied state the column form wins on both
+# cards (455 s against 529 s at 13 spins on the H200).
 TIP_FORM = "auto"
 BLOCK_FROM = 3
+BLOCK_COLUMNS = 8
 
 # scipy.integrate._ivp.rk
 SAFETY, MIN_FACTOR, MAX_FACTOR = 0.9, 0.2, 10.
@@ -306,7 +309,8 @@ class _DeviceFlow():
         self.column_chunks = -(-m//mc)
         form = TIP_FORM
         if form == "auto":
-            form = "block" if self.column_chunks >= BLOCK_FROM else "columns"
+            form = ("block" if mc <= BLOCK_COLUMNS and self.column_chunks >= BLOCK_FROM
+                    else "columns")
         if form not in ("block", "columns"):
             raise ValueError("TIP_FORM must be \"auto\", \"block\" or \"columns\", got %r"
                              % (TIP_FORM,))

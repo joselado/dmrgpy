@@ -1552,3 +1552,17 @@ return the thermal leading-log spectrum, whose first order is the thermal
 third order. At `T=0` the code path is the same as before, line for line,
 so no `T=0` number changes. The `info` dict of `leading_log_dIdV` has two
 new entries, `n_occ` and `n_chunks`.
+
+## The 2026-11-13 leading-log flow on a GPU
+
+With the JAX backend on a GPU, `leading_log_dIdV` now plans for at most
+0.95 of the limit of JAX's allocator, which is
+`XLA_PYTHON_CLIENT_MEM_FRACTION` of the card, 0.75 by default. A flow
+above it is cut in chunks of biases, also with `mem_gb=None`. A larger
+`mem_gb` warns and is lowered to it. When not even 8 biases fit, it raises
+a `ValueError` before the flow starts. Before, such a flow ran for
+minutes and then failed with RESOURCE_EXHAUSTED. The tip part now takes
+its block form when the occupied columns need 3 or more chunks of at most
+8 columns. The two
+forms agree to 1.2e-15, so no number changes beyond roundoff. The NumPy
+route and JAX's CPU device are unchanged.

@@ -167,22 +167,25 @@ def test_mem_gb_chunks_the_biases_by_the_device_model(on_jax):
     assert np.max(np.abs(cut[0]/one[0] - 1)) < 1e-10
 
 
-def test_auto_takes_the_block_form_from_three_chunks_of_columns(on_jax, monkeypatch):
-    """"auto" keeps the column form while the occupied columns fit in fewer
-    than BLOCK_FROM chunks of CHUNK_BYTES, and takes the block form from
-    there: 8 columns of 2*4*d^2 doubles each, d=8, in 1, 2 and 3 chunks."""
+def test_auto_takes_the_block_form_for_many_small_chunks_of_columns(on_jax, monkeypatch):
+    """"auto" takes the block form only when the column form needs
+    BLOCK_FROM or more chunks of at most BLOCK_COLUMNS columns each; one
+    column holds 2*4*d^2 doubles. 8 columns at d=8 in 1, 2 and 3 chunks,
+    and 32 columns at d=32 in chunks of 9 and of 8."""
     from dmrgpy.kondospectrumtk.conductance import _occupied_states
-    ks = _chain(3, T=2.)
-    e, occ = np.asarray(ks.e, dtype=float), _occupied_states(ks)
-    assert len(e) == 8 and len(occ) == 8 and leadinglog_device.BLOCK_FROM == 3
+    assert leadinglog_device.BLOCK_FROM == 3 and leadinglog_device.BLOCK_COLUMNS == 8
     monkeypatch.setattr(leadinglog_device, "TIP_FORM", "auto")
     got = []
-    for per_chunk in (8, 4, 3):
-        monkeypatch.setattr(leadinglog_device, "CHUNK_BYTES", per_chunk*2*4*8*8*8)
+    for n, T, per_chunk in ((3, 2., 8), (3, 2., 4), (3, 2., 3), (5, 50., 9), (5, 50., 8)):
+        ks = _chain(n, T=T)
+        e, occ = np.asarray(ks.e, dtype=float), _occupied_states(ks)
+        assert len(occ) == len(e) == 2**n
+        monkeypatch.setattr(leadinglog_device, "CHUNK_BYTES", per_chunk*2*4*len(e)**2*8)
         flow = leadinglog_device._DeviceFlow(e, np.array([0.]), occ, 20e-3, 5e-6, True,
                                              None, None)
         got.append((flow.column_chunks, flow.form))
-    assert got == [(1, "columns"), (2, "columns"), (3, "block")]
+    assert got == [(1, "columns"), (2, "columns"), (3, "block"), (4, "columns"),
+                   (4, "block")]
 
 
 def test_the_allocator_limit_caps_the_budget(on_jax, monkeypatch):
@@ -191,7 +194,8 @@ def test_the_allocator_limit_caps_the_budget(on_jax, monkeypatch):
     larger mem_gb warns and is lowered to it, and when not even 8 biases fit
     under it the error names XLA_PYTHON_CLIENT_MEM_FRACTION. JAX's CPU
     device reports no limit, so nothing changes there."""
-    assert leadinglog_device.allocator_budget() is None
+    if backend._JAX.devices()[0].platform == "cpu":
+        assert leadinglog_device.allocator_budget() is None
     ks = _chain(3, T=2.)
     eVs = np.linspace(-3e-3, 3e-3, 24) + 1.3e-5
     fixed, per_w = leadinglog_device.memory_model(ks.dim, 8, real=True)

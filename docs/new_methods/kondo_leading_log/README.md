@@ -482,21 +482,26 @@ so each chunk of occupied columns has operands of 4 d^2 numbers per
 column, and it builds the exchange kernel again. "block" applies the
 kernel to the vertex and does one product per bias for all the occupied
 columns. It has twice the arithmetic, but the kernel is built once per
-bias. What decides between them is the number of chunks of
-`CHUNK_BYTES` that the occupied columns need in the column form, since
-every chunk builds the exchange kernel again. From 11 spins on one column
-is already a chunk. With one occupied state the column form wins on both
+bias. What decides between them is how the occupied columns split into
+chunks of `CHUNK_BYTES` in the column form, since every chunk builds the
+exchange kernel again. A chunk holds 122 columns at 8 spins, 30 at 9, 7
+at 10, and from 11 spins on one column is already a chunk. With one occupied state the column form wins on both
 cards: 41 s against 78 s at 9 spins, 283 s against 364 s at 10 spins and
 116 s against 185 s on the complex route on the A2000, and 455 s against
 529 s at 13 spins on the H200. In 2 chunks it still wins (A2000, 8 spins,
 223 occupied states: 164 s against 308 s). One right-hand side on the
-A2000 ties in 3 chunks (10 spins, 17 occupied states: 1.10 s against
-1.03 s). The block form then wins in 15 chunks (10 spins, 102 states:
-4.04 s against 3.42 s), in 16 chunks (11 spins, 16 states: 15.1 s against
-5.3 s) and in 114 chunks (11 spins, 114 states: 96.8 s against 15.2 s).
-On the H200 at 13 spins and 24 states, in 24 chunks, the whole flow takes
-3013 s in the column form and 632 s in the block form. So "auto" takes
-the block form from 3 chunks (`BLOCK_FROM`). The two forms agree to
+A2000 shows that many chunks are not enough. With 122 or 30 columns per
+chunk the column form still wins in 3 to 18 chunks (8 spins, 256 states:
+0.44 s against 0.51 s; 9 spins, 67, 202 and 511 states: 0.54, 1.01 and
+2.48 s against 0.58, 1.46 and 3.45 s). With 7 columns per chunk the block
+form wins narrowly (10 spins, 17 states in 3 chunks: 1.03 s against
+1.10 s; 102 states in 15 chunks: 3.42 s against 4.04 s). With 1 column
+per chunk it wins by far (11 spins, 16 states: 5.3 s against 15.1 s; 114
+states: 15.2 s against 96.8 s). On the H200 at 13 spins and 24 states,
+in 24 chunks, the whole flow takes 3013 s in the column form and 632 s in
+the block form. So "auto" takes the block form when the column form needs
+3 or more chunks (`BLOCK_FROM`) of at most 8 columns each
+(`BLOCK_COLUMNS`). The two forms agree to
 1.2e-15 at every size measured on the H200.
 
 What is not done. The tip vertex is integrated as part of the state, so
@@ -661,5 +666,6 @@ the RTX A2000 of d22 it is 2 to 4 times faster than six cores at 9 and
 
 2026-11-13: on an H200 the flow takes 455 s at 13 spins and T=0, and
 632 s at 0.5 K with 24 occupied states (section 7). "auto" takes the
-block form of the tip part from 3 chunks of occupied columns, and the
-memory budget is capped at the allocator limit of JAX.
+block form of the tip part when the occupied columns need 3 or more
+chunks of at most 8 columns, and the memory budget is capped at the
+allocator limit of JAX.
