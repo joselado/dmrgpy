@@ -271,7 +271,8 @@ def _triple_product_coefficients(ks, occ=None, fin=None):
     of the result then runs over occ, in that order); None means all of
     them, i.e. the full dim^3 tensor -- only worth paying for when every
     state is thermally occupied. fin: the same for the final states f (the
-    second axis); None is every state."""
+    second axis); None is every state. This complex einsum is the
+    reference the tests read; the sums build Im of it with _levi_civita."""
     Xi = np.stack([ks.Sx, ks.Sy, ks.Sz], axis=-1) # Xi[a,b,alpha]=<a|S_alpha|b>
     if occ is None: occ = np.arange(ks.dim)
     if fin is None: fin = np.arange(ks.dim)

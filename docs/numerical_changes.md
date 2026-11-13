@@ -1584,3 +1584,35 @@ gives the same number.
 
 `get_kondo_spectrum(order="LL")` now takes `mem_gb`, which used to raise a
 `TypeError`. Without it nothing changes.
+
+## The 2026-11-14 speedups of the ED Kondo route
+
+The changes of `docs/kondo_speedup_plan.md` (items 1, 3, 4, 5 and 6; item
+2 was measured and not applied) move no `get_kondo_spectrum(mode="ED")`
+curve above roundoff. On the three
+chains of the plan the curves agree with the code before to $2.1\times
+10^{-15}$ of their peak at $T=0$, 1 K and 20 K, and the tests hold every
+term to $10^{-12}$ or better against the old form, on real and complex
+Hamiltonians, with degenerate levels, and with blocks of one state.
+
+One number moves above $10^{-14}$ of itself.
+`conductance.third_order_potential_dIdV` at $T>0$ now reads its $-eV$
+direction off the $eV$ one, since $F$ is even. The table of `FBuilder`
+is even only to about $10^{-14}$ of $F$, and where the term is a near
+cancellation this is a larger part of it: on 8 spins at 1000 K, where the
+term is $10^{-7}$ of its scale, it moves by $2\times 10^{-11}$ of itself,
+which is $2\times 10^{-18}$ of the second-order term. A callable `Fb`
+without `odd_part` keeps the old form exactly.
+
+`stepfunctions.Theta` has the right cubic term below $\lvert x\rvert =
+10^{-4}$ ($-x^3/180$, was $-x^3/360$) and the right tail above
+$\lvert x\rvert = 40$ ($(\lvert x\rvert - 1)e^{-\lvert x\rvert}$, was
+$(\lvert x\rvert + 1)e^{-\lvert x\rvert}$). Theta moves by at most
+$2.7\times 10^{-15}$, and no dI/dV above roundoff.
+
+A spectrum whose matrices are real for $S_x$ and $S_z$ and imaginary for
+$S_y$ (every ED spectrum of a real $H$, and the TASK and Krylov spectra
+when theirs are) now builds its Levi-Civita coefficients in real
+arithmetic, and the real eigh of a real $H$ picks another basis inside a
+degenerate level than the complex one did. Both move the curves at
+roundoff only, since every sum is a trace over each level.

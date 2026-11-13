@@ -194,11 +194,12 @@ initial states with the relative `P_CUT` of the third-order terms
 (`p_cut=0` is the full sum) and builds its Theta arrays per block of
 `CHUNK_ENTRIES`; it was O(n_eV dim^2) in time and memory (6.5 GB at 904
 TASK states and 241 biases). `third_order_kondo_dIdV` builds its
-coefficient tensor per block of occupied states under `COEFF_BYTES`, with
-BOTH tunnelling directions inside each block and the exchange diagram
-accumulated per group of biases under `EXCHANGE_BYTES`: one block is the
-old code path, and building the blocks once per direction cost 36 to 46%,
-so do NOT split them by direction. `FBuilder.__call__` evaluates F0 only
+coefficient tensor per block under `COEFF_BYTES`, with BOTH tunnelling
+directions inside each block: one block is the old code path, and building
+the blocks once per direction cost 36 to 46%, so do NOT split them by
+direction (since 2026-11-14 the blocks are over a shared index and the
+exchange accumulators of `EXCHANGE_BYTES` are gone, see the next
+paragraph). `FBuilder.__call__` evaluates F0 only
 outside its table; `Theta_prime` is a series below |x|=0.05, where the
 closed form lost every digit; the table is accurate for omega0 >~ kT only
 (2e-4 of F off for omega0 << kT, outside the paper's regimes, left as it
@@ -222,6 +223,55 @@ route warns when `es` cuts the elastic line or stops below max|eV|. In
 anything is built. Not applied: computing Sz once for the second-order
 and potential terms of the correlator route (8% of the call on HEAD, re-measured
 2026-11-13 after finding 11; 4% before it).
+
+**The 2026-11-14 speedups of the ED route** (`docs/kondo_speedup_plan.md`
+items 1 to 6; `tests/test_kondo_speedups_ed.py` pins each one by its
+numbers against the old form kept there and by a count of what it saves).
+On one core the 10-spin chain of the plan went from 5.4 s to 1.1 s at T=0
+and from 6.7 s to 2.4 s at 1 K, and 9 spins at 20 K from 20.2 s to 7.7 s,
+with every curve within 2.1e-15 of its peak of the old one. Six rules come with it.
+(1) The second- and third-order sums skip the final states f whose step
+is closed for every occupied state and bias (`_final_states`:
+min_i (e_f - e_i) <= max|eV|, plus `THETA_CUT` = 40 kT at T>0), exactly 0
+at T=0 and below 1.7e-16 at T>0. It is a mask and not a prefix, since the
+TASK and Krylov spectra need not be sorted, and m is never cut, since it is
+virtual. (2) A real H runs real: `edkondo.eigenpairs` diagonalizes it with
+a real eigh when its matrix has no imaginary part (exact zeros, not a
+tolerance), keeps the pairs per ED object (`_REAL_EIGH`, weak) and leaves
+the ED object's own complex `get_diagonalized_hamiltonian`, which
+`edtk/dynamics.py` reads, untouched; Sx and Sz come out real and Sy as i
+times a real matrix, and `conductance._spin_triplet` reads that form off
+the arrays. Read a sparse matrix through a COO copy (`edkondo._values`),
+never through `m.imag.count_nonzero()`: `m.imag` shares its data with m,
+and count_nonzero sums duplicates in place, which made H non-Hermitian on
+a mixed S=1 and S=1/2 chain (H not in canonical form) and moved its Kondo
+spectrum by 1% of the peak. (3) On that form R = Im coeff is the real
+triple product of (Sx, Im Sy, Sz), since every Levi-Civita term holds Sy
+once (`_levi_civita`): a numba kernel above `NUMBA_ENTRIES` = 4e6 entries
+(3.7 ns per entry, against 72 ns for the complex einsum) and NumPy below,
+because the kernel's first call in a process costs 0.4 s even from its
+disk cache; both make the same operations in the same order. (4) F is
+even, and that is used only exactly (F0 at T=0, with arguments that are
+exact negatives) or when `FBuilder.odd_part`, measured at construction and
+about 1e-14, is below `EVEN_TOL` = 1e-13; any other F keeps the exact form.
+The potential term is chunked over biases and its two F arrays serve both
+directions. (5) Several blocks of coefficients are blocks over a hub index
+(`_kondo_hub_blocks`): R is symmetric under every permutation of (i,f,m)
+for Hermitian spin matrices, the direct diagram is complete on a block of
+initial states and the exchange diagram on a block of final states, so
+every coefficient is built once per call, the direct diagram reads its F
+off the exchange tables of the other direction, and the exchange Theta of
+an occupied state is 1 minus the direct one. Do NOT go back to groups of
+biases with exchange accumulators: they built the blocks again for every
+group (7 times at 917 occupied states of 1024 and 241 biases). (6) Theta's
+series below |x| = 1e-4 is 1/2 + x/6 - x^3/180 and its tail above 40 is
+(|x|-1) e^-|x|; the closed form just above 1e-4 loses up to 2e-13 to
+cancellation, which is left as it is. Item 2 of the plan, the s->t
+exchange table read as the transposed t->s one, was measured and not
+applied: after the cut of final states it saves n_f/(2 dim) of the F
+entries, and it gave 0, 4 and 2% on the three chains, the copies of the
+transposed block eating the rest. The plan's cache of the eigenbasis spin
+operators per ED object and site (item 3) was not done.
 
 **Spinful fermion chains (2026-10-22).** `get_kondo_spectrum` lives on
 `kondospectrumtk/kondomethod.py::KondoSpectrumMixin`, inherited by
