@@ -78,8 +78,6 @@ def run(src, case, profile):
 
 
 def main():
-    sys.path.insert(0, HERE)
-    import cases
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--case")
     p.add_argument("--src", action="append", default=[])
@@ -91,6 +89,12 @@ def main():
                    help="run the case once in this process, for a smoke test "
                         "(one Python process; not for timing two trees)")
     a = p.parse_args()
+    # cases.py imports dmrgpy: from the first tree given, or from this
+    # checkout, never from whatever an installed copy would give
+    src0 = os.path.abspath(a.src[0]) if a.src else os.path.join(HERE, "..", "..", "src")
+    sys.path.insert(0, src0)
+    sys.path.insert(0, HERE)
+    import cases
     if a.list:
         for i, (k, c) in enumerate(cases.CASES.items()):
             print(i, k, "--", c["what"])
