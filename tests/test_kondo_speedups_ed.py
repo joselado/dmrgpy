@@ -315,3 +315,62 @@ def test_real_eigenpairs_are_kept_and_the_ed_object_is_untouched(monkeypatch):
     sc.set_hamiltonian(sc.hamiltonian + 1e-4*sc.Sz[1]) # a new H: a new eigh
     KondoSpectrum(sc, 0, 0.)
     assert len(calls) == 3
+
+
+# item 5: the potential term in chunks of biases, two F arrays by evenness
+
+
+def test_fbuilder_is_even_to_roundoff():
+    """What the even forms rest on at T>0: the table of FBuilder is even to
+    its roundoff, which it measures at construction (odd_part)."""
+    for T in (0.5, 2.0, 20.0):
+        fb = cd.FBuilder(T, omega0=20e-3, Gamma0=5e-6)
+        assert fb.odd_part < cd.EVEN_TOL
+    assert cd.FBuilder(2.0, tabulate=False).odd_part is None
+
+
+def test_potential_term_halves_F_at_zero_temperature(monkeypatch):
+    ks = KondoSpectrum(_chain(), 0, 0.)
+    nocc = len(cd._occupied_states(ks))
+    ref = _old_potential(ks, EV, -0.05, 0.2)
+    calls = _patch_F0(monkeypatch)
+    got = cd.third_order_potential_dIdV(ks, EV, -0.05, 0.2)
+    assert _rel(got, ref) < 1e-14
+    assert sum(calls) == 2*len(EV)*nocc*ks.dim # four arrays before
+
+
+@pytest.mark.parametrize("trust", [True, False])
+def test_potential_term_at_finite_temperature(trust):
+    """The even form only when the FBuilder says its table is even; a
+    callable without odd_part keeps the four arrays."""
+    ks = KondoSpectrum(_chain(), 0, 2.0)
+    nocc = len(cd._occupied_states(ks))
+    fb = cd.FBuilder(2.0, omega0=20e-3, Gamma0=5e-6)
+    ref = _old_potential(ks, EV, -0.05, 0.2, Fb=fb)
+    F = _CountF(fb)
+    if not trust: del F.odd_part
+    got = cd.third_order_potential_dIdV(ks, EV, -0.05, 0.2, Fb=F)
+    assert _rel(got, ref) < (1e-12 if trust else 1e-14)
+    assert F.n == (2 if trust else 4)*len(EV)*nocc*ks.dim
+
+
+def test_potential_term_memory_is_chunked(monkeypatch):
+    """Every state occupied (8 spins at 1000 K) and 61 biases: the old term
+    made its four (61, 256, 256) arrays at once, about 130 MB. The exact
+    form is used here: at 1000 K the term is a near cancellation, 1e-7 of
+    its scale, and the 1e-14 odd part of the table is 2e-11 of the term."""
+    import tracemalloc
+    ks = KondoSpectrum(_chain(n=8), 0, 1000.)
+    assert len(cd._occupied_states(ks)) == ks.dim == 256
+    eV = np.linspace(-5e-3, 5e-3, 61)
+    fb = cd.FBuilder(1000., omega0=20e-3, Gamma0=5e-6)
+    ref = _old_potential(ks, eV, -0.05, 0.2, Fb=fb)
+    F = _CountF(fb)
+    del F.odd_part
+    monkeypatch.setattr(cd, "CHUNK_ENTRIES", 2e5)
+    tracemalloc.start()
+    got = cd.third_order_potential_dIdV(ks, eV, -0.05, 0.2, Fb=F)
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert peak < 20e6
+    assert _rel(got, ref) < 1e-13

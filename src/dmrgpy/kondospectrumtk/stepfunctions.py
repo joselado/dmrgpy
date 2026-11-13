@@ -201,7 +201,13 @@ class FBuilder():
     F-bound.
 
     tabulate=False skips the table and has __call__ run the convolution
-    directly (_direct), for validating the spline against it."""
+    directly (_direct), for validating the spline against it.
+
+    odd_part is max |F(x) - F(-x)| over the nodes of the table and the
+    midpoints between them, relative to max |F| there: F is even, and the
+    table is even to roundoff (about 1e-14), which conductance.py checks
+    before it reads an s->t table off a t->s one (EVEN_TOL). It is None
+    without a table, and the exact form is kept then."""
     def __init__(self, T, omega0=20e-3, Gamma0=5e-6, kB=8.617333262e-5,
                  npts=4001, width=60., grid_span=10., tabulate=True):
         if T <= 0.: raise ValueError("F(eps,T) requires T>0")
@@ -210,6 +216,7 @@ class FBuilder():
         self.Gamma0 = Gamma0
         self._npts, self._width = npts, width
         self._F_spline = None
+        self.odd_part = None
         if tabulate:
             kT = self.kT
             dense = np.linspace(-40*kT, 40*kT, 1601)
@@ -222,6 +229,9 @@ class FBuilder():
             self._F_spline = CubicSpline(grid, self._direct(grid),
                                          extrapolate=False)
             self._F_min, self._F_max = grid[0], grid[-1]
+            x = np.concatenate([grid, 0.5*(grid[1:] + grid[:-1])])
+            Fx = self(x)
+            self.odd_part = float(np.max(np.abs(Fx - self(-x)))/np.max(np.abs(Fx)))
     def _direct(self, x):
         return _F_convolve(x, self.kT, self.omega0, self.Gamma0,
                            npts=self._npts, width=self._width)

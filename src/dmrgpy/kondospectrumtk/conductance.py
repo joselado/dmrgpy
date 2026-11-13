@@ -162,6 +162,24 @@ def _get_F(ks, omega0, Gamma0, Fb):
     return Fb
 
 
+# F is even, F(-x) = F(x), so a table of F at -eV can be read off one at eV
+# with the other sign of the energy difference: the potential term's -eV
+# direction is minus its eV sum, and the direct diagram's F(eV - (e_m - e_i))
+# is the exchange table F(-eV - (e_i - e_m)). F0 (T=0) is even exactly, and
+# the arguments are exact negatives, so nothing moves. At T>0 the table of an
+# FBuilder is even to its odd_part, about 1e-14 of F (the roundoff of its
+# nodes and of the convolution), and it is relied on only below EVEN_TOL; any
+# other F keeps the exact form.
+EVEN_TOL = 1e-13
+
+
+def _F_is_even(ks, Fcall):
+    """Whether Fcall may be read as even, see EVEN_TOL."""
+    if ks.T == 0.: return True
+    odd = getattr(Fcall, "odd_part", None)
+    return odd is not None and odd <= EVEN_TOL
+
+
 def _spin_matrix_elements_squared(ks, rows=None, cols=None):
     """|M_if|^2 = 1/2|<f|S-|i>|^2 + 1/2|<f|S+|i>|^2 + |<f|Sz|i>|^2,
     eq. "SA-transitionmatrix" (unpolarized tip and sample). rows and cols
@@ -534,6 +552,10 @@ def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
     of Fig. 3c (its "sum" curve is antisymmetric about zero bias) and the
     source of the asymmetry in Fig. 3d.
 
+    The F arrays are made for blocks of bias points of about CHUNK_ENTRIES
+    entries, and when F is even (EVEN_TOL) the two arrays at eV serve the
+    -eV direction too.
+
     Fb: see third_order_kondo_dIdV's docstring -- pass the same FBuilder
     to both to avoid rebuilding its expensive tabulation twice. Ignored at
     ks.T==0 (uses the closed-form F0 instead)."""
@@ -545,14 +567,25 @@ def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
     loop = np.real(np.einsum('imk,mik->im', Xi[occ, :, :], Xi[:, occ, :]))
     eps_im = ks.e[None, :] - ks.e[occ, None] # eps_im[i,m] = e_m - e_i
     Fcall = _get_F(ks, omega0, Gamma0, Fb)
+    even = _F_is_even(ks, Fcall) # see EVEN_TOL
     dim, nocc = ks.dim, len(occ)
+    chunk = max(1, int(CHUNK_ENTRIES)//(2*nocc*dim)) # biases per pair of F arrays
 
-    def one_direction(v):
+    def weighted(v):
         Fim = Fcall((v[:, None, None] - eps_im[None, :, :]).ravel()).reshape(len(v), nocc, dim)
         Fmi = Fcall((v[:, None, None] + eps_im[None, :, :]).ravel()).reshape(len(v), nocc, dim)
         # direct MINUS exchange: the m=i (eps_im=0) terms cancel here
-        weighted = np.einsum('i,im,eim->e', p, loop, Fim - Fmi, optimize=True)
-        return weighted*_theta_raw(ks, v)
+        return np.einsum('i,im,eim->e', p, loop, Fim - Fmi, optimize=True)
 
-    total = one_direction(eVs) - one_direction(-eVs) # eq. "asym_U": sign flips
+    total = np.empty(len(eVs))
+    for s0 in range(0, len(eVs), chunk):
+        v = eVs[s0:s0+chunk]
+        if even:
+            # F(-v - eps) = F(v + eps) and F(-v + eps) = F(v - eps), so the -v
+            # direction is minus the same sum: two F arrays serve both
+            w = weighted(v)
+            total[s0:s0+len(v)] = w*_theta_raw(ks, v) + w*_theta_raw(ks, -v)
+        else: # eq. "asym_U": the sign flips with the direction
+            total[s0:s0+len(v)] = (weighted(v)*_theta_raw(ks, v)
+                                   - weighted(-v)*_theta_raw(ks, -v))
     return 4*np.pi*T0**2*Jrho_s*U*total
