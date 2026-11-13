@@ -75,7 +75,8 @@ def test_mem_gb_reaches_the_leading_log_flow(monkeypatch):
     eV = np.linspace(-3e-3, 3e-3, 24) + 1e-5
     kw = dict(site=0, Jrho_s=-0.05, U=0.2, T=2.0, order="LL")
     ks = edkondo.KondoSpectrum(sc, 0, 2.0)
-    fixed, per_w = leadinglog.memory_model(len(ks.e), len(conductance._occupied_states(ks)))
+    real = leadinglog._block_is_real(leadinglog._spin_ops(ks))
+    fixed, per_w = leadinglog.memory_model(len(ks.e), len(conductance._occupied_states(ks)), real)
     mem_gb = (fixed + 16*per_w)*1.01/1e9  # 8 biases per flow, so 3 flows
     chunks = []
     original = leadinglog.leading_log_dIdV

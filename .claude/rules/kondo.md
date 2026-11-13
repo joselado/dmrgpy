@@ -387,7 +387,15 @@ T=0 one on 6 spins; what T really adds is occupied states, linear in their
 number (`p_cut`), and memory (`memory_model`, `mem_gb` chunks the biases).
 It came from a script on top of dmrgpy in a 1T-TaSe2 project (`llT.py`) and
 agrees with it to 1e-15. README section 8,
-`tests/test_kondo_leading_log_thermal.py`.
+`tests/test_kondo_leading_log_thermal.py`. Since 2026-11-14
+`memory_model(d, m, real)` counts real numbers when the flow takes the real
+route (the same `_block_is_real` test), as the device model already did;
+the complex count cut twice as many chunks as needed with `mem_gb` (on 8
+spins at 2 K a budget of 12 GB peaked at 5.8 GB). `mem_gb` stays None by
+default (the decider's pick), and a flow that the model puts above
+`usable_memory()` (the tightest cgroup limit minus its usage, else
+MemAvailable) warns and names `mem_gb`; do not turn the warning into an
+automatic budget without a pick (`tests/test_kondo_speedups_ll.py`).
 
 **The leading-log flow is one solve on the occupied columns (2026-11-11).**
 `leadinglog._joint_flow` integrates G, A_on and the tip vertex at every

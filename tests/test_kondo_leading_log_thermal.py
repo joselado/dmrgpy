@@ -171,7 +171,11 @@ def test_bias_chunks_give_the_one_flow_result():
     ks = spin1(0.3)
     eV = np.linspace(-2.4, 2.4, 24) + 1e-3
     one, i1 = ll(ks, eV, -0.05, U=0.25, return_info=True)
-    cut, i3 = ll(ks, eV, -0.05, U=0.25, return_info=True, mem_gb=3e-4)
+    # 8 biases per flow by the count of the route the flow takes, so 3 flows
+    real = leadinglog._block_is_real(leadinglog._spin_ops(ks))
+    fixed, per_w = leadinglog.memory_model(len(ks.e), len(conductance._occupied_states(ks)), real)
+    cut, i3 = ll(ks, eV, -0.05, U=0.25, return_info=True,
+                 mem_gb=(fixed + 16*per_w)*1.01/1e9)
     assert i1["n_chunks"] == 1 and i3["n_chunks"] == 3
     assert np.max(np.abs(cut/one - 1)) < 1e-10
     with pytest.raises(ValueError):
