@@ -247,6 +247,61 @@ def real_if_exact(arrays):
     return [xp.asarray(np.asarray(a, dtype=complex)) for a in arrays]
 
 
+def real_up_to_phase(Ws, tol=1e-13):
+    """(phase, real arrays) when the MPO arrays Ws are a global phase times
+    a real MPO site by site, every site tensor a phase times a real tensor
+    to tol of its largest entry; (1.0, Ws) unchanged otherwise.
+
+    compress_mpo writes S_y = i times a real operator as complex site
+    tensors with a phase on each (from its SVDs), so on a real basis every
+    application of it promoted the real rows and ran in complex arithmetic.
+    The product of the site phases is snapped to 1, -1, i or -i when it is
+    one of them to rounding, so that i S_y comes out exactly real. The
+    tensors are small (bond dimension 1 for a one-site operator) and are
+    split on the host."""
+    xp = backend.xp()
+    host = [backend.to_host(W) for W in Ws]
+    if all(not np.iscomplexobj(W) for W in host):
+        return 1.0, list(Ws)
+    phase, out = 1.0 + 0j, []
+    for W in host:
+        k = int(np.argmax(np.abs(W)))
+        top = complex(W.flat[k])
+        if top == 0.0:
+            return 1.0, list(Ws)
+        p = top / abs(top)
+        R = W / p
+        if float(np.max(np.abs(R.imag))) > tol * abs(top):
+            return 1.0, list(Ws)
+        phase *= p
+        out.append(np.ascontiguousarray(R.real))
+    for exact in (1.0, -1.0, 1j, -1j):
+        if abs(phase - exact) < 1e-12:
+            phase = exact
+            break
+    return phase, [xp.asarray(R) for R in out]
+
+
+def _exact_phase_form(M, phase, tol=1e-12):
+    """M as phase times a real matrix with exact zeros, when phase is 1,
+    -1, i or -i and M / phase is real to tol of its largest entry; M
+    otherwise. On a real basis the matrix of i times a real operator is
+    imaginary up to the rounding of its column, and conductance.py reads
+    that form off exact zeros (_spin_triplet) to take its real route."""
+    if phase not in (1.0, -1.0, 1j, -1j):
+        return M
+    R = M * np.conj(phase)  # exact for these four
+    if float(np.max(np.abs(R.imag), initial=0.)) > tol * max(
+            float(np.max(np.abs(R), initial=0.)), 1e-300):
+        return M
+    out = np.zeros(M.shape, dtype=complex)
+    if phase in (1.0, -1.0):
+        out.real = phase.real * R.real
+    else:
+        out.imag = phase.imag * R.real
+    return out
+
+
 # The largest tangent space pad_bonds may ask for. Measured on d22 (v3,
 # 21-site BCS Wilson chain, nkry = 100): pad_bonds=256 gives 2621439 and a
 # peak of about 1.9 GB in 2114 s; "full" there would be 4^21.
@@ -1286,24 +1341,37 @@ def projected_spectrum(ts, ops, nkry, residual=False, column=False):
     def overlaps(v):  # <q_i|v> for the n basis vectors, on the host
         return backend.to_host(backend.row_overlaps(store, v, n))[:n]
 
+    xp = backend.xp()
+    # A real basis (a real state and H, real_starts) has a real U as well,
+    # and there an operator that is a phase times a real one (S_y = i times
+    # a real operator) is applied as the real one, with the phase put back
+    # on the matrix: real arithmetic in every application, in the overlaps
+    # and in the Ritz transform, and S_y comes out imaginary with exact
+    # zeros (_exact_phase_form), the form conductance.py reads to run its
+    # own sums in real arithmetic. A complex basis keeps complex arithmetic.
+    real_basis = not np.issubdtype(np.dtype(store.dtype), np.complexfloating)
     mats = []
     for (W, Wd), bk, bdk in zip(ops, b, bd):
-        op = ts.operator(compress_mpo(W))
+        Wc = compress_mpo(W)
+        phase, Wc = real_up_to_phase(Wc) if real_basis else (1.0, Wc)
+        op = ts.operator(Wc)
         M = np.zeros((n + 1, n + 1), dtype=complex)
-        M[0, 0] = ts.expectation(op)
+        M[0, 0] = phase * ts.expectation(op)
         M[1:, 0] = Uh @ overlaps(ts.flat(bk))
         M[0, 1:] = (Uh @ overlaps(ts.flat(bdk))).conj()
+        if not column:
+            real = real_basis and not any(xp.iscomplexobj(x) for x in Wc)
+            G = np.zeros((n, n), dtype=float if real else complex)  # <q_i|O|q_j>
+            nb = ts.batch_size(op)
+            for j0 in range(0, n, nb):  # the basis in stacks, not vector by vector
+                j1 = min(n, j0 + nb)
+                ys = ts.flat_many(ts.apply_many(op, ts.unflat_many(store[j0:j1])))
+                G[:, j0:j1] = _overlap_columns(store, ys, n)
+                del ys
+            M[1:, 1:] = phase * (Uh @ G @ U)
+        if real_basis:
+            M = _exact_phase_form(M, phase)
         mats.append(M)
-        if column:
-            continue
-        G = np.zeros((n, n), dtype=complex)  # <q_i|O|q_j>
-        nb = ts.batch_size(op)
-        for j0 in range(0, n, nb):  # the basis in stacks, not vector by vector
-            j1 = min(n, j0 + nb)
-            ys = ts.flat_many(ts.apply_many(op, ts.unflat_many(store[j0:j1])))
-            G[:, j0:j1] = _overlap_columns(store, ys, n)
-            del ys
-        M[1:, 1:] = Uh @ G @ U
     if residual:
         return e, mats, res
     return e, mats
