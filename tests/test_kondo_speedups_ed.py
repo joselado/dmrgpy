@@ -374,3 +374,67 @@ def test_potential_term_memory_is_chunked(monkeypatch):
     tracemalloc.stop()
     assert peak < 20e6
     assert _rel(got, ref) < 1e-13
+
+
+# item 4: the coefficients are built once per call
+
+
+def test_levi_civita_coefficients_are_fully_symmetric():
+    """What the hub blocks rest on: Im coeff[i,f,m] is the same under every
+    permutation of (i,f,m), for a real and for a complex H."""
+    for complex_h in (False, True):
+        ks = KondoSpectrum(_chain(n=4, complex_h=complex_h), 0, 2.)
+        R = _old_coefficients(ks, np.arange(ks.dim))
+        for perm in ((1, 0, 2), (0, 2, 1), (2, 1, 0), (1, 2, 0), (2, 0, 1)):
+            assert _rel(R.transpose(perm), R) < 1e-14
+
+
+def _count_builds(monkeypatch):
+    built = []
+    levi = cd._levi_civita
+    def counting(S, real, rows, cols, **kw):
+        out = levi(S, real, rows, cols, **kw)
+        built.append(out.size)
+        return out
+    monkeypatch.setattr(cd, "_levi_civita", counting)
+    return built
+
+
+@pytest.mark.parametrize("T,cplx", [(0.5, False), (2.0, False), (2.0, True),
+                                    (1000., False)])
+def test_hub_blocks_equal_the_single_pass(monkeypatch, T, cplx):
+    """Blocks of one hub each (COEFF_BYTES=1): the numbers of the old single
+    pass, and every coefficient built once, n_occ n_f dim for the occupied
+    hubs and (n_f - n_occ) n_occ dim for the other final states."""
+    ks = KondoSpectrum(_chain(complex_h=cplx), 0, T)
+    occ = cd._occupied_states(ks)
+    nocc, nf, dim = len(occ), len(cd._final_states(ks, occ, EV)), ks.dim
+    assert nocc > 1
+    fb = cd.FBuilder(T, omega0=20e-3, Gamma0=5e-6)
+    ref = _old_third(ks, EV, -0.05, Fb=fb)
+    monkeypatch.setattr(cd, "COEFF_BYTES", 1)
+    built = _count_builds(monkeypatch)
+    got = cd.third_order_kondo_dIdV(ks, EV, -0.05, Fb=fb)
+    assert _rel(got, ref) < 1e-12
+    assert sum(built) == nocc*nf*dim + (nf - nocc)*nocc*dim
+    # the exact form (no odd_part) gives the same numbers
+    F = _CountF(fb)
+    del F.odd_part
+    assert _rel(cd.third_order_kondo_dIdV(ks, EV, -0.05, Fb=F), ref) < 1e-12
+
+
+def test_hub_blocks_build_once_whatever_the_number_of_biases(monkeypatch):
+    """The saving: the old code built the blocks again for every group of
+    biases its exchange accumulators held; the count no longer depends on
+    the number of biases."""
+    ks = KondoSpectrum(_chain(), 0, 1000.)
+    dim = ks.dim
+    monkeypatch.setattr(cd, "COEFF_BYTES", 16*4*dim*dim) # blocks of 4 hubs
+    built = _count_builds(monkeypatch)
+    fb = cd.FBuilder(1000., omega0=20e-3, Gamma0=5e-6)
+    cd.third_order_kondo_dIdV(ks, EV, -0.05, Fb=fb)
+    few = sum(built)
+    built.clear()
+    many = np.linspace(-5e-3, 5e-3, 301)
+    cd.third_order_kondo_dIdV(ks, many, -0.05, Fb=fb)
+    assert sum(built) == few == dim**3

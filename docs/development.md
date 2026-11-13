@@ -6137,11 +6137,16 @@ third-order sums are restricted to thermally occupied initial states
 tabulated once per `FBuilder`. Since 2026-11-12 the second-order sum is
 restricted the same way, and both sums work in blocks under the byte
 budgets at the top of `conductance.py` (`CHUNK_ENTRIES` for the Theta
-arrays, `COEFF_BYTES` for the third-order coefficients of a block of
-initial states, `EXCHANGE_BYTES` for the exchange diagram of a group of
-biases), so their memory does not grow with the number of biases or of
-occupied states. `stepfunctions.cached_fbuilder` keeps the last four
-tables across calls (`docs/audit_2026_11_hole_hunt.md`).
+and F arrays, `COEFF_BYTES` for one block of the third-order
+coefficients), so their memory does not grow with the number of biases or
+of occupied states. `stepfunctions.cached_fbuilder` keeps the last four
+tables across calls (`docs/audit_2026_11_hole_hunt.md`). Since 2026-11-14
+the sums also skip the final states that the step closes
+(`_final_states`), the spectrum and the coefficients are real for a real
+H (`edkondo.eigenpairs`, `conductance._spin_triplet`), and several blocks
+of coefficients are blocks over the index that both diagrams share
+(`_kondo_hub_blocks`), built once per call; the rules are in
+`.claude/rules/kondo.md`.
 
 **`mode="ED", submode="KRYLOV"`** (2026-11-12) is the one submode of
 `mode="ED"`, and the only one it accepts: any other `submode` stays in the

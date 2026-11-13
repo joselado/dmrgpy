@@ -105,13 +105,12 @@ def test_second_order_onehot_state_memory():
 
 
 @pytest.mark.parametrize("T,cplx", [(0.0, False), (3.0, False), (12.0, True)])
-@pytest.mark.parametrize("coeff_bytes,exchange_bytes", [(1, 1), (16*64*3, 16*64*5)])
+@pytest.mark.parametrize("coeff_bytes", [1, 16*64*3])
 def test_third_order_blocked_equals_single_pass(monkeypatch, T, cplx,
-                                                 coeff_bytes, exchange_bytes):
+                                                 coeff_bytes):
     ks = _chain(T, complex_h=cplx)
     ref = _old_third(ks, EV, -0.05, p_cut=0)
     monkeypatch.setattr(cd, "COEFF_BYTES", coeff_bytes)
-    monkeypatch.setattr(cd, "EXCHANGE_BYTES", exchange_bytes)
     got = cd.third_order_kondo_dIdV(ks, EV, -0.05, p_cut=0)
     assert np.max(np.abs(got - ref)) < 1e-12*np.max(np.abs(ref))
 
@@ -124,7 +123,6 @@ def test_third_order_coefficient_memory_follows_the_budget(monkeypatch):
     assert len(cd._occupied_states(ks)) == ks.dim == 256
     eV = np.linspace(-5e-3, 5e-3, 3)
     monkeypatch.setattr(cd, "COEFF_BYTES", 20e6)
-    monkeypatch.setattr(cd, "EXCHANGE_BYTES", 60e6)
     Fb = cd.FBuilder(ks.T, omega0=20e-3, Gamma0=5e-6, kB=ks.kB)
     tracemalloc.start()
     got = cd.third_order_kondo_dIdV(ks, eV, -0.05, p_cut=0, Fb=Fb)

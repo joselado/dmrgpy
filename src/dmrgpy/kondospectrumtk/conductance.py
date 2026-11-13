@@ -134,15 +134,13 @@ THETA_CUT = 40.
 
 
 # Byte budgets of the sums. CHUNK_ENTRIES is the size of one block of the
-# Theta and F arrays (entries, not bytes); COEFF_BYTES bounds the complex
-# Levi-Civita coefficient block of the third-order Kondo term, and
-# EXCHANGE_BYTES the two accumulators of its exchange diagram (one per
-# tunneling direction), which sets how many bias points share one pass over
-# the blocks. Peak memory of the third-order term is a few times the larger
-# of the two and does not grow with the number of occupied states.
+# Theta and F arrays (entries, not bytes); COEFF_BYTES bounds one block of
+# the Levi-Civita coefficients of the third-order Kondo term, counted at 16
+# bytes per entry. Peak memory of the third-order term is a few times
+# COEFF_BYTES and grows neither with the number of occupied states nor with
+# the number of biases.
 CHUNK_ENTRIES = 4e6
 COEFF_BYTES = 200e6
-EXCHANGE_BYTES = 600e6
 
 
 def _theta_raw(ks, x):
@@ -414,12 +412,11 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     3.4 GB and 13 s at dim=512 even at T=0, where all but one row of it is
     multiplied by p_i=0).
 
-    The coefficient tensor is built for blocks of occupied initial states
-    (COEFF_BYTES), with both tunneling directions inside each block, so the
-    memory does not grow with n_occ; one block, the usual case, costs what a
-    single pass costs. Several blocks accumulate the exchange diagram's
-    sum over i into one array per direction (EXCHANGE_BYTES) and contract it
-    with F afterwards.
+    The coefficient tensor is built once per call, in blocks of at most
+    COEFF_BYTES with both tunneling directions and every bias on each, so
+    the memory grows neither with n_occ nor with the number of biases. One
+    block, the usual case, costs what a single pass costs; several are
+    blocks over the index that both diagrams share (_kondo_hub_blocks).
 
     Fb: an existing FBuilder(ks.T, omega0=omega0, Gamma0=Gamma0, kB=ks.kB)
     to reuse instead of building a new one -- building it tabulates
@@ -440,17 +437,12 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     Fcall = _get_F(ks, omega0, Gamma0, Fb)
     S, real = _spin_triplet(ks) # real arithmetic for a real H
     dim, nocc, nf = ks.dim, len(occ), len(fin)
-    # blocks of initial states for the coefficient tensor, and groups of
-    # bias points sharing one pass over the blocks (see COEFF_BYTES)
-    nblock = int(min(nocc, max(1, COEFF_BYTES//(16*nf*dim))))
-    group = int(max(1, EXCHANGE_BYTES//(16*nf*dim)))
-    sub = max(1, int(CHUNK_ENTRIES)//(dim*nblock)) # biases per Theta/Fd array
     chunk = max(1, int(CHUNK_ENTRIES)//(nf*dim)) # biases per Fx array
     out = np.zeros(len(eVs))
-    if nblock >= nocc:
+    if nocc == 1 or 16*nocc*nf*dim <= COEFF_BYTES:
         # one block: the coefficients are built once and both diagrams are
-        # contracted per block of bias points, with no exchange accumulator
-        # (this is what the code did before the blocking, at the same cost)
+        # contracted per block of bias points (this is what the code did
+        # before the blocking, at the same cost); otherwise _kondo_hub_blocks
         pc = _levi_civita(S, real, occ, fin)
         pc *= (p/2.)[:, None, None] # SA factor: see above
         for d, sign in enumerate((1., -1.)):
@@ -466,40 +458,83 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
                 out[s0:s0+nv] += (np.einsum('ifm,eif,eim->e', pc, Th, Fd, optimize=True)
                                   + np.einsum('ifm,eif,efm->e', pc, Th, Fx, optimize=True))
         return 4*np.pi*T0**2*Jrho_s*out
-    for g0 in range(0, len(eVs), group):
-        vg = eVs[g0:g0+group]
-        ng = len(vg)
-        # the s->t direction is the same expression at -v (only eV flips,
-        # not eps_if/eps_im/e_fm), so both directions share each block of
-        # coefficients; W[d][e,f,m] = sum_i p_i coeff[i,f,m] Th[e,i,f]
-        dirs = (vg, -vg)
-        W = [np.zeros((ng, nf, dim)) for _ in dirs]
-        res = np.zeros(ng)
-        for b0 in range(0, nocc, nblock):
-            sl = slice(b0, b0+nblock)
-            pc = _levi_civita(S, real, occ[sl], fin)
-            pc *= (p[sl]/2.)[:, None, None] # SA factor: see above
-            for d, v in enumerate(dirs):
-                for s0 in range(0, ng, sub):
-                    vc = v[s0:s0+sub]
-                    nv = len(vc)
-                    Th = _theta_raw(ks, vc[:, None, None] - eps_if[None, sl, :])
-                    # direct diagram: log at eV = e_m - e_i
-                    Fd = Fcall((vc[:, None, None] - eps_im[None, sl, :]).ravel()
-                               ).reshape(nv, -1, dim)
-                    res[s0:s0+nv] += np.einsum('ifm,eif,eim->e', pc, Th, Fd,
-                                               optimize=True)
-                    W[d][s0:s0+nv] += np.einsum('ifm,eif->efm', pc, Th,
-                                                optimize=True)
-        # exchange diagram: log at eV = e_f - e_m
-        for d, v in enumerate(dirs):
-            for s0 in range(0, ng, chunk):
-                vc = v[s0:s0+chunk]
-                Fx = Fcall((vc[:, None, None] - e_fm[None, :, :]).ravel()
-                           ).reshape(len(vc), nf, dim)
-                res[s0:s0+len(vc)] += np.einsum('efm,efm->e', W[d][s0:s0+len(vc)], Fx)
-        out[g0:g0+ng] = res # eq. "sym_z": same sign in both directions
-    return 4*np.pi*T0**2*Jrho_s*out
+    out = _kondo_hub_blocks(ks, eVs, occ, fin, S, real, Fcall,
+                            _F_is_even(ks, Fcall))
+    return 4*np.pi*T0**2*Jrho_s*out # eq. "sym_z": same sign in both directions
+
+
+def _kondo_hub_blocks(ks, eVs, occ, fin, S, real, Fcall, even):
+    """The third-order Kondo sum, both diagrams and both directions, when
+    the coefficients of every occupied state do not fit in one block.
+
+    R[i,f,m] = Im coeff[i,f,m] is symmetric under every permutation of its
+    three indices: coeff is cyclic, and for Hermitian spin matrices swapping
+    f and m conjugates it and flips its sign. The direct diagram couples
+    (i,f) by Theta and (i,m) by F, so it is complete on a block of initial
+    states i (the "hubs") with R[i, fin, :]; the exchange diagram couples
+    (i,f) by Theta and (f,m) by F, so it is complete on a block of final
+    states f with R[f, occ, :]. A block of occupied hubs serves both, since
+    every occupied state is final, and the final states that are not
+    occupied get blocks R[f, occ, :] of their own. Nothing is summed across
+    blocks, so each block takes every bias in turn and each coefficient is
+    built once per call, whatever the number of biases. The old code built
+    the blocks again for every group of biases that one pair of exchange
+    accumulators (EXCHANGE_BYTES, 600 MB) could hold.
+
+    Per bias the F tables are F(+-v - (e_h - e_m)) of the hubs h. When F is
+    even (EVEN_TOL) the direct diagram reads its F off them, F(v - (e_m -
+    e_i)) = F(-v - (e_i - e_m)), so the F count per bias is 2 n_f dim, not
+    2 (n_occ + n_f) dim. The exchange Theta of an occupied hub is 1 minus the
+    direct Theta of the other direction, Theta(x) + Theta(-x) = 1: exact at
+    T=0 (Theta0) and to roundoff at T>0."""
+    e, p, dim = ks.e, ks.p, ks.dim
+    nocc, nf = len(occ), len(fin)
+    fo = np.concatenate([occ, np.setdiff1d(fin, occ)]) # final states, occupied first
+    # one kind of build for every block, by the whole size (NUMBA_ENTRIES)
+    numba = (nocc*nf + (nf - nocc)*nocc)*dim >= NUMBA_ENTRIES
+    nb = int(max(1, COEFF_BYTES//(16*nf*dim)))
+    blocks = [(occ[b:b+nb], True) for b in range(0, nocc, nb)]
+    nb = int(max(1, COEFF_BYTES//(16*nocc*dim)))
+    blocks += [(fo[b:b+nb], False) for b in range(nocc, nf, nb)]
+    out = np.zeros(len(eVs))
+    for H, occupied in blocks:
+        R = _levi_civita(S, real, H, fo if occupied else occ, numba=numba)
+        R *= 0.5 # SA factor (see the module docstring), exact
+        e_hm = e[H, None] - e[None, :] # e_h - e_m, the exchange log
+        if occupied:
+            x_hf = e[None, fo] - e[H, None] # e_f - e_h, the direct step
+            e_mh = e[None, :] - e[H, None] # e_m - e_h, the direct log
+        else:
+            x_hi = e[H, None] - e[None, occ] # e_h - e_i, the exchange step
+        chunk = max(1, int(CHUNK_ENTRIES)//(2*len(H)*dim))
+        for s0 in range(0, len(eVs), chunk):
+            vc = eVs[s0:s0+chunk]
+            nv = len(vc)
+            F = {s: Fcall((s*vc[:, None, None] - e_hm[None, :, :]).ravel()
+                          ).reshape(nv, len(H), dim) for s in (1., -1.)}
+            if occupied:
+                Thd = {s: _theta_raw(ks, s*vc[:, None, None] - x_hf[None, :, :])
+                       for s in (1., -1.)}
+            for s in (1., -1.):
+                # exchange diagram, hub f = h: sum_im p_i Th(i,h) R[h,i,m] F(h,m)
+                if occupied:
+                    Thx, Rx = 1. - Thd[-s][:, :, :nocc], R[:, :nocc, :]
+                else:
+                    Thx = _theta_raw(ks, s*vc[:, None, None] - x_hi[None, :, :])
+                    Rx = R
+                Thx *= p[occ][None, None, :]
+                out[s0:s0+nv] += np.einsum('him,ehi,ehm->e', Rx, Thx, F[s],
+                                           optimize=True)
+                if not occupied: continue
+                # direct diagram, hub i = h: sum_fm p_h Th(h,f) R[h,f,m] F(h,m)
+                if even: Fd = F[-s]
+                else:
+                    Fd = Fcall((s*vc[:, None, None] - e_mh[None, :, :]).ravel()
+                               ).reshape(nv, len(H), dim)
+                out[s0:s0+nv] += np.einsum('hfm,ehf,ehm->e', R,
+                                           Thd[s]*p[H][None, :, None], Fd,
+                                           optimize=True)
+    return out
 
 
 def third_order_potential_dIdV(ks, eVs, Jrho_s, U, T0=1.0, omega0=20e-3,
