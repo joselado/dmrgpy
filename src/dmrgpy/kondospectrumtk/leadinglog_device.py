@@ -582,6 +582,23 @@ def memory_model(d, m, real=False):
     return (20*8 + 10*4)*d*d*item + 3*CHUNK_BYTES, 20*4*d*m*item
 
 
+# share of the allocator limit of the device that one flow may plan for. On
+# the H200 the model was 109.6 GB against a peak of 108.9 GB at 13 spins
+# and T=0, and 124.26 GB against 124.30 GB at 0.5 K with 24 occupied states.
+ALLOCATOR_SHARE = 0.95
+
+
+def allocator_budget():
+    """Bytes one flow may plan for on the device, ALLOCATOR_SHARE of the
+    limit of JAX's allocator (memory_stats()["bytes_limit"]), or None where
+    the device reports none (JAX's CPU device). JAX sets the limit to
+    XLA_PYTHON_CLIENT_MEM_FRACTION of the card, 0.75 by default, also with
+    XLA_PYTHON_CLIENT_PREALLOCATE=false."""
+    stats = backend._JAX.devices()[0].memory_stats()
+    limit = (stats or {}).get("bytes_limit")
+    return None if not limit else ALLOCATOR_SHARE*limit
+
+
 def joint_flow(ks, w, cols, Jrho_s, omega0, Gamma0, rtol, atol, pole_threshold,
                kernel, onshell_kernel):
     """leadinglog._joint_flow on the device, called from there with its

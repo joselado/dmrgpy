@@ -688,7 +688,10 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     in chunks so that one flow stays below about mem_gb (memory_model, or
     leadinglog_device.memory_model on the device), at
     the cost of solving the couplings again in each chunk; it raises when
-    not even 8 biases fit. At T>0 the occupied states are the ones within
+    not even 8 biases fit. On a GPU the budget is at most
+    leadinglog_device.allocator_budget(), a share of the limit of JAX's
+    allocator: a flow that does not fit under it is cut in chunks also
+    with mem_gb=None, and a larger mem_gb warns and is lowered to it. At T>0 the occupied states are the ones within
     ln(1/p_cut) kT of the ground state, and the tip part costs d^2 per
     energy and per occupied state.
 
@@ -710,16 +713,34 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
         kernel = ThermalKernel(ks.kB*ks.T, omega0, Gamma0, max(1.05*span, 10*omega0))
         if onshell == "thermal":
             onshell_kernel = kernel
-    if mem_gb is None:
+    budget = None if mem_gb is None else mem_gb*1e9
+    cap = None
+    if _on_device():
+        from . import leadinglog_device as device
+        fixed, per_w = device.memory_model(len(e), len(occ), _block_is_real(_spin_ops(ks)))
+        cap = device.allocator_budget()
+        if cap is not None:
+            if mem_gb is None and fixed + 2*n*per_w > cap:
+                budget = cap
+            elif mem_gb is not None and budget > cap:
+                warnings.warn("leading_log_dIdV: mem_gb=%g is above the %.3g GB the "
+                              "device allocator gives (XLA_PYTHON_CLIENT_MEM_FRACTION, "
+                              "0.75 of the card by default); the biases are cut to fit "
+                              "it" % (mem_gb, cap/1e9), stacklevel=2)
+                budget = cap
+    else:
+        fixed, per_w = memory_model(len(e), len(occ))
+    if budget is None:
         pieces = [np.arange(n)]
     else:
-        if _on_device():
-            from .leadinglog_device import memory_model as device_model
-            fixed, per_w = device_model(len(e), len(occ), _block_is_real(_spin_ops(ks)))
-        else:
-            fixed, per_w = memory_model(len(e), len(occ))
-        nb = int((mem_gb*1e9 - fixed)//(2*per_w))
+        nb = int((budget - fixed)//(2*per_w))
         if nb < 8:
+            if budget == cap:
+                raise ValueError("leading_log_dIdV: %d occupied states of %d need %.3g GB "
+                                 "for 8 biases, above the %.3g GB the device allocator "
+                                 "gives; raise XLA_PYTHON_CLIENT_MEM_FRACTION before Python "
+                                 "starts, or p_cut to keep fewer states"
+                                 % (len(occ), len(e), (fixed + 16*per_w)/1e9, cap/1e9))
             raise ValueError("leading_log_dIdV: %d occupied states of %d need %.2g GB "
                              "for 8 biases, above mem_gb=%g; raise mem_gb, or p_cut to "
                              "keep fewer states" % (len(occ), len(e),

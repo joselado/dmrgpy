@@ -165,3 +165,31 @@ def test_mem_gb_chunks_the_biases_by_the_device_model(on_jax):
     cut = _ll(ks, {"eVs": eVs, "mem_gb": (fixed + 17*per_w)/1e9})
     assert one[1]["n_chunks"] == 1 and cut[1]["n_chunks"] == 3
     assert np.max(np.abs(cut[0]/one[0] - 1)) < 1e-10
+
+
+def test_the_allocator_limit_caps_the_budget(on_jax, monkeypatch):
+    """On a GPU the budget is at most allocator_budget(), the share of JAX's
+    allocator limit: a flow above it is cut in chunks with mem_gb=None, a
+    larger mem_gb warns and is lowered to it, and when not even 8 biases fit
+    under it the error names XLA_PYTHON_CLIENT_MEM_FRACTION. JAX's CPU
+    device reports no limit, so nothing changes there."""
+    assert leadinglog_device.allocator_budget() is None
+    ks = _chain(3, T=2.)
+    eVs = np.linspace(-3e-3, 3e-3, 24) + 1.3e-5
+    fixed, per_w = leadinglog_device.memory_model(ks.dim, 8, real=True)
+    one = _ll(ks, {"eVs": eVs})
+    monkeypatch.setattr(leadinglog_device, "allocator_budget", lambda: 1e15)
+    assert _ll(ks, {"eVs": eVs})[1]["n_chunks"] == 1
+    monkeypatch.setattr(leadinglog_device, "allocator_budget", lambda: fixed + 17*per_w)
+    cut = _ll(ks, {"eVs": eVs})
+    assert cut[1]["n_chunks"] == 3
+    assert np.max(np.abs(cut[0]/one[0] - 1)) < 1e-10
+    with warnings.catch_warnings(record=True) as wl:
+        warnings.simplefilter("always")
+        big = leadinglog.leading_log_dIdV(ks, eVs, -0.05, U=0.25, return_info=True,
+                                          mem_gb=1e3)
+    assert big[1]["n_chunks"] == 3
+    assert any("XLA_PYTHON_CLIENT_MEM_FRACTION" in str(w.message) for w in wl)
+    monkeypatch.setattr(leadinglog_device, "allocator_budget", lambda: fixed + 15*per_w)
+    with pytest.raises(ValueError, match="XLA_PYTHON_CLIENT_MEM_FRACTION"):
+        _ll(ks, {"eVs": eVs})
