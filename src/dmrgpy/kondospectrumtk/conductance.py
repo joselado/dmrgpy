@@ -122,6 +122,16 @@ from .stepfunctions import Theta, Theta0, FBuilder, F0, cached_fbuilder
 P_CUT = 1e-12
 
 
+# Final states f whose step Theta(eV - (e_f - e_i)) is closed for every
+# occupied i and every bias are left out of the second- and third-order sums
+# (_final_states). At T=0 the step of such a state is exactly 0, so nothing
+# changes; at T>0 the cut is THETA_CUT kT above the largest open energy, where
+# Theta is below Theta(-40) = 1.6e-16, so every term that goes is below about
+# 1e-16 of a term that stays. The intermediate state m is virtual and is never
+# cut. On the 10-spin chain at T=0 this keeps 99 final states of 1024.
+THETA_CUT = 40.
+
+
 # Byte budgets of the sums. CHUNK_ENTRIES is the size of one block of the
 # Theta and F arrays (entries, not bytes); COEFF_BYTES bounds the complex
 # Levi-Civita coefficient block of the third-order Kondo term, and
@@ -151,12 +161,33 @@ def _get_F(ks, omega0, Gamma0, Fb):
     return Fb
 
 
-def _spin_matrix_elements_squared(ks):
+def _spin_matrix_elements_squared(ks, rows=None, cols=None):
     """|M_if|^2 = 1/2|<f|S-|i>|^2 + 1/2|<f|S+|i>|^2 + |<f|Sz|i>|^2,
-    eq. "SA-transitionmatrix" (unpolarized tip and sample)."""
-    Splus = ks.Sx + 1j*ks.Sy
-    Sminus = ks.Sx - 1j*ks.Sy
-    return 0.5*np.abs(Sminus)**2 + 0.5*np.abs(Splus)**2 + np.abs(ks.Sz)**2
+    eq. "SA-transitionmatrix" (unpolarized tip and sample). rows and cols
+    (index arrays of f and i) restrict it to a block; None is every state."""
+    def block(S):
+        S = np.asarray(S)
+        if rows is not None: S = S[rows]
+        if cols is not None: S = S[:, cols]
+        return S
+    Sx, Sy, Sz = block(ks.Sx), block(ks.Sy), block(ks.Sz)
+    Splus = Sx + 1j*Sy
+    Sminus = Sx - 1j*Sy
+    return 0.5*np.abs(Sminus)**2 + 0.5*np.abs(Splus)**2 + np.abs(Sz)**2
+
+
+def _final_states(ks, occ, eVs):
+    """Indices of the final states f whose step is open for at least one
+    occupied initial state i and one bias of either tunneling direction:
+    min_i (e_f - e_i) <= max|eV| at T=0 (Theta0(0) = 1/2 keeps the equality),
+    and <= max|eV| + THETA_CUT kT at T>0. The difference is the same float
+    the sums form, so at T=0 every state left out has a step of exactly 0.
+    Every occupied state is kept (e_i - e_i = 0)."""
+    eVs = np.asarray(eVs, dtype=float)
+    vmax = np.max(np.abs(eVs)) if eVs.size else 0.
+    if ks.T != 0.: vmax = vmax + THETA_CUT*ks.kB*ks.T
+    lowest = np.min(ks.e[None, :] - ks.e[occ, None], axis=0)
+    return np.nonzero(lowest <= vmax)[0]
 
 
 def second_order_dIdV(ks, eVs, T0=1.0, U=0.0, p_cut=P_CUT):
@@ -174,13 +205,15 @@ def second_order_dIdV(ks, eVs, T0=1.0, U=0.0, p_cut=P_CUT):
 
     The sum runs over the thermally occupied initial states only, the same
     ones as the third-order terms (p_cut, see P_CUT; p_cut=0 keeps every
-    state), so it costs O(n_eV dim n_occ) and not O(n_eV dim^2). The Theta
+    state), and over the final states whose step is open (_final_states),
+    so it costs O(n_eV n_f n_occ) and not O(n_eV dim^2). The Theta
     arrays are made for blocks of bias points of about CHUNK_ENTRIES
     entries."""
     eVs = np.asarray(eVs, dtype=float)
     occ = _occupied_states(ks, p_cut)
-    M2 = _spin_matrix_elements_squared(ks)[:, occ] # [f,i], i over occ
-    eps = ks.e[:, None] - ks.e[occ][None, :] # eps[f,i] = e_f - e_i
+    fin = _final_states(ks, occ, eVs)
+    M2 = _spin_matrix_elements_squared(ks, fin, occ) # [f,i], f over fin, i over occ
+    eps = ks.e[fin][:, None] - ks.e[occ][None, :] # eps[f,i] = e_f - e_i
     weight = ks.p[occ][None, :]*M2 # weight[f,i] = p_i*|M_if|^2
     chunk = max(1, int(CHUNK_ENTRIES)//weight.size)
     spin_term = np.empty(len(eVs))
@@ -210,7 +243,7 @@ def _occupied_states(ks, p_cut=P_CUT):
     return np.nonzero(ks.p > p_cut*np.max(ks.p))[0]
 
 
-def _triple_product_coefficients(ks, occ=None):
+def _triple_product_coefficients(ks, occ=None, fin=None):
     """coeff[i,f,m] = sum_jkl eps_jkl <i|S_l|f><f|S_k|m><m|S_j|i>, the
     Levi-Civita triple product appearing in eq. "3rd-normal"/"3rd-reversed"
     (both give the identical coefficient; only the F(...) argument
@@ -220,11 +253,13 @@ def _triple_product_coefficients(ks, occ=None):
     occ: indices of the initial states i to build it for (the first axis
     of the result then runs over occ, in that order); None means all of
     them, i.e. the full dim^3 tensor -- only worth paying for when every
-    state is thermally occupied."""
+    state is thermally occupied. fin: the same for the final states f (the
+    second axis); None is every state."""
     Xi = np.stack([ks.Sx, ks.Sy, ks.Sz], axis=-1) # Xi[a,b,alpha]=<a|S_alpha|b>
     if occ is None: occ = np.arange(ks.dim)
-    return np.einsum('jkl,ifl,fmk,mij->ifm', _EPS3, Xi[occ, :, :], Xi,
-                     Xi[:, occ, :], optimize=True)
+    if fin is None: fin = np.arange(ks.dim)
+    return np.einsum('jkl,ifl,fmk,mij->ifm', _EPS3, Xi[np.ix_(occ, fin)],
+                     Xi[fin, :, :], Xi[:, occ, :], optimize=True)
 
 
 def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
@@ -253,13 +288,14 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     the module docstring for why, and for what that changed on
     2026-09-26.
 
-    This is an O(n_occ * dim^2 * len(eVs)) calculation, n_occ being the
+    This is an O(n_occ * n_f * dim * len(eVs)) calculation, n_occ being the
     number of thermally occupied initial states (p_cut, see P_CUT: one
-    state at T=0 for a non-degenerate ground state), inherent to the
-    triple sum over eigenstates -- the f and m sums always run over the
-    full spectrum, since m is a virtual intermediate state. The exchange
+    state at T=0 for a non-degenerate ground state) and n_f the number of
+    final states whose step is open (_final_states, THETA_CUT), inherent to
+    the triple sum over eigenstates -- the m sum always runs over the full
+    spectrum, since m is a virtual intermediate state. The exchange
     diagram's F depends on the (f, m) pair rather than on (i, m), so it
-    costs dim^2 F evaluations per bias point whatever n_occ is; they are
+    costs n_f*dim F evaluations per bias point whatever n_occ is; they are
     made in chunks of bias points, which bounds the memory at a few
     million entries. It used to be O(dim^3) in both time and memory
     regardless of T (the full coefficient tensor was built for every i,
@@ -282,26 +318,27 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     instead)."""
     eVs = np.asarray(eVs, dtype=float)
     occ = _occupied_states(ks, p_cut) # initial states i that carry weight
+    fin = _final_states(ks, occ, eVs) # final states f whose step is open
     p = ks.p[occ]
-    # eps_if[i,f] = e_f - e_i and eps_im[i,m] = e_m - e_i are the same
-    # array (e[None,:]-e[occ,None]) under two names for readability at the
-    # call sites below; the first axis runs over occ
-    eps_if = eps_im = ks.e[None, :] - ks.e[occ, None]
-    e_fm = ks.e[:, None] - ks.e[None, :] # e_fm[f,m] = e_f - e_m
+    # eps_if[i,f] = e_f - e_i over occ x fin, eps_im[i,m] = e_m - e_i over
+    # occ x every state, e_fm[f,m] = e_f - e_m over fin x every state
+    eps_if = ks.e[None, fin] - ks.e[occ, None]
+    eps_im = ks.e[None, :] - ks.e[occ, None]
+    e_fm = ks.e[fin, None] - ks.e[None, :]
     Fcall = _get_F(ks, omega0, Gamma0, Fb)
-    dim, nocc = ks.dim, len(occ)
+    dim, nocc, nf = ks.dim, len(occ), len(fin)
     # blocks of initial states for the coefficient tensor, and groups of
     # bias points sharing one pass over the blocks (see COEFF_BYTES)
-    nblock = int(min(nocc, max(1, COEFF_BYTES//(16*dim*dim))))
-    group = int(max(1, EXCHANGE_BYTES//(16*dim*dim)))
+    nblock = int(min(nocc, max(1, COEFF_BYTES//(16*nf*dim))))
+    group = int(max(1, EXCHANGE_BYTES//(16*nf*dim)))
     sub = max(1, int(CHUNK_ENTRIES)//(dim*nblock)) # biases per Theta/Fd array
-    chunk = max(1, int(CHUNK_ENTRIES)//(dim*dim)) # biases per Fx array
+    chunk = max(1, int(CHUNK_ENTRIES)//(nf*dim)) # biases per Fx array
     out = np.zeros(len(eVs))
     if nblock >= nocc:
         # one block: the coefficients are built once and both diagrams are
         # contracted per block of bias points, with no exchange accumulator
         # (this is what the code did before the blocking, at the same cost)
-        pc = p[:, None, None]*np.imag(_triple_product_coefficients(ks, occ))/2.
+        pc = p[:, None, None]*np.imag(_triple_product_coefficients(ks, occ, fin))/2.
         for d, sign in enumerate((1., -1.)):
             v = sign*eVs
             for s0 in range(0, len(v), chunk):
@@ -311,7 +348,7 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
                 Fd = Fcall((vc[:, None, None] - eps_im[None, :, :]).ravel()
                            ).reshape(nv, nocc, dim)
                 Fx = Fcall((vc[:, None, None] - e_fm[None, :, :]).ravel()
-                           ).reshape(nv, dim, dim)
+                           ).reshape(nv, nf, dim)
                 out[s0:s0+nv] += (np.einsum('ifm,eif,eim->e', pc, Th, Fd, optimize=True)
                                   + np.einsum('ifm,eif,efm->e', pc, Th, Fx, optimize=True))
         return 4*np.pi*T0**2*Jrho_s*out
@@ -322,13 +359,13 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
         # not eps_if/eps_im/e_fm), so both directions share each block of
         # coefficients; W[d][e,f,m] = sum_i p_i coeff[i,f,m] Th[e,i,f]
         dirs = (vg, -vg)
-        W = [np.zeros((ng, dim, dim)) for _ in dirs]
+        W = [np.zeros((ng, nf, dim)) for _ in dirs]
         res = np.zeros(ng)
         for b0 in range(0, nocc, nblock):
             sl = slice(b0, b0+nblock)
             # SA factor: see above
             pc = p[sl, None, None]*np.imag(
-                _triple_product_coefficients(ks, occ[sl]))/2.
+                _triple_product_coefficients(ks, occ[sl], fin))/2.
             for d, v in enumerate(dirs):
                 for s0 in range(0, ng, sub):
                     vc = v[s0:s0+sub]
@@ -346,7 +383,7 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
             for s0 in range(0, ng, chunk):
                 vc = v[s0:s0+chunk]
                 Fx = Fcall((vc[:, None, None] - e_fm[None, :, :]).ravel()
-                           ).reshape(len(vc), dim, dim)
+                           ).reshape(len(vc), nf, dim)
                 res[s0:s0+len(vc)] += np.einsum('efm,efm->e', W[d][s0:s0+len(vc)], Fx)
         out[g0:g0+ng] = res # eq. "sym_z": same sign in both directions
     return 4*np.pi*T0**2*Jrho_s*out
