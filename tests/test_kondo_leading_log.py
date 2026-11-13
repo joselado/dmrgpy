@@ -212,7 +212,9 @@ def test_the_flow_stops_at_the_kondo_scale():
         got, info = leadinglog.leading_log_dIdV(ks, eVs, -0.2, omega0=W0,
                                                 Gamma0=G0, return_info=True)
     assert info["D_stop"] is not None and info["D_stop"] > G0
-    assert info["max_coupling"] >= 1.
+    # the stop is where the coupling crosses the threshold, located by brentq,
+    # so the largest coupling is the threshold to roundoff (1 - 2e-16 on Triton)
+    assert info["max_coupling"] > 1. - 1e-12
     assert any("order one" in str(x.message) for x in w)
     assert np.all(np.isnan(got[1:4]))
     assert np.all(np.isfinite(got[[0, 4]]))

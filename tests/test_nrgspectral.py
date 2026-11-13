@@ -178,8 +178,11 @@ def test_free_spin_gives_the_density_of_states(U, operators, factor):
                                 operators=operators, Lambda=4.0)
     from dmrgpy.ysrtk.zaverage import bdg_poles
     w, wt = bdg_poles(eps, t, 0.0)
-    assert np.max(np.abs(resolvent(r.omega, r.weight)
-                         - factor*resolvent(w, wt))) < 1e-12
+    ref = factor*resolvent(w, wt)
+    # relative to the largest value, about 50 on the ldos: 2.5e-12 absolute
+    # on Triton, 5e-14 of it
+    assert np.max(np.abs(resolvent(r.omega, r.weight) - ref)) \
+        < 1e-12*np.max(np.abs(ref))
     rk = nrgspectral.chain_poles(ns=1, n=30, JK=0.0, U=U, Lambda=4.0,
                                  keep=100, operators=operators)
     assert rk.total == pytest.approx(factor, abs=1e-12)

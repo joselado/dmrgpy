@@ -14,6 +14,8 @@ ED_WATCH = ["edkondo.py:__init__", "edkondo.py:_eigenbasis_spin_operator",
             "conductance.py:third_order_kondo_dIdV",
             "conductance.py:third_order_potential_dIdV",
             "conductance.py:_triple_product_coefficients",
+            "conductance.py:_levi_civita", "conductance.py:_kondo_hub_blocks",
+            "edkondo.py:eigenpairs",
             "stepfunctions.py:__call__", "stepfunctions.py:F0", "eigh"]
 TASK_WATCH = ["taskkondo.py:__init__", "task.py:projected_spectrum",
               "task.py:block_krylov", "task.py:apply_many",
@@ -23,7 +25,8 @@ KRYLOV_WATCH = ["krylovkondo.py:__init__", "krylovkondo.py:low_states",
                 "krylovkondo.py:state_spectrum", "krylovkondo.py:block_krylov",
                 "conductance.py:second_order_dIdV",
                 "conductance.py:third_order_kondo_dIdV",
-                "conductance.py:third_order_potential_dIdV"]
+                "conductance.py:third_order_potential_dIdV",
+                "conductance.py:_levi_civita"]
 LL_WATCH = ["edkondo.py:__init__", "leadinglog.py:leading_log_dIdV",
             "leadinglog.py:_joint_flow", "leadinglog.py:tip_vertex",
             "leadinglog.py:_hole_sum_table", "leadinglog.py:_hole_sum",
