@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from dmrgpy import spinchain
+from dmrgpy.algebra import algebra
 from dmrgpy.kondospectrumtk import conductance as cd
 from dmrgpy.kondospectrumtk.edkondo import KondoSpectrum
 
@@ -174,3 +175,130 @@ def test_final_states_cut_on_an_unsorted_spectrum():
         setattr(ks, name, getattr(ks, name)[np.ix_(perm, perm)])
     assert _rel(cd.second_order_dIdV(ks, EV), ref2) < 1e-13
     assert _rel(cd.third_order_kondo_dIdV(ks, EV, -0.05), ref3) < 1e-12
+
+
+# item 3: real arithmetic for a real H
+
+
+class _OldSpectrum:
+    """KondoSpectrum as it was built before item 3: the complex eigenpairs of
+    the ED object and complex transforms of the spin operators."""
+    def __init__(self, chain, site, T, kB=8.617333262e-5, degeneracy_tol=1e-9):
+        edobj = chain.get_ED_obj()
+        emu, vs = edobj.get_diagonalized_hamiltonian()
+        emu = np.array(emu, dtype=float)
+        order = np.argsort(emu)
+        emu, vs = emu[order], np.array(vs)[:, order]
+        self.e, self.dim, self.T, self.kB = emu - emu[0], len(emu), T, kB
+        if T == 0.:
+            gs = (self.e <= degeneracy_tol*max(self.e[-1], 1e-300)).astype(float)
+            self.p = gs/np.sum(gs)
+        else:
+            p = np.exp(-self.e/(kB*T))
+            self.p = p/np.sum(p)
+        for name in ("Sx", "Sy", "Sz"):
+            op = getattr(chain, name)[site]
+            mat = np.array(algebra.todense(edobj.get_operator(op)), dtype=complex)
+            setattr(self, name, np.conjugate(vs.T)@mat@vs)
+
+
+def _all_terms(ks, Fb=None):
+    return (cd.second_order_dIdV(ks, EV, U=0.2),
+            cd.third_order_kondo_dIdV(ks, EV, -0.05, Fb=Fb),
+            cd.third_order_potential_dIdV(ks, EV, -0.05, 0.2, Fb=Fb))
+
+
+def test_real_hamiltonian_gives_real_arrays():
+    """The saving: real eigenvectors, real Sx and Sz, Sy = i times a real
+    matrix, and the real form read by the Levi-Civita build. A complex H
+    (a field along y) keeps the complex path."""
+    ks = KondoSpectrum(_chain(), 0, 0.5)
+    assert ks.vs.dtype == np.float64
+    assert ks.Sx.dtype == np.float64 and ks.Sz.dtype == np.float64
+    assert np.iscomplexobj(ks.Sy) and not np.any(ks.Sy.real)
+    assert cd._spin_triplet(ks)[1]
+    kc = KondoSpectrum(_chain(complex_h=True), 0, 0.5)
+    assert np.iscomplexobj(kc.vs) and not cd._spin_triplet(kc)[1]
+
+
+def test_real_levi_civita_equals_the_complex_product():
+    ks = KondoSpectrum(_chain(), 0, 0.5)
+    occ = cd._occupied_states(ks)
+    fin = cd._final_states(ks, occ, EV)
+    ref = np.imag(cd._triple_product_coefficients(ks, occ, fin))
+    S, real = cd._spin_triplet(ks)
+    got = cd._levi_civita(S, real, occ, fin)
+    assert got.dtype == np.float64
+    assert _rel(got, ref) < 1e-13
+    kc = KondoSpectrum(_chain(complex_h=True), 0, 0.5)
+    ref = np.imag(cd._triple_product_coefficients(kc, occ, fin))
+    assert _rel(cd._levi_civita(*cd._spin_triplet(kc), occ, fin), ref) < 1e-13
+
+
+@pytest.mark.parametrize("field", [True, False])
+@pytest.mark.parametrize("T", [0.0, 2.0])
+def test_real_path_equals_complex_path(field, T):
+    """Without a field the 5-spin chain has a doublet ground state and
+    degenerate multiplets, where the real and complex eigh give different
+    bases; every sum is a trace over each level and does not see it."""
+    new = KondoSpectrum(_chain(field=field), 0, T)
+    old = _OldSpectrum(_chain(field=field), 0, T)
+    if not field: assert np.sum(new.p > 0.4*np.max(new.p)) >= 2
+    Fb = cd._get_F(new, 20e-3, 5e-6, None) if T else None
+    for a, b in zip(_all_terms(new, Fb), _all_terms(old, Fb)):
+        assert _rel(a, b) < 1e-12
+
+
+def test_complex_hamiltonian_keeps_the_numbers():
+    new = KondoSpectrum(_chain(complex_h=True), 0, 2.0)
+    old = _OldSpectrum(_chain(complex_h=True), 0, 2.0)
+    Fb = cd._get_F(new, 20e-3, 5e-6, None)
+    for a, b in zip(_all_terms(new, Fb), _all_terms(old, Fb)):
+        assert _rel(a, b) < 1e-12
+
+
+def _impurity_chain(complex_h):
+    """An S=1 impurity on three spins 1/2: its sparse H is not in canonical
+    form, which is where reading H.imag in place once scrambled H."""
+    sc = spinchain.Spin_Chain(["S=1"] + ["S=1/2"]*3)
+    h = 1e-3*sc.Sz[0]*sc.Sz[0] + 2e-4*sc.Sz[0]
+    for i in range(3):
+        h = h + 1e-3*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
+    if complex_h: h = h + 3e-4*sc.Sy[0] + 1e-4*sc.Sx[1]
+    sc.set_hamiltonian(h)
+    return sc
+
+
+@pytest.mark.parametrize("complex_h", [False, True])
+def test_the_hamiltonian_matrix_is_not_touched(complex_h):
+    sc = _impurity_chain(complex_h)
+    H = sc.get_ED_obj().get_hamiltonian()
+    before = (H.data.copy(), H.indices.copy(), H.indptr.copy())
+    new = KondoSpectrum(sc, 0, 0.5)
+    for a, b in zip(before, (H.data, H.indices, H.indptr)):
+        assert np.array_equal(a, b)
+    old = _OldSpectrum(_impurity_chain(complex_h), 0, 0.5)
+    assert np.max(np.abs(new.e - old.e)) < 1e-15
+    for a, b in zip(_all_terms(new, cd._get_F(new, 20e-3, 5e-6, None)),
+                    _all_terms(old, cd._get_F(old, 20e-3, 5e-6, None))):
+        assert _rel(a, b) < 1e-12
+
+
+def test_real_eigenpairs_are_kept_and_the_ed_object_is_untouched(monkeypatch):
+    """Two spectra of one chain diagonalize once, and the ED object's own
+    (complex) diagonalization, which edtk/dynamics.py reads, is not changed."""
+    calls = []
+    eigh = algebra.eigh
+    monkeypatch.setattr(algebra, "eigh", lambda m: (calls.append(1), eigh(m))[1])
+    sc = _chain()
+    a = KondoSpectrum(sc, 0, 0.)
+    b = KondoSpectrum(sc, 0, 2.)
+    assert len(calls) == 1
+    assert np.array_equal(a.vs, b.vs)
+    edobj = sc.get_ED_obj()
+    assert edobj.Diagonalized_Hamiltonian is None
+    emu, vs = edobj.get_diagonalized_hamiltonian()
+    assert np.iscomplexobj(vs) and len(calls) == 2
+    sc.set_hamiltonian(sc.hamiltonian + 1e-4*sc.Sz[1]) # a new H: a new eigh
+    KondoSpectrum(sc, 0, 0.)
+    assert len(calls) == 3
