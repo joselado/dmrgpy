@@ -468,7 +468,7 @@ offered. `docs/development.md`
 
 **The NRG route to the STM spectrum (2026-11-13)**, `nrgspectral.py`
 (the complete-basis NRG with the full density matrix, and the exact first
-shell of up to about five spins) and `nrgmps.py` (the shells read off a
+shell of up to about six spins) and `nrgmps.py` (the shells read off a
 DMRG state, the hand-over to an NRG tail, TASK on the head above it),
 public as `ysr.get_stm_spectrum(fc, es, submode="NRG", head=, nz=)`, is
 milestones N0 to N4 and N7 of `docs/nrg_mps_kondo_plan.md`; the measured
@@ -506,10 +506,11 @@ tail agree with the exact route to 8e-4 (keep 800 against 1600 gave the
 1.5 to 1.9% of the first comparison: compare at equal keep). Keeping
 only the lowest states of the bare spin chain as the impurity is
 uncontrolled (42 times too narrow a resonance on 3 spins); `project=`
-exists for that test only. The exact route needs
-keep 1600 from 2 spins on (keep 800 was 100% off at 4 spins) and fails at
-6 (6% at 1600). TASK on the head is one block Krylov space from the four
-starts (`head_task_poles`), only the column <alpha|O|GS>: separate
+exists for that test only. The exact route needs keep 800 up to 4 spins
+and 1600 at 5 and 6 (1.5% of the peak off keep 3200 at 6); measure keep
+in units of the peak of A, since an even chain is a singlet whose A
+vanishes at low w (relative point by point it gave 100% and 5e4%).
+TASK on the head is one block Krylov space from the four starts (`head_task_poles`), only the column <alpha|O|GS>: separate
 `stm_poles` recursions took over 30 minutes on a 15-site head at maxm 256.
 Its error above the cut is the Krylov resolution (12% at nkry = 30, 3.8%
 at 90, the default, on 3 spins against the exact route), and the joined

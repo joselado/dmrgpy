@@ -1301,11 +1301,12 @@ print(t) # 1.001, 0.999 and 0.596; Wilson's T_K is 3.5e-3
 
 There are two ways to start the iteration. With `head="exact"` the spins
 and the first Wilson site are diagonalized exactly, which works up to
-about five spins: above the bandwidth of the spins every spin state is a
+about six spins: above the bandwidth of the spins every spin state is a
 low-energy state, and the number of states to keep grows with the number
 of spins. With `head="dmrg"` DMRG solves the spins and the Wilson sites of
-`fc` (the head), and the NRG goes on from the bond basis of that state a
-few sites before its end (the tail). The tail gives the spectrum below the
+`fc` (the head, a short chain of about 12 Wilson sites), and the NRG goes
+on from the bond basis of that state a few sites before its end (the
+tail). The tail gives the spectrum below the
 energy of that site, and TASK on the head gives it above. On three spins
 the two ways agree. For more spins there is no exact reference, so raise
 `fc.maxm` until the spectrum stops changing: at seven spins it still moved
@@ -1328,13 +1329,13 @@ between the band edge and the spin exchange: for three spins at
 $J_s=10^{-3}D$ the lowest doublet alone gives a resonance 42 times
 narrower than all eight states.
 
-- `head`: `"exact"` (the first shell diagonalized, up to about five
+- `head`: `"exact"` (the first shell diagonalized, up to about six
   spins) or `"dmrg"` (the bond basis of a DMRG state of `fc`, solved with
-  `fc.maxm` and `fc.nsweeps`).
+  `fc.maxm` and `fc.nsweeps`; `fc` is the head and should be short).
 - `nz`: the number of twisted meshes averaged. One mesh at
   $\Lambda=4$ is a comb of lines; 4 meshes give a smooth curve.
-- `keep`: the states kept per Wilson site, 800 by default. Several spins
-  need 1600.
+- `keep`: the states kept per Wilson site, 800 by default, enough up to
+  four spins. Five and six spins need 1600.
 - `T`: the temperature. At $T>0$ the result is $dI/dV$ with the Fermi
   function of a normal tip at the same temperature; `tip_fermi=False`
   gives $A(\omega)$ itself.

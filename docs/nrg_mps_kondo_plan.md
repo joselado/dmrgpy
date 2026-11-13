@@ -8,8 +8,11 @@ docstrings and from the papers of the last section.
 The gate N2 passed: a DMRG bond basis of about 150 states holds the low
 states of the block well enough that the head and the tail give the exact
 NRG of 3 spins to the 2% two NRG runs differ by, while 64 states were 3%
-low. The exact route stops near 6 spins, as estimated in section 4 (keep
-1600 is 6% off there). Ladder step 9 is open: at 7 and 8 spins the head
+low. The exact route works up to at least 6 spins, with keep = 1600 1.5%
+of the peak away from 3200 there, so the estimate of section 4 was about
+right; where it stops was not measured. The depth floor of N2 (the
+deepest hand-over at which the DMRG block spectrum agrees with NRG in
+relative terms) was not measured either. Ladder step 9 is open: at 7 and 8 spins the head
 route runs and gives the expected physics, but maxm = 256 was not enough
 to converge it (6% and 15% changes from 128). A flip-symmetric hand-over
 for a head with a moment is open too. The measurements are in

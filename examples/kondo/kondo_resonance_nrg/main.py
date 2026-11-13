@@ -7,6 +7,7 @@ import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 # at T = 0 it reaches the unitary value 1 at w = 0, and at T above
 # the Kondo temperature T_K the resonance melts.
 import numpy as np
+import matplotlib.pyplot as plt
 from dmrgpy import nrgspectral, nrgthermo, ysr
 
 Lambda = 4.0 # discretization of the Wilson chain
@@ -24,9 +25,8 @@ for T in [0.0, TK, 10*TK]:
     if T == 0.0:
         print("t(w) at w = 1e-6:", t[np.argmin(abs(es-1e-6))])
         assert abs(t[np.argmin(abs(es-1e-6))] - 1.0) < 0.02 # unitary limit
-    import matplotlib.pyplot as plt
     plt.semilogx(es/TK, t, label="T = %.3g T_K" % (T/TK))
-plt.xlabel("w/T_K")
+plt.xlabel("eV/T_K")
 plt.ylabel("t(w)")
 plt.legend()
 plt.show()

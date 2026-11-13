@@ -20,7 +20,7 @@ bandwidth, and where TASK (the tangent-space Krylov route of
 `get_stm_spectrum`) does not resolve the Kondo resonance below about
 T_K/3?
 
-The answer is yes up to about 5 spins, where the exact route is enough:
+The answer is yes up to at least 6 spins, where the exact route is enough:
 the spins and the first Wilson site are diagonalized exactly and the NRG
 goes on from there. Beyond that, DMRG solves the spins and the first
 Wilson sites (the head), and the NRG goes on from the bond basis of that
@@ -101,25 +101,30 @@ stops at the first shell below T/100.
 `nrgspectral.spin_cluster_shell` diagonalizes the spins and the first
 Wilson site exactly, in blocks of (Q, 2S^z), up to 10 spins. The keep it
 needs was measured at Js = 1e-3 D, rho JK = 0.15, Lambda = 4, one mesh,
-as the largest relative change of A(w) on 1e-9 to 0.3 against
-keep = 3200:
+as the largest change of A(w) on 1e-9 to 0.3 against keep = 3200, in
+units of the peak of A. The peak is the unit because an even chain is a
+singlet whose A(w) vanishes at low w, where a relative change is a ratio
+of two near-zero numbers (a first version of this table, relative point
+by point, gave 100% at 4 spins and 5e4% at 6 that way):
 
 | ns | keep 400 | keep 800 | keep 1600 | time at 1600 |
 |---|---|---|---|---|
-| 1 | 0.8% | 0.9% | 0.16% | 45 s |
-| 2 | 39% | 2.0% | 0.30% | 37 s |
-| 3 | 1.0% | 1.0% | 0.66% | 49 s |
-| 4 | 43% | 100% | 0.70% | 38 s |
-| 5 | 17% | 2.0% | 0.20% | 56 s |
-| 6 | 5e4% | 21% | 6.3% | 46 s |
+| 1 | 0.20% | 0.68% | 0.02% | 45 s |
+| 2 | 0.75% | 0.16% | 0.11% | 37 s |
+| 3 | 0.88% | 0.86% | 0.09% | 49 s |
+| 4 | 1.0% | 0.14% | 0.16% | 38 s |
+| 5 | 17% | 0.98% | 0.15% | 56 s |
+| 6 | 106% | 17% | 1.5% | 46 s |
 
 keep = 3200 itself takes 230 to 430 s per mesh. At Js = 1e-2 D three spins
-need less (0.8% at keep = 400). So the exact route stops near 6 spins, as
-the plan estimated, and the head of section 4 takes over there.
-
-Below the keep that converges, the result can be qualitatively wrong,
-not just less accurate (100% at 4 spins and keep = 800). So keep = 1600
-is the default of the examples with several spins.
+behave the same (0.75% at keep = 400). So up to 4 spins keep = 800 is
+enough, the keep needed grows from 5 spins on, and at 6 spins keep = 1600
+is still 1.5% of the peak away (5.6% relative where A is above 1% of its
+peak). Where the exact route stops is between 6 spins and the next one we
+did not measure; the head of section 4 is the route beyond. Below the
+keep that converges, the result can be qualitatively wrong, not just less
+accurate (106% of the peak at 6 spins and keep = 400). keep = 1600 is
+the default of the examples with several spins.
 
 The shortcut of the plan, the lowest states of the bare spin chain as the
 impurity, is uncontrolled, as the plan expected. With 3 spins at
@@ -332,6 +337,11 @@ chain). A coarse Krylov space is not enough above w_join: nkry = 30 was
   marginal flow.
 - A converged case beyond 6 spins: at 7 and 8 spins maxm = 256 was not
   enough (section 6).
+- The depth floor of the plan's N2, the deepest hand-over at which the
+  block spectrum of DMRG still agrees with NRG in relative terms, was not
+  measured; every hand-over here was at the Wilson site 7 or 8, where the
+  scale is about 1e-2. `head_tail_poles` warns when the hand-over basis
+  holds fewer than `MIN_HANDOVER` = 100 states.
 
 ## 10. Papers
 

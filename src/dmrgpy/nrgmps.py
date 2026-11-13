@@ -419,6 +419,7 @@ def handover_shell(fc, k0, U=0.0, imp=None, export=None, pad_bonds=None,
     return sh, ex
 
 
+MIN_HANDOVER = 100 # a hand-over basis below this warns (README section 5)
 N_MAX = 120 # the longest Wilson chain the tail is given, before its stop rule
 OMEGA_MIN = 1e-30 # and the chain ends before its hoppings fall below this
 
@@ -527,6 +528,13 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     Lambda = wp.get("Lambda", abs(t[0]/t[2]) if len(t) > 2 else 4.0)
     sh, ex = handover_shell(c, k0, U=U, Lambda=Lambda, pad_bonds=pad_bonds)
     omega_k0 = sh.omega
+    if sh.info["chi"] < MIN_HANDOVER:
+        warnings.warn("head_tail_poles: the hand-over basis at the Wilson site "
+                      "%d holds %d states, below the about %d the tail needs "
+                      "(measured on one spin at rho J = 0.2: 35%% low with 16 "
+                      "states, 3%% with 64); raise fc.maxm or m"
+                      % (k0, sh.info["chi"], MIN_HANDOVER), RuntimeWarning,
+                      stacklevel=2)
     if w_join is None:
         w_join = omega_k0
     if task and T > 0.1*w_join:

@@ -226,3 +226,14 @@ def test_tail_chain_stays_above_the_broken_end():
     assert len(eps) == 99
     assert np.max(np.abs(eps)/np.abs(np.append(t, t[-1]))) < 1.0
     assert abs(t[-1]) < 1e-28
+
+
+def test_a_small_handover_basis_warns():
+    """Two sites after the hand-over hold at most 16 states, far below the
+    about 100 the tail needs, and head_tail_poles says so."""
+    J = 0.4*ysr.lambda_factor(4.0)
+    fc = ysr.spin_chain_on_metal(1, 6, JK=J, Lambda=4.0,
+                                 itensor_version="python")
+    fc.maxm, fc.nsweeps = 64, 10
+    with pytest.warns(RuntimeWarning, match="hand-over basis"):
+        nrgmps.head_tail_poles(fc, m=2, keep=100, task=False, n_tail=20)
