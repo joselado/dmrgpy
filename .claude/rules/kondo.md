@@ -157,7 +157,16 @@ the lowest pole minus its residual and wants it converged (a Ritz energy
 is an upper bound: 0.47 meV at `nkry=3` for 0.29 meV), counts the poles
 within 1e-3 kT of zero as the manifold of `n_gs` and raises when there
 are more than `n_gs`-1 (a truncated partner sits at 1.5e-9 eV, not at 0),
-and raises on a reached pole below the state. Keep all three. At T>0 the warning counts a pole only when its third nearest pole
+and raises on a reached pole below the state. Keep all three. With
+`n_gs>1` the `n_gs`-1 poles closest to zero within `manifold_window`
+(Gamma0, the split the `n_gs` average accepts without a warning) are
+members too and skip the last two checks (2026-11-13 re-read): with 1e-3 kT
+alone the partner fell outside below about 17 mK on the 9-site test
+chain and the call was refused, while T=0 and 0.1 K ran. The DMRG
+energies of the members are NOT the window: they agree to far below the
+1.5e-9 eV at which the partner's Ritz energy sits, and a window of twice
+their split still refused the call
+(`tests/test_audit_2026_11_13_reread.py`). At T>0 the warning counts a pole only when its third nearest pole
 is further than 5.4 kT (`THERMAL_WIDTH`), a rule fitted on one 24-site
 chain, and weighs it by min(1, d/(5.4 kT)), with d = min(r, r^2/g) the
 distance a Ritz energy with residual r can still move, g being the
@@ -271,9 +280,13 @@ orthogonal to |i>, so [i] + Ritz states is orthonormal, and a
 U=0 only). Ritz energies within the degeneracy tolerance of E_i are
 snapped to it, as on TASK. Exact once each space is exhausted: 1e-15 to
 1e-12 against ED on every model of `tests/test_kondo_krylov.py`.
-`su2=True` takes one member per multiplet with weight 2S+1 in the sector
-of the smallest |Sz_tot|, checks [H, S_tot]=0 on a random state and
-raises otherwise. mode="ED" accepts no other submode (it stays an unknown
+`su2=True` takes one member per multiplet with weight 2S+1, the one at
+Sz_tot=0 for an integer S and at Sz_tot=+1/2 for a half-integer S,
+checks [H, S_tot]=0 on a random state and raises otherwise. Do NOT go
+back to the sector of the smallest |Sz_tot|: a spinful fermion chain with
+no Nf sector holds both kinds of S, and that sector dropped every
+half-integer multiplet, 0.338 of the peak off ED on a 3-site Hubbard
+chain (2026-11-13 re-read, `tests/test_audit_2026_11_13_reread.py`). mode="ED" accepts no other submode (it stays an unknown
 keyword, TypeError), and order="LL" with it raises. Full ED refuses
 above 2000 states (`algebra.maxsize`), so above 10 spins 1/2 this is the
 only ED route. README: `docs/new_methods/kondo_krylov_thermal/`.

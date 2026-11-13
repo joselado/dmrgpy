@@ -1566,3 +1566,21 @@ its block form when the occupied columns need 3 or more chunks of at most
 8 columns. The two
 forms agree to 1.2e-15, so no number changes beyond roundoff. The NumPy
 route and JAX's CPU device are unchanged.
+
+## The 2026-11-13 re-read of the Kondo commits
+
+`get_kondo_spectrum(submode="KRYLOV", su2=True)` on a chain of spinful
+fermions with no `Nf` sector **changes numbers**. It kept the states of
+the smallest $\lvert S^z_{\text{tot}}\rvert$, which is 0 when even and odd
+electron numbers occur together, and so it dropped every multiplet of
+half-integer spin. On a 3-site Hubbard chain at $T=0.3$ it was 0.338 of the
+peak away from `mode="ED"`, and it now agrees to $10^{-11}$. Spin chains
+and chains in an `Nf` sector are unchanged.
+
+`get_kondo_spectrum(mode="DMRG", n_gs=2)` at $T>0$ on a truncated
+degenerate manifold raised a `ValueError` below about 17 mK on a 9-site
+chain, while $T=0$ and 0.1 K ran. It now runs. A call that ran before
+gives the same number.
+
+`get_kondo_spectrum(order="LL")` now takes `mem_gb`, which used to raise a
+`TypeError`. Without it nothing changes.

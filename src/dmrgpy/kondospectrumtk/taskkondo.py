@@ -66,7 +66,7 @@ class TaskKondoSpectrum():
     state, the DMRG route's own T=0 (get_kondo_spectrum's n_gs averages a
     degenerate manifold on top of it)."""
     def __init__(self, chain, site, nkry=100, kB=8.617333262e-5,
-                 degeneracy_tol=1e-9, T=0., n_gs=1):
+                 degeneracy_tol=1e-9, T=0., n_gs=1, manifold_window=0.):
         from .. import taskdmrg
         taskdmrg._check_backend(chain, "get_kondo_spectrum(mode=\"DMRG\")")
         if isinstance(nkry, bool) or not isinstance(nkry, (int, np.integer)) or nkry < 1:
@@ -77,6 +77,7 @@ class TaskKondoSpectrum():
         self.site = site
         self.T = float(T)
         self.kB = kB
+        self.manifold_window = float(manifold_window)
         taskdmrg.ground_state(chain) # no session on julia_live
         ops = []
         for name in ("Sx", "Sy", "Sz"):
@@ -147,7 +148,11 @@ class TaskKondoSpectrum():
         kT of the ground state, whose Boltzmann factors are 1 to that
         accuracy, so the equal weights of n_gs are the thermal ones; at a
         truncated maxm the partner of a member is not at zero exactly
-        (1.5e-9 eV on 9 sites at maxm=10). The lowest pole above them
+        (1.5e-9 eV on 9 sites at maxm=10), so with n_gs>1 the n_gs-1 poles
+        closest to zero within manifold_window (Gamma0, the split
+        get_kondo_spectrum accepts between members) are members too: with
+        1e-3 kT alone the partner fell outside below 17 mK on that chain,
+        and the call that T=0 and 0.1 K run was refused. The lowest pole above them
         enters with its residual subtracted: a Ritz energy is an upper
         bound, and a short Krylov space puts it too high (0.47 meV at
         nkry=3 for 0.29 meV on a 24-site chain), which would let a warm
@@ -166,7 +171,16 @@ class TaskKondoSpectrum():
                 "mode=\"ED\"." % (self.T, len(partners), near,
                                   len(partners) + 1, n_gs, n_gs,
                                   len(partners) + 1))
-        below = rows[(e[1:] < -near) & reached]
+        # the members a truncated solve moved off zero, but no further
+        # than the manifold window
+        member = np.zeros(len(rows), dtype=bool)
+        member[partners - 1] = True
+        free = n_gs - 1 - len(partners)
+        if free > 0 and self.manifold_window > near:
+            cand = rows[(np.abs(e[1:]) <= self.manifold_window) & ~member]
+            cand = cand[np.argsort(np.abs(e[cand]))][:free]
+            member[cand - 1] = True
+        below = rows[(e[1:] < -near) & reached & ~member]
         if len(below):
             raise ValueError(
                 "get_kondo_spectrum(mode=\"DMRG\", T=%g): the spin of site "
@@ -175,7 +189,7 @@ class TaskKondoSpectrum():
                 "spectrum follows from it. Converge the ground state "
                 "further, or use mode=\"ED\"."
                 % (self.T, self.site, -np.min(e[below])))
-        above = rows[e[1:] > near]
+        above = rows[(e[1:] > near) & ~member]
         if not len(above):
             return
         k = above[np.argmin(e[above])]

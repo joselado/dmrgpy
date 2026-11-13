@@ -107,7 +107,9 @@ order in $J\rho_s$ this is exactly `order=3`. At $T>0$ the cutoff of each
 logarithm is averaged over the thermal window of the electrodes, with the
 same weight as the third order, so the first order is `order=3` at the same
 temperature, and the excited states of the sample are occupied as in
-`mode="ED"`.
+`mode="ED"`. At $T>0$ the memory grows with the number of occupied
+states, and `mem_gb=4` cuts the biases in groups so that each flow stays
+below about 4 GB.
 
 ```python
 sc = spinchain.Spin_Chain(["S=1/2"])

@@ -70,7 +70,12 @@ class KondoSpectrumMixin():
               exactly order=3 at the same T. mode="ED" only; at T>0
               the cutoff kernel is thermally averaged with the weight of
               the third order (kondospectrumtk/thermalkernel.py); see
-              docs/new_methods/kondo_leading_log/README.md.
+              docs/new_methods/kondo_leading_log/README.md. mem_gb
+              (order="LL" only, default None) cuts the biases in chunks
+              so that one flow stays below about mem_gb GB; with None
+              every bias is one flow on the CPU, which at T>0 holds a
+              table per occupied state per bias (leadinglog.memory_model
+              gives the size).
           mode: "ED" (default) always uses full ED diagonalization of this
               chain's Hamiltonian (every eigenstate is needed as a
               possible virtual intermediate state), via
@@ -265,6 +270,10 @@ class KondoSpectrumMixin():
                 for k in ("nkry", "p_cut", "su2"):
                     if k in kwargs:
                         krylov[k] = kwargs.pop(k)
+            # the memory budget of the leading-log flow, without which a
+            # T>0 call on the CPU runs every bias in one flow
+            mem_gb = kwargs.pop("mem_gb", None) if (
+                order == "LL" and submode is None) else None
             if kwargs:
                 raise TypeError(
                     "get_kondo_spectrum(mode=\"ED\"%s) got unexpected keyword "
@@ -277,7 +286,8 @@ class KondoSpectrumMixin():
                     "full-spectrum route does not use -- its T=0 already "
                     "averages a degenerate ground manifold -- or "
                     "parameters of submode=\"KRYLOV\" (nkry, p_cut, su2), "
-                    "which need that submode, or not "
+                    "which need that submode, or mem_gb, which needs "
+                    "order=\"LL\" without a submode, or not "
                     "parameters of this method at all (check the spelling "
                     "of Jrho_s, U, T, T0, omega0, Gamma0, order, kB)")
             if submode == "KRYLOV" and order == "LL":
@@ -293,7 +303,8 @@ class KondoSpectrumMixin():
                                                        T0, omega0, Gamma0, order,
                                                        kB, **krylov)
             return self._get_kondo_spectrum_ed(eV, site, Jrho_s, U, T, T0,
-                                                omega0, Gamma0, order, kB)
+                                                omega0, Gamma0, order, kB,
+                                                mem_gb=mem_gb)
         elif mode == "DMRG":
             if not T >= 0.:
                 raise ValueError("T must be >= 0, got %r" % (T,))
@@ -313,7 +324,7 @@ class KondoSpectrumMixin():
                                                  omega0=omega0, Gamma0=Gamma0,
                                                  order=order)
     def _get_kondo_spectrum_ed(self, eV, site, Jrho_s, U, T, T0, omega0,
-                                Gamma0, order, kB):
+                                Gamma0, order, kB, mem_gb=None):
         from .edkondo import KondoSpectrum
         from . import conductance
         from .stepfunctions import cached_fbuilder
@@ -321,7 +332,8 @@ class KondoSpectrumMixin():
         if order == "LL":
             from .leadinglog import leading_log_dIdV
             return eV, leading_log_dIdV(ks, eV, Jrho_s, U=U, T0=T0,
-                                        omega0=omega0, Gamma0=Gamma0)
+                                        omega0=omega0, Gamma0=Gamma0,
+                                        mem_gb=mem_gb)
         dIdV = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
         if order == 3:
             # shared between both calls below, and kept across calls at
@@ -394,9 +406,12 @@ class KondoSpectrumMixin():
                 if self.get_mode(mode="DMRG") == "DMRG":
                     # T>0 is the temperature of the electrodes, with the
                     # sample in its ground state; TaskKondoSpectrum raises
-                    # when that is not the thermal state
+                    # when that is not the thermal state; a member of an
+                    # n_gs manifold may sit up to Gamma0 off its partner,
+                    # the split the n_gs average accepts below
                     ks = TaskKondoSpectrum(self, site, nkry=nkry, kB=kB,
-                                           T=T, n_gs=n_gs)
+                                           T=T, n_gs=n_gs,
+                                           manifold_window=Gamma0 if n_gs > 1 else 0.)
                     # the poles the Krylov space has not converged are
                     # steps at energies that move with nkry
                     if len(eV): ks.warn_unconverged(np.max(np.abs(eV)))

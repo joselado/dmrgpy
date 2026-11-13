@@ -223,9 +223,10 @@ SU2_TOL = 1e-10
 
 def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
     """(E, V, w, S): one member of each spin multiplet among the initial
-    states, in the sector of the smallest |S^z_tot| (0, or 1/2 for a
-    half-integer total spin, where every multiplet has exactly one member),
-    with the weight (2S+1) exp(-(E-E0)/kT), normalized. With an
+    states, the one at S^z_tot=0 for an integer total spin and at
+    S^z_tot=+1/2 for a half-integer one (every multiplet has exactly one
+    member there, also when both kinds occur, as in a spinful fermion
+    chain with no Nf sector), with the weight (2S+1) exp(-(E-E0)/kT), normalized. With an
     unpolarized tip each term of dI/dV is the expectation value of a
     rotation-invariant operator, the same for every member of a multiplet,
     so this is the sum over all of them. Raises ValueError unless H
@@ -254,8 +255,11 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
         raise ValueError("get_kondo_spectrum(submode=\"KRYLOV\", su2=True): "
                          "S^z_tot is not diagonal in the ED basis of this chain")
     m = np.real(Sz.diagonal())
-    mmin = np.min(np.abs(m))
-    idx = np.flatnonzero(np.abs(m - mmin) < 1e-9)
+    # an integer S has one member at m=0 and a half-integer S one at
+    # m=+1/2; a chain of spinful fermions with no Nf sector holds both
+    # kinds at once (even and odd electron numbers), so the smallest |m|
+    # alone would drop every multiplet of the other kind
+    idx = np.flatnonzero((np.abs(m) < 1e-9) | (np.abs(m - 0.5) < 1e-9))
     Hs = H[idx][:, idx]
     S2 = (Stot[0] @ Stot[0] + Stot[1] @ Stot[1] + Stot[2] @ Stot[2]).tocsr()[idx][:, idx]
     tol = degeneracy_tol*2.*nH
