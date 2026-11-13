@@ -1271,6 +1271,85 @@ last hopping of the chain, `fc.t_last`, is its energy resolution.
 
 The example is `examples/kondo/spin_chain_on_metal_site_resolved`.
 
+## The Kondo resonance by NRG
+
+TASK resolves the spectrum of a Wilson chain only down to about a third
+of the Kondo temperature, because one Krylov space has to converge at
+every energy at once. The numerical renormalization group (NRG) resolves
+one energy scale per Wilson site instead: it adds one site, diagonalizes,
+keeps the lowest states and repeats. With the discarded states of every
+site and the full density matrix, the spectrum keeps its sum rule and is
+valid at any temperature. The quantity is the same $A(\omega)$ as in
+[A magnetic atom on a superconductor](#a-magnetic-atom-on-a-superconductor),
+for a spin or a chain of spins on a normal metal (`ysr.kondo_chain` or
+`ysr.spin_chain_on_metal`). For one spin, the T-matrix
+$t(\omega)=\pi^2\rho J^2 A(\omega)/2$ reaches the unitary value 1 at
+$\omega=0$ and $T=0$, which is the height of the Kondo resonance in STM.
+
+```python
+import numpy as np
+from dmrgpy import ysr
+J = 0.4*ysr.lambda_factor(4.0) # rho J = 0.2 in the continuum
+fc = ysr.kondo_chain(40, J=J, Lambda=4.0, itensor_version="python")
+es = np.array([0.0, 1e-4, 1e-2])
+(e, didv) = ysr.get_stm_spectrum(fc, es, submode="NRG", head="exact", nz=4)
+t = np.pi**2*0.5*0.4**2*didv*fc.dos_factor/2 # the T-matrix
+print(t) # 1.001, 0.999 and 0.596; Wilson's T_K is 3.5e-3
+(e, didv) = ysr.get_stm_spectrum(fc, es, submode="NRG", head="exact", nz=4,
+                                 T=3.5e-3) # at T = T_K, t(0) = 0.719
+```
+
+There are two ways to start the iteration. With `head="exact"` the spins
+and the first Wilson site are diagonalized exactly, which works up to
+about five spins: above the bandwidth of the spins every spin state is a
+low-energy state, and the number of states to keep grows with the number
+of spins. With `head="dmrg"` DMRG solves the spins and the Wilson sites of
+`fc` (the head), and the NRG goes on from the bond basis of that state a
+few sites before its end (the tail). The tail gives the spectrum below the
+energy of that site, and TASK on the head gives it above. On three spins
+the two ways agree. For more spins there is no exact reference, so raise
+`fc.maxm` until the spectrum stops changing: at seven spins it still moved
+by 6% from `maxm=128` to 256.
+
+```python
+fc = ysr.spin_chain_on_metal(3, 12, Js=0.01, JK=0.3*ysr.lambda_factor(4.0),
+                             Lambda=4.0, itensor_version=3) # metal under the end spin
+fc.maxm, fc.nsweeps = 160, 30
+es = np.logspace(-8, 0, 50)
+(e, a1) = ysr.get_stm_spectrum(fc, es, submode="NRG", head="exact", keep=1600)
+(e, a2) = ysr.get_stm_spectrum(fc, es, submode="NRG", head="dmrg", keep=1600,
+                               m=4, nkry=30)
+print(np.max(np.abs(a2/a1 - 1)[es < 1e-3])) # 8e-4 below the hand-over
+```
+
+Keeping only the lowest states of the bare spin chain as the impurity is
+not a controlled shortcut. The states that are cut take part in the Kondo flow
+between the band edge and the spin exchange: for three spins at
+$J_s=10^{-3}D$ the lowest doublet alone gives a resonance 42 times
+narrower than all eight states.
+
+- `head`: `"exact"` (the first shell diagonalized, up to about five
+  spins) or `"dmrg"` (the bond basis of a DMRG state of `fc`, solved with
+  `fc.maxm` and `fc.nsweeps`).
+- `nz`: the number of twisted meshes averaged. One mesh at
+  $\Lambda=4$ is a comb of lines; 4 meshes give a smooth curve.
+- `keep`: the states kept per Wilson site, 800 by default. Several spins
+  need 1600.
+- `T`: the temperature. At $T>0$ the result is $dI/dV$ with the Fermi
+  function of a normal tip at the same temperature; `tip_fermi=False`
+  gives $A(\omega)$ itself.
+- `m`: with `head="dmrg"`, the tail starts `m` Wilson sites before the
+  end of the head. The bond basis there needs about 150 states, which
+  takes `m=4` and `fc.maxm` of at least 160. The temperature has to be
+  far below the energy of that site, since TASK is a $T=0$ method.
+- `nkry`: the Krylov blocks of TASK on the head, which gives the
+  spectrum above that energy. The default 90 gives it to about 4% on
+  three spins; 30 is three times faster and about 12% off there.
+- `b`, `omega0`: the log-Gaussian broadening, as in `zaverage`.
+
+The examples are `examples/kondo/kondo_resonance_nrg` and
+`examples/kondo/spin_chain_nrg_head_tail`.
+
 ## A spin chain on a superconducting island
 
 We now take a chain of spins 1/2 whose last spin sits on a small

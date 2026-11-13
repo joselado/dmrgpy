@@ -16,3 +16,8 @@ public API.
   without full diagonalization, from one block Krylov space per occupied
   state, in `kondospectrumtk/krylovkondo.py`
   (`get_kondo_spectrum(mode="ED", submode="KRYLOV")`).
+- `kondo_nrg_mps/`: the STM spectrum of one spin or a chain of spins on
+  a metal by NRG with the complete basis and the full density matrix,
+  from the exact first shell or from the bond basis of a DMRG head, in
+  `nrgspectral.py` and `nrgmps.py`
+  (`ysr.get_stm_spectrum(submode="NRG")`).

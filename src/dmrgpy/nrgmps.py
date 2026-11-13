@@ -476,7 +476,7 @@ class HeadTailSpectrum(object):
 
 
 def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
-                    nkry=60, w_join=None, stop_tol=1e-4, stop_extra=6,
+                    nkry=90, w_join=None, stop_tol=1e-4, stop_extra=6,
                     wilson_tail=None, task=True, Nf=None, Sz=None,
                     window=None, solved=False, pad_bonds=None):
     """Poles of the STM spectrum A(w) of ysr.py on the chain fc (a
@@ -576,7 +576,7 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
 
 def stm_spectrum(es, ns=1, n_head=12, site=None, Js=0.5, JK=0.2, Lambda=4.0,
                  D=1.0, B=0.0, mesh="mean", nz=4, b=0.6, omega0=None, U=0.0,
-                 m=4, keep=800, T=0.0, nkry=60, maxm=256, nsweeps=30,
+                 m=4, keep=800, T=0.0, nkry=90, maxm=160, nsweeps=30,
                  cutoff=1e-12, itensor_version=3, continuum_norm=True,
                  task=True, tip_fermi=True, **kwargs):
     """A(w) at the energies es with a DMRG head and an NRG tail, z-averaged
@@ -641,7 +641,7 @@ def twin_chain(fc, z):
 
 
 def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
-                     T=0.0, keep=800, m=4, k0=None, n_tail=None, nkry=60,
+                     T=0.0, keep=800, m=4, k0=None, n_tail=None, nkry=90,
                      stop_tol=1e-4, stop_extra=6, tip_fermi=True,
                      return_poles=False):
     """ysr.get_stm_spectrum(fc, es, submode="NRG"): A(w) at the energies es,
@@ -730,7 +730,7 @@ def _session_arrays(c, ops):
     return Ms, Ws, Wo
 
 
-def head_task_poles(c, U=0.0, nkry=60):
+def head_task_poles(c, U=0.0, nkry=90):
     """TASK poles of the STM spectrum of the head state c (a solved chain,
     one of definite parity), from one block Krylov space
     (pyitensor.task.block_krylov, nkry blocks) started from P X^dag_sigma

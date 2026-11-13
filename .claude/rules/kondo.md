@@ -466,6 +466,56 @@ screened case (spin 2 of 7) gave the same ranking. Delta != 0 is not
 offered. `docs/development.md`
 4.8i, `tests/test_ysr_spin_chain_on_metal.py`.
 
+**The NRG route to the STM spectrum (2026-11-13)**, `nrgspectral.py`
+(the complete-basis NRG with the full density matrix, and the exact first
+shell of up to about five spins) and `nrgmps.py` (the shells read off a
+DMRG state, the hand-over to an NRG tail, TASK on the head above it),
+public as `ysr.get_stm_spectrum(fc, es, submode="NRG", head=, nz=)`, is
+milestones N0 to N4 and N7 of `docs/nrg_mps_kondo_plan.md`; the measured
+record is `docs/new_methods/kondo_nrg_mps/README.md`. Rules it rests on:
+at T > 0 the NRG keeps the weight inside |w| < T but not its shape (250
+times too much weight below 1e-7 on the free chain at T = 3.5e-4), and
+`broaden_poles` with omega0 = T then dips to 0.68 inside |w| < T for the
+exact density of states too, so the T > 0 result is dI/dV with the Fermi
+function of the tip (`thermal_didv`, omega0 = T/4); do NOT return the
+broadened A(w) at T > 0 as the STM spectrum. At T = 0 the curve below the
+last shell is the kernel's, so `curve` reads |w| below `FLOOR` = 30
+omega_N there, with ONE floor for all twists (read at their own omega_N
+the meshes sit at one phase of their comb: 1.93 instead of 1.00). The
+T = 0 density matrix is the ground manifold within `DEG_TOL` = 1e-4
+omega_N, since on an even chain the fixed point has a fourfold manifold
+split by 1e-7 omega_N. The Boltzmann weights use ground energies relative
+to the last shell, accumulated from the per-shell increments (absolute
+ones moved A by 1e-2 at T = 1e-14); the B = 0 average of (Q, 2Sz) and
+(Q, -2Sz) is decided from the recorded B, not from a spectral tolerance
+(which erased B = 5e-11). Keep that average on for a DMRG hand-over: a
+doublet head (odd Nf) has a left basis that is not flip symmetric, and
+without the average the tail was 59% off the exact route with the metal
+under the middle of 3 spins, 3.8% with it (a symmetric basis from both
+members of the doublet is open). The tail chain stops before its scale falls
+below 1e-30 (`max_sites`, 99 sites at Lambda = 4): `wilson_chain` breaks
+near 1e-35. The hand-over needs a graded basis, so `head_state` solves in
+the sector (Nf, 2Sz), with the v3 charge seed, scans 2Sz in a field and
+promotes to dense; "python" states come in a complex gauge and
+`real_gauge` weights by the bond matrix (unweighted, Schmidt values of
+1e-6 failed it at 3.7e-4), with a tolerance of 1e-4 because a solved
+state is real only to the accuracy of the solve (2.5e-7 at 20 sweeps).
+The hand-over basis needs about 150 states (m = 4, maxm >= 160): 64
+states were 3% low on 3 spins, and with keep 1600 on both sides head and
+tail agree with the exact route to 8e-4 (keep 800 against 1600 gave the
+1.5 to 1.9% of the first comparison: compare at equal keep). Keeping
+only the lowest states of the bare spin chain as the impurity is
+uncontrolled (42 times too narrow a resonance on 3 spins); `project=`
+exists for that test only. The exact route needs
+keep 1600 from 2 spins on (keep 800 was 100% off at 4 spins) and fails at
+6 (6% at 1600). TASK on the head is one block Krylov space from the four
+starts (`head_task_poles`), only the column <alpha|O|GS>: separate
+`stm_poles` recursions took over 30 minutes on a 15-site head at maxm 256.
+Its error above the cut is the Krylov resolution (12% at nkry = 30, 3.8%
+at 90, the default, on 3 spins against the exact route), and the joined
+curve is 3% low around the cut, where nothing conserves the weight.
+`tests/test_nrgspectral.py`, `tests/test_nrgmps.py`.
+
 On v3 a sector solve keeps the impurity charges of its start, since no term
 of H moves charge on or off an impurity site: S > 1/2 (`ysr.py`,
 `_seed_impurity_charge`) and several surrogate spins

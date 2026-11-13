@@ -1,8 +1,20 @@
 # An NRG route to the Kondo spectrum of several spins, with matrix product states
 
-Plan, 2026-11-13. Nothing here is implemented or measured yet. The numbers
-quoted are from the existing docstrings and from the papers of the last
-section.
+Plan, 2026-11-13. The numbers quoted below are from the existing
+docstrings and from the papers of the last section.
+
+**Status (2026-11-13): N0 to N4 and N7 are implemented**, in
+`nrgspectral.py`, `nrgmps.py` and `ysr.get_stm_spectrum(submode="NRG")`.
+The gate N2 passed: a DMRG bond basis of about 150 states holds the low
+states of the block well enough that the head and the tail give the exact
+NRG of 3 spins to the 2% two NRG runs differ by, while 64 states were 3%
+low. The exact route stops near 6 spins, as estimated in section 4 (keep
+1600 is 6% off there). Ladder step 9 is open: at 7 and 8 spins the head
+route runs and gives the expected physics, but maxm = 256 was not enough
+to converge it (6% and 15% changes from 128). A flip-symmetric hand-over
+for a head with a moment is open too. The measurements are in
+`docs/new_methods/kondo_nrg_mps/README.md`; what follows is the plan as
+written.
 
 **Decision (2026-11-13): the bath on one spin.** The target is the
 one-channel geometry of `spin_chain_on_metal`, milestones N0 to N4 and N7.

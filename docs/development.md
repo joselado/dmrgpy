@@ -7205,6 +7205,49 @@ site order, and the middle spin against ED on `"python"` and 3 (energy to
 1e-14, TASK spectrum to 4e-12 on 6 sites).
 `examples/kondo/spin_chain_on_metal_site_resolved`.
 
+### 4.8j The STM spectrum by NRG, with a DMRG head (`nrgspectral.py`, `nrgmps.py`)
+
+Two modules and one dispatch. `nrgspectral.py` is the numerical
+renormalization group with the complete basis of discarded states and the
+full density matrix, built on `nrgthermo`'s `_components` and
+`_block_hamiltonian`: a `StartShell` (every eigenstate of the first shell
+by label (Q, 2Sz), f of its last site, the creation-like operators and
+their anticommutators), the forward pass `iterate` (with the stop rule at
+the fixed point), the backward pass `density_matrices` and the Lehmann sum
+`spectral_poles`. `spin_cluster_shell` builds the exact first shell of ns
+spins and the first Wilson site by dense diagonalization (up to 10 spins);
+`chain_poles` and `stm_spectrum` run it on a Wilson chain and average
+twists; `curve` and `thermal_didv` turn poles into a curve at T = 0 and
+T > 0. `nrgmps.py` builds a `StartShell` from a DMRG state instead:
+`head_state` solves the chain in a sector and promotes it, `Export` holds
+the left isometries in a real gauge and contracts any operator of the left
+block with the MPO the backend exports (the arrays TASK uses), and
+`handover_shell` grades the basis by N and S^z and writes the block
+Hamiltonian, f and the tip vertices in it. `head_tail_poles` joins the
+tail below the scale of the hand-over with `head_task_poles` (one block
+Krylov space of TASK from the four starts) above it.
+
+`ysr.get_stm_spectrum(fc, es, submode="NRG")` dispatches to
+`nrgmps.get_stm_spectrum` before any of the TASK code, and refuses `imp`,
+`site`, `delta` and a `mode`: the tip sits on `fc.tip_spin` and the first
+Wilson site, and the broadening is the log-Gaussian kernel. The twists
+other than fc's are rebuilt by `twin_chain` from what the ysr chains
+store: `fc.wilson_chain = (eps, t)` and `fc.wilson_params` (Lambda, D, z,
+mesh), both added for this route, `fc.J_chain`, `fc.Js`, `fc.B_imp` and
+`fc.tip_spin`. A chain built with `wilson=` by hand has no
+`wilson_params` and takes `nz=1` only. Backends: "python" and 3 (the
+export and the sector solve); `julia_live` raises.
+
+Why the hand-over is cut from a sector state. The labels of the tail are
+the eigenvalues of N and S^z of the block in the left basis, which are
+integers only when the state has a definite total N and S^z; a plain solve
+of a degenerate multiplet is an arbitrary member of it. The parity of the
+tail's Jordan-Wigner sign is that of N of the whole block, singly occupied
+spin sites included, which is the ordering of the backend's own strings.
+The measurements behind every default are in
+`docs/new_methods/kondo_nrg_mps/README.md` and the rules in
+`.claude/rules/kondo.md`.
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,

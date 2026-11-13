@@ -74,6 +74,22 @@ The poles of all shells are binned on a logarithmic mesh of |w|
 broadened with the log-Gaussian kernel of ysrtk.zaverage.broaden_poles.
 The twist average (nz meshes z = k/nz) is stm_spectrum.
 
+From poles to a curve (curve). At T = 0 the curve below the last shell
+is that of the kernel and not of the spectrum (it falls to 0.86 of the
+plateau below omega_N), while past the fixed point the spectrum no
+longer changes; so every |w| below FLOOR*omega_N is read at that energy,
+with one floor for all the meshes of a twist average, since each mesh
+read at its own omega_N sits at the same place of its comb (1.93 instead
+of 1.00). At T > 0 the NRG keeps the weight inside |w| < T but not its
+shape: on the free chain at T = 3.5e-4 the poles below 1e-7 carry 250
+times too much weight, while the weight inside |w| < T is right to
+0.15%, and the kernel with omega0 = T dips to 0.68 of a flat density
+inside |w| < T for the exact density of states as well. STM measures
+dI/dV = int dw A(w) [-f'(w - eV)] with the Fermi function of the tip,
+which averages over that window, and this is what thermal_didv returns:
+on the free chain it gives the exact density of states of the same
+chains to 0.3% at every bias.
+
 Long chains. At B = 0 the spectra of the blocks (Q, 2Sz) and (Q, -2Sz)
 are set to their mean at every shell, as in nrgthermo, since roundoff
 would otherwise split the two members of a free moment and act as a

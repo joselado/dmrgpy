@@ -272,6 +272,30 @@ def test_stm_spectrum_passes_the_number_of_spins():
     assert i3["results"][0].nkept[0] == 32
 
 
+def test_kondo_resonance_splits_in_a_field():
+    """One spin at rho J = 0.2 with B = 10 T_K on the impurity: the
+    spin-summed resonance splits into two peaks just below +-B (measured
+    at 9.06 T_K with four meshes) and the zero-bias value falls to 0.21,
+    while B = T_K leaves a flat top at zero bias (0.90), with no peak
+    above it."""
+    J, TK = 0.4*A4, 3.489e-3
+    es = np.concatenate([-np.logspace(-1, -5, 33), np.logspace(-5, -1, 33)])
+    for B, zero in ((TK, 0.90), (10*TK, 0.21)):
+        _, A, info = nrgspectral.stm_spectrum(es, ns=1, n=60, JK=J, B=B,
+                                              Lambda=4.0, nz=2, b=0.5,
+                                              keep=400, stop_tol=1e-4)
+        assert info["results"][0].flip is False
+        t = np.pi**2*0.5*(J/A4)**2*A/2.0
+        assert t[np.argmin(np.abs(es - 1e-5))] == pytest.approx(zero, abs=0.03)
+        pos = es > 0
+        peak = es[pos][np.argmax(t[pos])]
+        if B > 5*TK:
+            assert 0.7*B < peak < 1.05*B
+            assert -es[~pos][np.argmax(t[~pos])] == pytest.approx(peak, rel=1e-6)
+        else:
+            assert np.max(t[pos]) - t[np.argmin(np.abs(es - 1e-5))] < 0.03
+
+
 def test_validation():
     with pytest.raises(ValueError):
         nrgspectral.spin_cluster_shell(ns=2, site=2)
