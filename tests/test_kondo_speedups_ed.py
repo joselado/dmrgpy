@@ -414,13 +414,23 @@ def test_hub_blocks_equal_the_single_pass(monkeypatch, T, cplx):
     ref = _old_third(ks, EV, -0.05, Fb=fb)
     monkeypatch.setattr(cd, "COEFF_BYTES", 1)
     built = _count_builds(monkeypatch)
-    got = cd.third_order_kondo_dIdV(ks, EV, -0.05, Fb=fb)
+    thetas = []
+    theta = cd.Theta
+    monkeypatch.setattr(cd, "Theta", lambda x: (thetas.append(np.size(x)), theta(x))[1])
+    F = _CountF(fb)
+    got = cd.third_order_kondo_dIdV(ks, EV, -0.05, Fb=F)
     assert _rel(got, ref) < 1e-12
     assert sum(built) == nocc*nf*dim + (nf - nocc)*nocc*dim
+    # the savings of the layout: the direct diagram reads its F off the
+    # exchange tables (2 n_f dim per bias, not 2 (n_occ + n_f) dim), and the
+    # exchange Theta of an occupied hub is 1 minus the direct one
+    assert F.n == 2*len(EV)*nf*dim
+    assert sum(thetas) == 2*len(EV)*nocc*(2*nf - nocc)
     # the exact form (no odd_part) gives the same numbers
     F = _CountF(fb)
     del F.odd_part
     assert _rel(cd.third_order_kondo_dIdV(ks, EV, -0.05, Fb=F), ref) < 1e-12
+    assert F.n == 2*len(EV)*(nf + nocc)*dim
 
 
 def test_hub_blocks_build_once_whatever_the_number_of_biases(monkeypatch):
@@ -438,6 +448,26 @@ def test_hub_blocks_build_once_whatever_the_number_of_biases(monkeypatch):
     many = np.linspace(-5e-3, 5e-3, 301)
     cd.third_order_kondo_dIdV(ks, many, -0.05, Fb=fb)
     assert sum(built) == few == dim**3
+
+
+def test_hub_blocks_memory_does_not_grow_with_the_biases(monkeypatch):
+    """Every state occupied (7 spins at 1000 K), blocks of 2 MB: the peak is
+    set by CHUNK_ENTRIES and the block, not by the number of biases. The
+    old pair of exchange accumulators was (n_eV, 128, 128) per direction,
+    11 MB at 41 biases and 63 MB at 241."""
+    import tracemalloc
+    ks = KondoSpectrum(_chain(n=7), 0, 1000.)
+    assert len(cd._occupied_states(ks)) == ks.dim == 128
+    fb = cd.FBuilder(1000., omega0=20e-3, Gamma0=5e-6)
+    monkeypatch.setattr(cd, "COEFF_BYTES", 2e6)
+    monkeypatch.setattr(cd, "CHUNK_ENTRIES", 4e4) # 22 biases per chunk
+    peaks = []
+    for nb in (41, 241):
+        tracemalloc.start()
+        cd.third_order_kondo_dIdV(ks, np.linspace(-5e-3, 5e-3, nb), -0.05, Fb=fb)
+        peaks.append(tracemalloc.get_traced_memory()[1])
+        tracemalloc.stop()
+    assert peaks[1] < 1.2*peaks[0] + 1e6 and peaks[1] < 12e6
 
 
 # item 6: the series and the tails of Theta

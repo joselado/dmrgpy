@@ -1614,5 +1614,14 @@ A spectrum whose matrices are real for $S_x$ and $S_z$ and imaginary for
 $S_y$ (every ED spectrum of a real $H$, and the TASK and Krylov spectra
 when theirs are) now builds its Levi-Civita coefficients in real
 arithmetic, and the real eigh of a real $H$ picks another basis inside a
-degenerate level than the complex one did. Both move the curves at
-roundoff only, since every sum is a trace over each level.
+degenerate level than the complex one did. For the sums of orders 2 and 3
+both are roundoff only, since every sum is a trace over each level.
+
+`get_kondo_spectrum(order="LL")` reads the same spectrum, and its flow is
+an adaptive integration whose steps follow the last digits of the
+matrices. Where the spectrum has degenerate levels it now sees another
+basis inside them, and the curve moves at the tolerance of the
+integration (`rtol=1e-10`): on 5 spins at zero field by $4.3\times
+10^{-12}$ of the peak at $T=0$ and by $1.8\times 10^{-11}$ at 1 K. With a
+field (no degeneracy) it moves by $3\times 10^{-15}$ at most. The old
+basis was not better: it was whatever the complex eigh returned.

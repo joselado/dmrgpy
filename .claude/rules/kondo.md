@@ -241,7 +241,11 @@ tolerance), keeps the pairs per ED object (`_REAL_EIGH`, weak) and leaves
 the ED object's own complex `get_diagonalized_hamiltonian`, which
 `edtk/dynamics.py` reads, untouched; Sx and Sz come out real and Sy as i
 times a real matrix, and `conductance._spin_triplet` reads that form off
-the arrays. Read a sparse matrix through a COO copy (`edkondo._values`),
+the arrays. Every sum of orders 2 and 3 is a trace over each degenerate
+level, so the basis the real eigh picks there moves them at roundoff; the
+adaptive flow of `order="LL"` is not a sum and moves at its `rtol`
+(1.8e-11 of the peak on 5 spins at zero field and 1 K, 3e-15 with a
+field), which the ledger records. Read a sparse matrix through a COO copy (`edkondo._values`),
 never through `m.imag.count_nonzero()`: `m.imag` shares its data with m,
 and count_nonzero sums duplicates in place, which made H non-Hermitian on
 a mixed S=1 and S=1/2 chain (H not in canonical form) and moved its Kondo
