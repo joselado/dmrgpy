@@ -161,8 +161,10 @@ def kondo_chain(n, J=0.2, Delta=0.0, Lambda=2.0, D=1.0, B=0.0, z=0.0,
     J*lambda_factor(Lambda) to stand for J in the continuum; on "zp" it
     has rho, and the continuum J goes on the chain bare. The chain stores
     that factor as fc.dos_factor (lambda_factor(Lambda) or 1), the mesh as
-    fc.mesh, the coupling as fc.J_chain and the last hopping |t_{n-1}| as
-    fc.t_last (D for n=1); ysrtk.zaverage reads both. The band
+    fc.mesh, the coupling as fc.J_chain, the last hopping |t_{n-1}| as
+    fc.t_last (D for n=1) and the chain as fc.wilson_chain = (eps, t)
+    with fc.wilson_params (Lambda, D, z, mesh); ysrtk.zaverage reads the
+    first two. The band
     is flat on [-D, D], so rho = 1/(2D) and rho J is J/(2D). B is the field
     on the impurity only and Dz the uniaxial anisotropy, both in energy
     units (Dz (S^z)^2 is a constant for S=1/2). S is "1/2" (default), "1",
@@ -215,6 +217,8 @@ def kondo_chain(n, J=0.2, Delta=0.0, Lambda=2.0, D=1.0, B=0.0, z=0.0,
     fc.dos_factor = lambda_factor(Lambda) if mesh == "mean" else 1.0
     fc.J_chain = J
     fc.t_last = abs(t[-1]) if n > 1 else D
+    fc.wilson_chain = (np.array(eps), np.array(t))
+    fc.wilson_params = dict(Lambda=Lambda, D=D, z=z, mesh=mesh)
     fc.Dz = Dz
     fc.B_imp = B
     fc.qp_gap = bath_quasiparticle_gap(eps, t, Delta)
@@ -671,8 +675,10 @@ def spin_chain_on_metal(ns, n, site=None, Js=0.5, JK=0.5, Lambda=2.0, D=1.0,
     fc.tip_spin = site, fc.wilson and fc.channels = [wilson], fc.J_chain
     = JK, fc.Js, fc.B_imp, fc.Dz = 0, fc.Delta_sc = 0, fc.Upen, fc.mesh,
     fc.dos_factor, fc.t_last (the last hopping, the energy resolution of
-    the chain), fc.qp_gap (the lowest level of the Wilson chain alone,
-    zero for n odd on a symmetric band) and fc.reaches_gap = False."""
+    the chain), fc.wilson_chain = (eps, t), fc.wilson_params (Lambda, D,
+    z and mesh, None for wilson= by hand), fc.qp_gap (the lowest level
+    of the Wilson chain alone, zero for n odd on a symmetric band) and
+    fc.reaches_gap = False."""
     ns, n = int(ns), int(n)
     if ns < 1 or n < 1:
         raise ValueError("spin_chain_on_metal needs ns >= 1 spins and "
@@ -727,6 +733,9 @@ def spin_chain_on_metal(ns, n, site=None, Js=0.5, JK=0.5, Lambda=2.0, D=1.0,
     fc.mesh = mesh
     fc.dos_factor = lambda_factor(Lambda) if mesh == "mean" else 1.0
     fc.t_last = abs(t[-1]) if n > 1 else D
+    fc.wilson_chain = (np.array(eps), np.array(t))
+    fc.wilson_params = (None if wilson is not None
+                        else dict(Lambda=Lambda, D=D, z=z, mesh=mesh))
     fc.qp_gap = bath_quasiparticle_gap(eps, t, 0.0)
     fc.reaches_gap = False
     return fc
