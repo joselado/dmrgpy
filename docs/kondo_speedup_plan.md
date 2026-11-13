@@ -8,6 +8,28 @@ yet. Each item says where the time goes, what to change, what the gain
 should be, and whether a number moves. The three bugs and the test gaps
 of the same re-read are already fixed (`27198eb`, `e8ac10a`).
 
+## The baseline, measured
+
+The light cases of `benchmarks/kondo_speedups/cases.py`, on HEAD of
+2026-11-13 (`85ea31a`), one core of an Intel Xeon Gold 6248, BLAS
+pinned, three or two repeats in fresh processes, and the cumulative time
+of the functions the items aim at from one run under cProfile:
+
+| case | time | where it goes |
+|---|---|---|
+| ED, 10 spins, T=0, 41 biases | 2.9 s | third-order Kondo term 1.66 s (F0 1.27 s), KondoSpectrum 1.20 s (eigh 0.63 s, eigenbasis 0.42 s) |
+| ED, 10 spins, 1 K, 41 biases | 5.9 s | third-order Kondo term 4.28 s (the F spline 2.88 s), KondoSpectrum 1.21 s |
+| ED, 9 spins, 20 K, 41 biases | 58.6 s | third-order Kondo term 55.7 s (coefficients 9.8 s, the F spline 2.7 s), potential term 1.6 s |
+| TASK, order 2, nkry=100, 121 biases | 2.4 s | the projected spectrum 3.4 s of 3.5 s under the profiler |
+| TASK, order 3, nkry=300, 0.3 K, 241 biases | 24.6 s | the build 14.4 s (block Krylov 11.5 s), third-order Kondo term 12.7 s |
+| TASK, n_gs=2, a scan of 4 values of U | 20.3 s | get_excited_states 25.4 s of 32.4 s under the profiler |
+| KRYLOV, 12 spins, 1 K, 61 biases | 53.7 s | the Krylov spaces 26.6 s, third-order Kondo term 26.1 s |
+| LL on the CPU, 9 spins, T=0, 61 biases | 204.6 s | the flow, all of it |
+
+So the ED sums (items 1, 2, 4), the manifold re-solve (item 10), the
+Krylov spaces (item 11) and the leading-log flow (items 13 to 15) are
+where the time is. The peak memory of every light case was below 0.9 GB.
+
 We order the items by how much a user waits on the path they touch. The
 ED route comes first, since it is the reference for every other route and
 the only one at any T on small clusters.
