@@ -361,9 +361,16 @@ is `_tip_bracket` line for line (the electron index summed first, an
 operand of 4 d^2 numbers per occupied column), and "block" applies the
 kernel to the vertex and does one product per bias for all the occupied
 columns, twice the arithmetic but the exchange kernel built once per bias
-and nothing that grows with their number. "auto" takes "block" from
-`BLOCK_FROM` occupied columns, which is set out of reach: on the A2000 the
-column form won every case measured, also at 223 occupied columns. With `mem_gb` the biases are chunked by
+and nothing that grows with their number. "auto" takes "block" when the
+column form needs `BLOCK_FROM` = 3 or more chunks of columns
+(`_DeviceFlow.column_chunks`). It is a rule on the size, not on the card.
+Measured on 2026-11-13, the column form wins with one occupied column on
+both the A2000 and an H200, and in 2 chunks (d=256, 223 columns). The two
+tie in 3 chunks, and the block form wins from 15 chunks on, by up to 6.4
+on the A2000 (d=2048, 114 columns) and 4.8 on the H200 (d=8192, 24
+columns). Do not key it on the card again: an earlier rule put it out of
+reach after the A2000 runs, which had at most 2 chunks.
+`tests/test_kondo_leading_log_device.py` pins the rule. With `mem_gb` the biases are chunked by
 `leadinglog_device.memory_model` on the device. The exchange sum runs on
 the card there, which does not touch the author's one-core rule for
 `_hole_sum` on the host. JAX's allocator is capped at

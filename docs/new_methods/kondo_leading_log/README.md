@@ -430,13 +430,38 @@ card (2.9 at 9 spins, 1.9 at 10), since the products, where it is
 slower than six cores, grow as d^3. A card with full double precision
 (V100, A100, H100, H200) is the one for large impurities.
 
+On an H200 (Triton, jax 0.7.1), on the same chain and with the same
+parameters, single runs that include the compilation give the times
+below. They are for `leading_log_dIdV` alone; the diagonalization on the
+host adds 3 s at 11 spins, 27 s at 12 and about 260 s at 13, on one
+thread and with 30 GB of host memory at 13 spins.
+
+| case | column form | block form | peak on the card |
+|---|---|---|---|
+| 9 spins, T=0 | 2.1 s | 2.6 s | 1.0 GB |
+| 11 spins, T=0 | 11.8 s | 18.4 s | 7.1 GB |
+| 12 spins, T=0 | 77.2 s | 88.6 s | 27.4 GB |
+| 13 spins, T=0 | 455 s | 529 s | 108.9 GB |
+| 13 spins, T=0.5 K, 24 occupied states | 3013 s | 632 s | 124.3 GB |
+
+So at 9 spins the H200 is 20 times faster than the A2000 and 57 times
+faster than six cores. The flow takes about 520 steps at 11 to 13 spins.
+We split the 13-spin times into a fixed part and a part per bias, by
+timing one right-hand side at 61 and at 201 biases. At T=0 in the column
+form it is about 400 s plus 0.85 s per bias. At 0.5 K in the block form
+it is about 410 s plus 3.6 s per bias, and in the column form about 720 s
+plus 37.6 s per bias. The fixed part is paid again in every chunk of
+`mem_gb`, since each chunk solves the couplings again.
+
 The memory on the device is `leadinglog_device.memory_model(d, m,
 real)`. It counts about 20 copies of the state, against about 24 for
 SciPy's DOP853. The couplings are 8 d^2 numbers, and the tip vertex is
 4 d m per energy. It also counts about ten 2d x 2d matrices of the
 right-hand side and three chunks of the tip part. It gives 6.1 GB for
-the T=2 K run above, where 6.15 GB were measured, and it is the model
-`mem_gb` uses on this route. For 13 spins 1/2 (d=8192) on the real route
+the T=2 K run above, where 6.15 GB were measured. On the H200 at 13 spins
+it gives 109.6 GB at T=0, where 108.9 GB were measured, and 124.3 GB at
+0.5 K, where 124.3 GB were measured. It is the model `mem_gb` uses on this
+route. For 13 spins 1/2 (d=8192) on the real route
 it gives about 110 GB before the first bias, so only a 141 GB card holds
 it. Each energy then adds 5.2 MB per occupied state. JAX caps its
 allocator at 75% of the card by default, also with
@@ -446,6 +471,10 @@ in its environment. On the A2000 a 10 GB array failed under the default
 and was allocated at 0.95. A run at 13 spins and 0.5 K on the chain
 above keeps 24 occupied states, which needs about 124 GB for 61 biases
 by the model, and only fits with the larger fraction.
+`leading_log_dIdV` plans for at most 0.95 of the allocator limit
+(`leadinglog_device.allocator_budget()`). A flow above it is cut in
+chunks, a larger `mem_gb` warns and is lowered, and when not even 8
+biases fit the error names the fraction to raise.
 
 The tip part has two forms (`TIP_FORM`). "columns" is `_tip_bracket`
 line for line: the electron index is summed before the kernel is applied,
@@ -453,10 +482,22 @@ so each chunk of occupied columns has operands of 4 d^2 numbers per
 column, and it builds the exchange kernel again. "block" applies the
 kernel to the vertex and does one product per bias for all the occupied
 columns. It has twice the arithmetic, but the kernel is built once per
-bias. On the A2000 the column form was faster in every case: 41 s
-against 78 s at 9 spins, 283 s against 364 s at 10 spins, 116 s against
-185 s on the complex route, and 164 s against 308 s with 223 occupied
-states. So "auto" takes the column form.
+bias. What decides between them is the number of chunks of
+`CHUNK_BYTES` that the occupied columns need in the column form, since
+every chunk builds the exchange kernel again. From 11 spins on one column
+is already a chunk. With one occupied state the column form wins on both
+cards: 41 s against 78 s at 9 spins, 283 s against 364 s at 10 spins and
+116 s against 185 s on the complex route on the A2000, and 455 s against
+529 s at 13 spins on the H200. In 2 chunks it still wins (A2000, 8 spins,
+223 occupied states: 164 s against 308 s). One right-hand side on the
+A2000 ties in 3 chunks (10 spins, 17 occupied states: 1.10 s against
+1.03 s). The block form then wins in 15 chunks (10 spins, 102 states:
+4.04 s against 3.42 s), in 16 chunks (11 spins, 16 states: 15.1 s against
+5.3 s) and in 114 chunks (11 spins, 114 states: 96.8 s against 15.2 s).
+On the H200 at 13 spins and 24 states, in 24 chunks, the whole flow takes
+3013 s in the column form and 632 s in the block form. So "auto" takes
+the block form from 3 chunks (`BLOCK_FROM`). The two forms agree to
+1.2e-15 at every size measured on the H200.
 
 What is not done. The tip vertex is integrated as part of the state, so
 its 13 stages are kept like those of the couplings. It does not enter
@@ -616,4 +657,9 @@ the author's choice on this date.
 2026-11-12: the flow runs on a GPU through JAX (`leadinglog_device.py`,
 end of section 7), with the numbers of the NumPy route to roundoff. On
 the RTX A2000 of d22 it is 2 to 4 times faster than six cores at 9 and
-10 spins. The H200 timing at 11 to 13 spins is pending.
+10 spins.
+
+2026-11-13: on an H200 the flow takes 455 s at 13 spins and T=0, and
+632 s at 0.5 K with 24 occupied states (section 7). "auto" takes the
+block form of the tip part from 3 chunks of occupied columns, and the
+memory budget is capped at the allocator limit of JAX.

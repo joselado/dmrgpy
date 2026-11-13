@@ -17,13 +17,16 @@ tens of kB), and receives one scalar per stage attempt (the error norm) and
 one per step (the sample coupling). The tip part of the right-hand side is
 computed per chunk of biases (and of occupied columns), with each chunk
 below CHUNK_BYTES, in one of two forms (TIP_FORM, _DeviceFlow._tip): as
-leadinglog._tip_bracket does for a few occupied columns, and as one matrix
-product per bias for many.
+leadinglog._tip_bracket does, one chunk of occupied columns at a time, and
+as one matrix product per bias for all of them.
 
 Memory. The integrator holds the 13 stages of a step, the state at its
-start and the new state, and one stage argument, about 16 copies of the
-state where SciPy's DOP853 holds about 24 (leadinglog.memory_model). At a
-stop of the flow three more stages are computed for the dense output.
+start and the new state, and one stage argument, and at a stop of the flow
+three more stages and the difference for the dense output: about 20 copies
+of the state where SciPy's DOP853 holds about 24 (memory_model,
+leadinglog.memory_model). JAX caps its allocator at
+XLA_PYTHON_CLIENT_MEM_FRACTION of the card, 0.75 by default, and
+leadinglog.leading_log_dIdV plans for at most allocator_budget().
 
 What it is for. The d^3 part of the flow is four 2d x 2d products per
 right-hand side, which a GPU with full double precision does far faster
@@ -51,12 +54,17 @@ CHUNK_BYTES = 512e6
 # 4 d^2 numbers per occupied column and the exchange kernel built again for
 # every chunk of columns; "block" applies the kernel to the vertex and does
 # one product per bias for all the columns, with twice the arithmetic.
-# "auto" takes "columns" up to BLOCK_FROM - 1 occupied columns. On the RTX
-# A2000 of d22 the column form was faster in every case measured (41 s
-# against 78 s at 9 spins and one column, 164 s against 308 s at 8 spins and
-# 223 columns), so "auto" is the column form until a card shows otherwise.
+# "auto" takes "block" when the column form needs BLOCK_FROM or more chunks
+# of columns, so for many occupied states of a large impurity. Measured,
+# per right-hand side or per flow at 61 biases: the column form wins with
+# one occupied state (9 to 13 spins, on the RTX A2000 of d22 and on an
+# H200) and in 2 chunks (A2000, d=256, 223 columns: 164 s against 308 s);
+# the two tie in 3 chunks (A2000, d=1024: 1.10 s against 1.03 s); the
+# block form wins in 15 chunks (A2000, d=1024: 4.04 s against 3.42 s), in
+# 16 and 114 chunks (A2000, d=2048: 2.8 and 6.4 times) and in 24 chunks
+# (H200, d=8192, 24 columns: 3013 s against 632 s).
 TIP_FORM = "auto"
-BLOCK_FROM = 10**9
+BLOCK_FROM = 3
 
 # scipy.integrate._ivp.rk
 SAFETY, MIN_FACTOR, MAX_FACTOR = 0.9, 0.2, 10.
@@ -292,7 +300,13 @@ class _DeviceFlow():
         self.st_tip = None if kernel is None else _thermal_static(kernel)
         self.st_on = None if onshell_kernel is None else _thermal_static(onshell_kernel)
         item = 8 if real else 16
-        form = TIP_FORM if TIP_FORM != "auto" else ("block" if m >= BLOCK_FROM else "columns")
+        # occupied columns per chunk of the column form: P and Q are
+        # 4 mc d^2 numbers each
+        mc = int(max(1, min(m, CHUNK_BYTES//(2*4*d*d*item))))
+        self.column_chunks = -(-m//mc)
+        form = TIP_FORM
+        if form == "auto":
+            form = "block" if self.column_chunks >= BLOCK_FROM else "columns"
         if form not in ("block", "columns"):
             raise ValueError("TIP_FORM must be \"auto\", \"block\" or \"columns\", got %r"
                              % (TIP_FORM,))
@@ -315,10 +329,8 @@ class _DeviceFlow():
             self.consts = base + (jnp.asarray(e[cols]), jnp.asarray(colsel), chunks(self.kd),
                                   chunks(self.kc))
         else:
-            # occupied columns per chunk: P and Q are 4 mc d^2 numbers each;
             # biases per chunk of the exchange sum: a d x kc x d kernel
-            self.mc = int(max(1, min(m, CHUNK_BYTES//(2*4*d*d*item))))
-            nch = -(-m//self.mc)
+            self.mc, nch = mc, self.column_chunks
             colp = np.concatenate([cols, np.full(nch*self.mc - m, cols[-1])])
             self.kc = int(max(1, min(n, CHUNK_BYTES//(8*d*d))))
             self.consts = base + (jnp.asarray(colp.reshape(nch, self.mc)), chunks(self.kc))

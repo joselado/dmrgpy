@@ -6327,8 +6327,12 @@ state on the device, so the two routes give the same numbers to roundoff.
 Any change to the equations of `_joint_flow` or `_tip_bracket` has to go
 into `_DeviceFlow` as well; `tests/test_kondo_leading_log_device.py`
 compares the two routes case by case. `mem_gb` reads
-`leadinglog_device.memory_model` on this route. Measurements are in the
-method's README, section 7.
+`leadinglog_device.memory_model` on this route, and the budget is capped at
+`leadinglog_device.allocator_budget()`, 0.95 of the limit of JAX's
+allocator, so a flow that would not fit is cut in chunks instead of failing
+with RESOURCE_EXHAUSTED. The tip part takes the block form when the column
+form needs `BLOCK_FROM` (3) or more chunks of occupied columns.
+Measurements are in the method's README, section 7.
 
 ### 4.8d Kondo screening on a Wilson chain (`wilsonchain.py`, `kondoscreening.py`)
 

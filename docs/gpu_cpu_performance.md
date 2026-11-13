@@ -788,11 +788,14 @@ while on the card they do not.
 The gain against six cores falls with size on this card (2.9 at 9 spins,
 1.9 at 10), as the products grow as d^3. The table, the memory model and
 the agreement with NumPy are in
-`docs/new_methods/kondo_leading_log/README.md`, section 7. The H200
-measurement at 11 to 13 spins is pending. Note that JAX caps its
-allocator at 75% of the card by default, also without preallocation, and
-13 spins need about 110 GB, so the run sets
-`XLA_PYTHON_CLIENT_MEM_FRACTION=0.95`.
+`docs/new_methods/kondo_leading_log/README.md`, section 7.
+
+On an H200 the same flow is 2.1 s at 9 spins, against 41 s on the A2000
+and 119 s on six cores. At 13 spins (d=8192) it takes 455 s at T=0 and
+632 s at 0.5 K with 24 occupied states, with 109 to 124 GB on the card;
+the diagonalization on the host adds about 260 s on one thread. Note that
+JAX caps its allocator at 75% of the card by default, also without
+preallocation, so a 13-spin run sets `XLA_PYTHON_CLIENT_MEM_FRACTION=0.95`.
 
 
 Everything above is about *speed*. This section is about whether a

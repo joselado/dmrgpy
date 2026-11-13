@@ -167,6 +167,24 @@ def test_mem_gb_chunks_the_biases_by_the_device_model(on_jax):
     assert np.max(np.abs(cut[0]/one[0] - 1)) < 1e-10
 
 
+def test_auto_takes_the_block_form_from_three_chunks_of_columns(on_jax, monkeypatch):
+    """"auto" keeps the column form while the occupied columns fit in fewer
+    than BLOCK_FROM chunks of CHUNK_BYTES, and takes the block form from
+    there: 8 columns of 2*4*d^2 doubles each, d=8, in 1, 2 and 3 chunks."""
+    from dmrgpy.kondospectrumtk.conductance import _occupied_states
+    ks = _chain(3, T=2.)
+    e, occ = np.asarray(ks.e, dtype=float), _occupied_states(ks)
+    assert len(e) == 8 and len(occ) == 8 and leadinglog_device.BLOCK_FROM == 3
+    monkeypatch.setattr(leadinglog_device, "TIP_FORM", "auto")
+    got = []
+    for per_chunk in (8, 4, 3):
+        monkeypatch.setattr(leadinglog_device, "CHUNK_BYTES", per_chunk*2*4*8*8*8)
+        flow = leadinglog_device._DeviceFlow(e, np.array([0.]), occ, 20e-3, 5e-6, True,
+                                             None, None)
+        got.append((flow.column_chunks, flow.form))
+    assert got == [(1, "columns"), (2, "columns"), (3, "block")]
+
+
 def test_the_allocator_limit_caps_the_budget(on_jax, monkeypatch):
     """On a GPU the budget is at most allocator_budget(), the share of JAX's
     allocator limit: a flow above it is cut in chunks with mem_gb=None, a
