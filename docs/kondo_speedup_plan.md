@@ -26,6 +26,15 @@ of the functions the items aim at from one run under cProfile:
 | KRYLOV, 12 spins, 1 K, 61 biases | 53.7 s | the Krylov spaces 26.6 s, third-order Kondo term 26.1 s |
 | LL on the CPU, 9 spins, T=0, 61 biases | 204.6 s | the flow, all of it |
 
+The two heavy cases ran in a second job (21571380, same node type). ED
+on 10 spins at 10 K with 241 biases took 2923 s and 2800 s in two runs,
+with a peak of 6.0 GB, and the third run and the profile did not fit in
+the 2 h of the job. The leading-log flow on 8 spins at 2 K with 61 biases
+and `mem_gb=12` took 3209 s with a peak of 5.8 GB, 3153 s of it in the
+flow and 36 s in the thermal kernel. The peak is half the budget, which
+is what item 13 says: the memory model counts complex numbers where the
+real route holds real ones.
+
 So the ED sums (items 1, 2, 4), the manifold re-solve (item 10), the
 Krylov spaces (item 11) and the leading-log flow (items 13 to 15) are
 where the time is. The peak memory of every light case was below 0.9 GB.
