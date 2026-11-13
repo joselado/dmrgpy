@@ -438,3 +438,47 @@ def test_hub_blocks_build_once_whatever_the_number_of_biases(monkeypatch):
     many = np.linspace(-5e-3, 5e-3, 301)
     cd.third_order_kondo_dIdV(ks, many, -0.05, Fb=fb)
     assert sum(built) == few == dim**3
+
+
+# item 6: the series and the tails of Theta
+
+
+def _theta_exact(x):
+    # mpmath is not a dependency of dmrgpy, so only these tests skip
+    mp = pytest.importorskip("mpmath")
+    mp.mp.dps = 60
+    x = mp.mpf(float(x))
+    if abs(x) < 1:
+        return mp.mpf(1)/2 + (mp.sinh(x) - x)/(2*(mp.cosh(x) - 1))
+    # the same closed form without the cancellation of 1/2 against 1/2:
+    # Theta(y) = e^y (e^y - 1 - y)/(e^y - 1)^2 for y < 0
+    y = -abs(x)
+    low = mp.exp(y)*(mp.exp(y) - 1 - y)/(mp.exp(y) - 1)**2
+    return low if x < 0 else 1 - low
+
+
+@pytest.mark.parametrize("x", [1e-7, 5e-5, 9.9e-5, -9.9e-5, -3e-5])
+def test_theta_series_below_1e_4(x):
+    """The cubic coefficient is -1/180: -1/360 was 2.7e-15 off at 9.9e-5."""
+    got = float(cd.Theta(np.array([x]))[0])
+    assert abs(got - float(_theta_exact(x))) < 2.5e-16
+
+
+@pytest.mark.parametrize("x", [-40.5, -41., -60., -200.])
+def test_theta_tail_above_40(x):
+    """Theta(-|x|) -> (|x|-1) e^-|x|, to every digit (the +1 was 5% off)."""
+    got = float(cd.Theta(np.array([x]))[0])
+    ref = _theta_exact(x)
+    assert abs(got - float(ref)) < 1e-14*float(ref)
+    up = float(cd.Theta(np.array([-x]))[0])
+    assert abs(up - float(_theta_exact(-x))) < 2.5e-16
+
+
+@pytest.mark.parametrize("x,tol", [(2e-4, 1e-12), (1e-3, 2e-13), (0.1, 1e-15),
+                                   (3., 1e-15), (39., 1e-15)])
+def test_theta_closed_form_between(x, tol):
+    """Left as it is: the closed form loses about 1e-16/|x| to cancellation
+    just above the series."""
+    for s in (1., -1.):
+        got = float(cd.Theta(np.array([s*x]))[0])
+        assert abs(got - float(_theta_exact(s*x))) < tol

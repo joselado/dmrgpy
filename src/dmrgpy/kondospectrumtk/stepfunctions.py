@@ -67,20 +67,26 @@ def Theta(x):
 
     with x = eps/(kB T). Theta(x) -> 0 as x -> -inf, -> 1 as x -> +inf,
     Theta(0) = 1/2, and Theta(x) + Theta(-x) = 1 identically.
+
+    Below |x| = 1e-4 it is the series 1/2 + x/6 - x^3/180 (next term
+    x^5/5040), and above |x| = 40 the tail (|x|-1) e^-|x| of Theta(-|x|),
+    both exact to double precision. The closed form between loses about
+    1e-16/|x| to the cancellation in sinh(x) - x and cosh(x) - 1 (2e-13 at
+    |x| = 2e-4), which is left as it is.
     """
     x = np.asarray(x, dtype=float)
     out = np.empty_like(x)
     small = np.abs(x) < 1e-4
     large = np.abs(x) > 40
     mid = ~small & ~large
-    out[small] = 0.5 + x[small]/6.0 - x[small]**3/360.0
+    out[small] = 0.5 + x[small]/6.0 - x[small]**3/180.0
     xm = x[mid]
     out[mid] = 0.5 + (np.sinh(xm) - xm)/(2*(np.cosh(xm) - 1))
     xl = x[large]
     pos = xl > 0
     out[large] = np.where(pos,
-                           1.0 - (np.abs(xl)+1)*np.exp(-np.abs(xl)),
-                           (np.abs(xl)+1)*np.exp(-np.abs(xl)))
+                           1.0 - (np.abs(xl)-1)*np.exp(-np.abs(xl)),
+                           (np.abs(xl)-1)*np.exp(-np.abs(xl)))
     return out
 
 
