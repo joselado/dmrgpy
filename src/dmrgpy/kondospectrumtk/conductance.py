@@ -308,24 +308,52 @@ def _levi_civita_imag(X, Y, Z, WX, WY, WZ, rows, cols, out):
                                   + Z[b, m]*(ux*wy - uy*wx)).imag
 
 
-def _levi_civita(S, real, rows, cols):
+# Below this many entries the Levi-Civita coefficients are built with NumPy
+# and above it with the numba kernel. The first call of the kernel in a
+# process costs about 0.4 s, also when it is loaded from its disk cache,
+# which is what NumPy (25 ns per entry on the real form) takes for 1.6e7
+# entries; below 4e6 NumPy also keeps its three work arrays under 200 MB.
+# Both make the same operations in the same order, so on the real form the
+# coefficients are the same to the last bit either way.
+NUMBA_ENTRIES = 4e6
+
+
+def _levi_civita(S, real, rows, cols, numba=None):
     """R[a,b,m] = Im sum_jkl eps_jkl <a|S_l|b><b|S_k|m><m|S_j|a> for a in
     rows, b in cols and every m, i.e. Im of the triple product V.(U x W) of
     the vectors U = <a|S|b>, V = <b|S|m> and W = <m|S|a> (S, real from
     _spin_triplet). It is Im _triple_product_coefficients. On the real form
     (Sy = iY) every term holds Sy exactly once, so the complex product is i
     times the same product of (Sx, Y, Sz), and R is that real product, in
-    real arithmetic. One pass of a numba kernel (one core, no fastmath), with
-    no work space beyond the result: 3.7 ns per entry on the real form, 72
-    ns for the complex einsum it replaces."""
+    real arithmetic. numba (None: by the size, NUMBA_ENTRIES) takes one pass
+    of a numba kernel (one core, no fastmath) with no work space beyond the
+    result, 3.7 ns per entry on the real form, against 72 ns for the complex
+    einsum it replaces; otherwise NumPy, in three work arrays."""
     rows = np.ascontiguousarray(rows, dtype=np.int64)
     cols = np.ascontiguousarray(cols, dtype=np.int64)
     S = [np.ascontiguousarray(s) for s in S]
-    W = [np.ascontiguousarray(s[:, rows].T) for s in S] # W[ia,m] = <m|S|a>
-    out = np.empty((len(rows), len(cols), S[0].shape[1]))
-    kernel = _levi_civita_real if real else _levi_civita_imag
-    kernel(S[0], S[1], S[2], W[0], W[1], W[2], rows, cols, out)
-    return out
+    shape = (len(rows), len(cols), S[0].shape[1])
+    if numba is None: numba = np.prod(shape) >= NUMBA_ENTRIES
+    if numba:
+        W = [np.ascontiguousarray(s[:, rows].T) for s in S] # W[ia,m] = <m|S|a>
+        out = np.empty(shape)
+        kernel = _levi_civita_real if real else _levi_civita_imag
+        kernel(S[0], S[1], S[2], W[0], W[1], W[2], rows, cols, out)
+        return out
+    U = [s[np.ix_(rows, cols)][:, :, None] for s in S] # <a|S|b>
+    W = [s[:, rows].T[:, None, :] for s in S] # <m|S|a>
+    V = [s[cols][None, :, :] for s in S] # <b|S|m>
+    acc, t1, t2 = (np.empty(shape, dtype=float if real else complex)
+                   for _ in range(3))
+    # V_k (U x W)_k, (U x W)_k = U_a W_b - U_b W_a for (k, a, b) cyclic
+    for n, (k, a, b) in enumerate(((0, 1, 2), (1, 2, 0), (2, 0, 1))):
+        t = acc if n == 0 else t1
+        np.multiply(U[a], W[b], out=t)
+        np.multiply(U[b], W[a], out=t2)
+        np.subtract(t, t2, out=t)
+        np.multiply(t, V[k], out=t)
+        if n: acc += t1
+    return acc if real else np.ascontiguousarray(acc.imag)
 
 
 def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,

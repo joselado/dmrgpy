@@ -235,6 +235,19 @@ def test_real_levi_civita_equals_the_complex_product():
     assert _rel(cd._levi_civita(*cd._spin_triplet(kc), occ, fin), ref) < 1e-13
 
 
+@pytest.mark.parametrize("complex_h", [False, True])
+def test_numba_and_numpy_builds_agree(complex_h):
+    """The kernel above NUMBA_ENTRIES and NumPy below it make the same
+    operations in the same order: the same bits on the real form."""
+    ks = KondoSpectrum(_chain(complex_h=complex_h), 0, 2.)
+    rows, cols = np.arange(0, ks.dim, 3), np.arange(ks.dim)[::-1]
+    S, real = cd._spin_triplet(ks)
+    a = cd._levi_civita(S, real, rows, cols, numba=True)
+    b = cd._levi_civita(S, real, rows, cols, numba=False)
+    if real: assert np.array_equal(a, b)
+    else: assert _rel(a, b) < 1e-14
+
+
 @pytest.mark.parametrize("field", [True, False])
 @pytest.mark.parametrize("T", [0.0, 2.0])
 def test_real_path_equals_complex_path(field, T):
