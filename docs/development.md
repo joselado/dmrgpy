@@ -7101,6 +7101,110 @@ differ only for a chain routed to ED.
 
 `tests/test_ysr_island.py`, `examples/kondo/spin_chain_on_superconducting_island`.
 
+### 4.8i A spin chain on a metal, with the bath on any spin (`ysr.spin_chain_on_metal`)
+
+`ysr.spin_chain_on_metal(ns, n, site=...)` is a Heisenberg chain of ns spins
+1/2 whose spin `site` is Kondo coupled to the first site of a normal Wilson
+chain of n sites. It uses the encoding of `island_chain` with no island and
+no pairing: one `Spinful_Fermionic_Chain_Native` of ns+n sites, the spins on
+sites 0..ns-1 as singly occupied penalized sites, the Wilson chain on sites
+ns..ns+n-1. With `site = ns-1`, the default, it is `island_chain(ns, 1, n-1)`
+with the island site taken as the first Wilson site and Delta=0, term by
+term.
+
+With `site` in the middle the geometry is a T junction: the spin chain is
+one line and the Wilson chain hangs from one of its spins. The site order
+does not change with `site`. The Wilson chain always comes after all the
+spins, and the Kondo term jumps over the spins site+1..ns-1. A site's
+position is its label, so `fc.Sz[i]` is spin i for every `site`.
+
+Why this order. An order cannot change a number, only the bond dimension a
+number needs, and that is set by the entropy at each cut, where the
+entropies of the bonds that are cut add. Three orders were compared on v3
+(Js=0.5, JK=1, Lambda=2, 20 sweeps, one BLAS thread):
+
+- linear, the one in the code;
+- interleave, the spins 0..site alternating with the reversed Wilson chain,
+  so that every term has range 2 at most;
+- fold, the reversed Wilson chain, then the spin `site`, then the two arms
+  of the spin chain alternating, also range 2 at most.
+
+On 15 spins and 21 Wilson sites with the bath on spin 7, the energy above
+the lowest one found:
+
+| maxm | linear | interleave | fold |
+|---|---|---|---|
+| 32 | 8.0e-4 | 1.9e-2 | 6.8e-4 |
+| 64 | 5.2e-5 | 2.7e-3 | 4.1e-5 |
+| 128 | 2.4e-7 | 3.5e-4 | 0 |
+
+On 7 spins and 13 Wilson sites with the bath on spin 3, against the energy
+at maxm=256 (linear and fold agree there to 1e-11): 9.6e-6, 4.3e-4 and
+9.6e-6 at maxm=64, and 9.8e-8, 1.6e-5 and 9.8e-8 at maxm=128. So the
+interleave needs about 2 times the bond dimension on 7 spins and between 2
+and 4 times on 15, and linear and fold are tied. With the bath on spin 1 of
+7, where linear jumps 5 spins, linear and fold are still tied (1.0e-9 apart
+at maxm=128).
+
+The total spin of the ground state depends on `site`, and the runs above
+are all on one side. On an odd chain the spins of odd index point against
+the total spin of the chain, so their exchange with the metal acts as
+ferromagnetic, and the ground state is a triplet: S_tot^2 = 2.000 with the
+bath on spin 1 of 3 and on spins 1 and 3 of 7 (n odd), against 0.000 on
+spin 2 of 3 and of 7, where the metal screens the chain. Spin 3 of 7, spin
+1 of 7 and spin 7 of 15 are all triplets. The screened case was run
+afterwards, 7 spins and 13 Wilson sites with the bath on spin 2, against
+the lowest energy at maxm=128: 1.1e-5, 3.7e-4 and 9.6e-6 at maxm=64, and
+5.8e-9, 4.9e-6 and 0 at maxm=128, for linear, interleave and fold. So the
+ranking is the same there. The cut between the spins and the Wilson chain
+carries 0.83 in that case, and the jumped spin bonds 0.8 to 1.4.
+
+The entropies say why. Every bond of the Wilson chain carries 1.2 to 1.6,
+along the whole chain. The cut between all the spins and the Wilson chain
+carries 0.51 on 7 spins and 0.66 on 15, and a spin bond 0.4 to 0.7. A
+jumped spin bond of the linear order carries 0.7 to 1.3, a cut of the fold
+0.7 to 1.3, and a cut of the interleave 1.5 to 2.2, a spin bond plus a
+Wilson bond. Do not interleave the Wilson chain with anything.
+
+Checks of the measurement: on ED the three orders give the same energy to
+1e-15 and the same dI/dV to 1e-11, and the interleaved order at JK=0
+converges to the Heisenberg energy plus the free Wilson chain (1.4e-6 above
+it at maxm=128 on 7+13 sites), so no weak channel of the range-2 hoppings
+is lost.
+
+Open. Linear and fold are tied in energy, and their dI/dV on the middle
+spin was compared once (7+13 sites, maxm=64, TASK with nkry=200, broadening
+0.03): equal to 3e-3 of the peak for |eV| < 0.5, to 9e-3 below 0.8, and up
+to 9e-2 apart above |eV| = 1. No second nkry was run and the missing weight
+was not read, so which one is closer there is not known. That chain has
+the bath on spin 3 of 7, a triplet ground state, and the two solves can
+stop at different states of the triplet, whose tangent spaces differ; this
+is a candidate for the difference and was not tested. The cost of the
+linear order grows with the number of spins it jumps, so for a chain that is
+mirror symmetric the cheaper of `site` and `ns-1-site` is the larger one;
+the builder does not mirror the chain by itself, since that would break
+position = label. Only this parameter set was measured: a weaker JK and a
+longer Wilson chain were not.
+
+The chain stores what `island_chain` stores, without `fc.island`:
+`fc.impurity` (the penalized sites), `fc.spin = ns/2`, `fc.tip_spin = site`,
+`fc.wilson`, `fc.channels = [wilson]`, `fc.Delta_sc = 0`. The metal has no
+gap, so `subgap_energies`, `island_energies` and `parity_ground_state`
+raise on it, and a plain solve gives one state of the ground multiplet (a
+singlet, a triplet, or a doublet for ns+n odd, see above). The spin-summed
+dI/dV is a scalar under spin rotation, so it is the same for every state
+of a multiplet; `test_ysr_spin_chain_on_metal.py` has it to 1e-12 against
+ED on the triplet of 3 spins. A gapped bath (Delta != 0) is not offered here: its sector
+helpers assume the first bath site is site ns, which this order keeps, but
+nothing was tested.
+
+`tests/test_ysr_spin_chain_on_metal.py` pins the reductions, the mirror
+symmetry between `site=0` (the Kondo term jumps the whole chain) and
+`site=ns-1` (a plain chain), the same junction written by hand in another
+site order, and the middle spin against ED on `"python"` and 3 (energy to
+1e-14, TASK spectrum to 4e-12 on 6 sites).
+`examples/kondo/spin_chain_on_metal_site_resolved`.
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,

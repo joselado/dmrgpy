@@ -67,6 +67,13 @@ splitting, E_parity = E_odd - E_even, against its value at JK=0; the
 sector solves, the charge seeding and the parity state are the ones
 above, with ns penalized sites.
 
+A spin chain on a normal metal (spin_chain_on_metal) is that encoding
+with no island: ns spins 1/2 and the Wilson chain of the metal, Kondo
+coupled to any one spin of the chain, the one under the tip. The Wilson
+chain comes after all the spins also when that spin is in the middle, so
+the Kondo term is then long-range (docs/development.md 4.8i says why this
+order and not one that alternates the spins with the Wilson sites).
+
 The STM spectrum is the composite-operator form of
 docs/kondo_higher_order_plan.md: at lowest order in the tip coupling the
 tip electron enters through
@@ -605,6 +612,124 @@ def island_spin_correlations(fc, mode="DMRG"):
             op = fc.Sx[i]*fc.Sx[j] + fc.Sy[i]*fc.Sy[j] + fc.Sz[i]*fc.Sz[j]
             C[a, b] = C[b, a] = np.real(fc.vev(op, mode=mode))
     return C
+
+
+def spin_chain_on_metal(ns, n, site=None, Js=0.5, JK=0.5, Lambda=2.0, D=1.0,
+                        B=0.0, z=0.0, Upen=None, mesh="mean", wilson=None,
+                        **kwargs):
+    """A Heisenberg chain of ns spins 1/2 on a normal metal: the spin
+    site (any of 0..ns-1, default the end spin ns-1) is Kondo coupled by
+    JK to the first site of a Wilson chain of n sites, the metal under
+    that spin. ns+n native spinful sites (Spinful_Fermionic_Chain_Native):
+    spins 0..ns-1, Wilson chain ns..ns+n-1, for every site. With w0 = ns,
+
+        H = Js sum_i S_i.S_{i+1} + JK S_site.s_{w0} + B sum_i S^z_i
+            + Upen sum_i (N_i - 1)^2                      (spin sites)
+            + sum_m eps_m N_m + sum_m t_m (f^dag_m f_{m+1} + h.c.)  (metal)
+
+    with s_w0 = f^dag_w0 (sigma/2) f_w0 and every spin a native site with
+    one electron, as in kondo_chain and island_chain. With site = ns-1
+    this is one linear chain (island_chain with one island site and no
+    pairing, to roundoff). With a spin in the middle the geometry is a T
+    junction, and the Wilson chain still comes after all the spins, so
+    the Kondo term jumps over the spins site+1..ns-1. Keep this order: a
+    cut between two of those spins carries the entropy of the spin bond
+    plus that of the spins with the metal (0.5 to 0.8 on 7 and 15 spins
+    at Js=0.5, JK=1), while every bond of the Wilson chain carries 1.2
+    to 1.6. Alternating the spins with the Wilson sites, which makes
+    every term of range 2, puts a Wilson bond on every spin bond: on 15
+    spins and 21 Wilson sites with the metal on spin 7 it was 2.7e-3
+    above the best energy at maxm=64, against 5e-5 for this order
+    (docs/development.md 4.8i).
+
+    Js > 0 and JK > 0 are antiferromagnetic. B is a field on the spins
+    only. The Wilson chain is wilsonchain.wilson_chain(n, Lambda, (-D, D),
+    z, mesh), or wilson=(eps, t) by hand (n values and n-1). JK is the
+    coupling on the chain, as J in kondo_chain: on mesh="mean" pass
+    JK*lambda_factor(Lambda) to stand for JK in the continuum, on
+    mesh="zp" pass it bare (fc.dos_factor is the factor that applies).
+    Upen (default 2(D + |JK| + |Js| + |B|)) only has to exceed the
+    magnetic binding of a spin site, since no term moves charge on or off
+    it. Extra keywords go to the chain.
+
+    The total spin of the ground state depends on site. On 3 and on 7
+    spins with n odd it is a singlet with the metal on an even spin (0,
+    2, ...), which the metal screens, and a triplet with the metal on an
+    odd spin, which points against the total spin of the chain, so its
+    exchange with the metal acts as ferromagnetic (S_tot^2 = 0 and 2,
+    measured). With ns+n odd it is a doublet. The spin-summed dI/dV is a
+    scalar under spin rotation, so every state of a multiplet gives the
+    same one.
+
+    The metal has no gap, so the sector tools (subgap_energies,
+    island_energies, parity_ground_state) raise on this chain, and a
+    plain solve gives the ground state. get_stm_spectrum puts the tip on
+    the spin site and takes the electron at the first Wilson site.
+
+    Stored on the chain: fc.impurity = [0..ns-1] (the penalized sites),
+    fc.spin = ns/2 (the convention of island_chain, not the total spin),
+    fc.tip_spin = site, fc.wilson and fc.channels = [wilson], fc.J_chain
+    = JK, fc.Js, fc.B_imp, fc.Dz = 0, fc.Delta_sc = 0, fc.Upen, fc.mesh,
+    fc.dos_factor, fc.t_last (the last hopping, the energy resolution of
+    the chain), fc.qp_gap (the lowest level of the Wilson chain alone,
+    zero for n odd on a symmetric band) and fc.reaches_gap = False."""
+    ns, n = int(ns), int(n)
+    if ns < 1 or n < 1:
+        raise ValueError("spin_chain_on_metal needs ns >= 1 spins and "
+                         "n >= 1 Wilson sites")
+    if site is None:
+        site = ns - 1
+    if site != int(site) or not 0 <= site < ns:
+        raise ValueError("site must be one of the spins 0..%d, got %r"
+                         % (ns - 1, site))
+    site = int(site)
+    if wilson is None:
+        eps, t = wilsonchain.wilson_chain(n, Lambda=Lambda, band=(-D, D),
+                                          z=z, mesh=mesh)
+    else:
+        eps, t = (np.asarray(x, dtype=float) for x in wilson)
+        if len(eps) != n or len(t) != n - 1:
+            raise ValueError("wilson=(eps, t) needs %d energies and %d "
+                             "hoppings" % (n, n - 1))
+    if Upen is None:
+        Upen = 2.0*(D + abs(JK) + abs(Js) + abs(B))
+    w0 = ns
+    fc = fermionchain.Spinful_Fermionic_Chain_Native(ns + n, **kwargs)
+    h = 0
+    for i in range(ns - 1): # Heisenberg chain
+        h = h + Js*(fc.Sx[i]*fc.Sx[i+1] + fc.Sy[i]*fc.Sy[i+1]
+                    + fc.Sz[i]*fc.Sz[i+1])
+    # the Kondo term, long-range when site is not the end spin
+    h = h + JK*(fc.Sx[site]*fc.Sx[w0] + fc.Sy[site]*fc.Sy[w0]
+                + fc.Sz[site]*fc.Sz[w0])
+    for i in range(ns):
+        if B != 0.0:
+            h = h + B*fc.Sz[i]
+        ni_ = fc.Nup[i] + fc.Ndn[i] - 1 # one electron on every spin site
+        h = h + Upen*ni_*ni_
+    for m in range(n): # the Wilson chain
+        if eps[m] != 0.0:
+            h = h + eps[m]*(fc.Nup[w0+m] + fc.Ndn[w0+m])
+        if m < n - 1:
+            h = h + t[m]*_hop(fc, w0 + m, w0 + m + 1)
+    fc.set_hamiltonian(h)
+    fc.impurity = list(range(ns))
+    fc.spin = fractions.Fraction(ns, 2)
+    fc.tip_spin = site
+    fc.wilson = list(range(w0, w0 + n))
+    fc.channels = [fc.wilson]
+    fc.Delta_sc = 0.0
+    fc.Dz = 0.0
+    fc.B_imp = B
+    fc.J_chain = JK
+    fc.Js = Js
+    fc.Upen = Upen
+    fc.mesh = mesh
+    fc.dos_factor = lambda_factor(Lambda) if mesh == "mean" else 1.0
+    fc.t_last = abs(t[-1]) if n > 1 else D
+    fc.qp_gap = bath_quasiparticle_gap(eps, t, 0.0)
+    fc.reaches_gap = False
+    return fc
 
 
 def _default_site(fc, site):

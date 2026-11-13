@@ -444,6 +444,28 @@ chain is grown site by site with relative precision and the (Q, 2Sz) and
 n=46 at Lambda=4 gave a wrong, even negative, T_K. At Lambda=2 use
 beta_bar=1.5 and keep >= 800.
 
+**A spin chain on a metal with the bath on any spin (2026-11-13)**,
+`ysr.spin_chain_on_metal(ns, n, site=)`, is `island_chain` with no island
+and no pairing, and the Kondo term on the spin `site`. The Wilson chain
+stays after all the spins for every `site`, so the Kondo term jumps the
+spins site+1..ns-1 and a position is its label. The author asked for the
+order that alternates the spins with the reversed Wilson chain (every term
+of range 2) and picked the linear one after the measurement: on 15 spins
+and 21 Wilson sites the alternating order was 2.7e-3 above the best energy
+at maxm=64 against 5e-5, since every Wilson bond carries 1.2 to 1.6 of
+entropy and the cut between the spins and the metal only 0.5 to 0.8. Do
+NOT interleave the Wilson chain with the spins. The builder does not
+mirror the chain to jump the shorter arm, which would break position =
+label; this was decided while writing the builder, not picked by the
+author, and a bath on spin 1 of 7 tied with the fold. Folding the spin chain around `site` ties with linear
+in energy; their dI/dV above |eV| = 1 differed by 9e-2 of the peak in one
+run at nkry=200, which is open. On an odd chain the ground state is a
+singlet with the bath on an even spin and a triplet on an odd spin
+(S_tot^2 = 0 and 2), and most of the order comparison was on triplets; the
+screened case (spin 2 of 7) gave the same ranking. Delta != 0 is not
+offered. `docs/development.md`
+4.8i, `tests/test_ysr_spin_chain_on_metal.py`.
+
 On v3 a sector solve keeps the impurity charges of its start, since no term
 of H moves charge on or off an impurity site: S > 1/2 (`ysr.py`,
 `_seed_impurity_charge`) and several surrogate spins

@@ -1218,6 +1218,59 @@ need `itensor_version=3` or `mode="ED"`.
 
 The example is `examples/kondo/ysr_dimer_surrogate`.
 
+## A spin chain on a metal
+
+We now take a chain of spins 1/2 on a normal metal, and we put the tip on
+one of its spins. The spin under the tip is Kondo coupled to the metal, a
+Wilson chain. The other spins see the metal only through the chain. The
+Hamiltonian is
+
+$$
+H = J_s \sum_{i} \mathbf{S}_i\cdot\mathbf{S}_{i+1} + J_K\, \mathbf{S}_{j}\cdot\mathbf{s}_{0} + B \sum_i S^z_i + \sum_m \epsilon_m f^\dagger_m f_m + \sum_m t_m \left(f^\dagger_m f_{m+1} + \mathrm{h.c.}\right),
+$$
+
+with $j$ the spin under the tip, $\mathbf{s}_0$ the spin of the electrons
+on the first Wilson site, and $f_m$ the Wilson chain of a flat band of
+half-width $D$. The spin $j$ can be any spin of the chain, at the end or
+in the middle. The STM spectrum uses the composite tunneling vertex of
+[A magnetic atom on a superconductor](#a-magnetic-atom-on-a-superconductor),
+with the tip on the spin $j$ and the electron entering at the first Wilson
+site.
+
+```python
+import numpy as np
+from dmrgpy import ysr
+fc = ysr.spin_chain_on_metal(3, 5, site=1, Js=0.3, JK=0.4) # 3 spins, metal under the middle spin
+fc.maxm, fc.nsweeps = 40, 12
+es = np.linspace(-1.0, 1.0, 201)
+(e, didv) = ysr.get_stm_spectrum(fc, es, delta=0.03) # tip on the middle spin
+print(didv[100]) # 0.080 at zero bias, and 0.510 with site=2
+```
+
+The spectrum depends on the spin under the tip. In the ground state of
+three spins the two end spins are parallel to the total spin, and the
+middle spin is antiparallel to it. So the exchange with the metal is
+antiferromagnetic for an end spin and ferromagnetic for the middle spin.
+With the metal on an end spin the ground state is a singlet, meaning that
+the metal screens the chain. With the metal on the middle spin it is a
+triplet. The end spin has peaks close to zero bias, and the middle spin
+does not.
+On a finite Wilson chain the spectrum is a set of discrete lines, and the
+last hopping of the chain, `fc.t_last`, is its energy resolution.
+
+- `ns`, `n`: the number of spins and of Wilson sites. With `ns+n` odd
+  the ground state is a doublet.
+- `site`: the spin coupled to the metal, where the tip is. The default is
+  the last spin.
+- `Js`, `JK`: the Heisenberg and the Kondo exchange, antiferromagnetic when
+  positive. On the default mesh, `JK*ysr.lambda_factor(Lambda)` stands for
+  the continuum $J_K$.
+- `B`: a field on the spins only.
+- `Lambda`, `D`, `mesh`, `z`: the Wilson chain, as in `kondo_chain`.
+- `nkry` (in `get_stm_spectrum`): raise it for sharp lines on a long chain.
+
+The example is `examples/kondo/spin_chain_on_metal_site_resolved`.
+
 ## A spin chain on a superconducting island
 
 We now take a chain of spins 1/2 whose last spin sits on a small
