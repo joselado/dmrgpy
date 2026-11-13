@@ -789,7 +789,10 @@ The gain against six cores falls with size on this card (2.9 at 9 spins,
 1.9 at 10), as the products grow as d^3. The table, the memory model and
 the agreement with NumPy are in
 `docs/new_methods/kondo_leading_log/README.md`, section 7. The H200
-measurement at 11 to 13 spins is pending.
+measurement at 11 to 13 spins is pending. Note that JAX caps its
+allocator at 75% of the card by default, also without preallocation, and
+13 spins need about 110 GB, so the run sets
+`XLA_PYTHON_CLIENT_MEM_FRACTION=0.95`.
 
 
 Everything above is about *speed*. This section is about whether a

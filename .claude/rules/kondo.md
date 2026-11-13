@@ -366,7 +366,13 @@ and nothing that grows with their number. "auto" takes "block" from
 column form won every case measured, also at 223 occupied columns. With `mem_gb` the biases are chunked by
 `leadinglog_device.memory_model` on the device. The exchange sum runs on
 the card there, which does not touch the author's one-core rule for
-`_hole_sum` on the host.
+`_hole_sum` on the host. JAX's allocator is capped at
+`XLA_PYTHON_CLIENT_MEM_FRACTION` of the card, 0.75 by default, also with
+`XLA_PYTHON_CLIENT_PREALLOCATE=false` (checked on the A2000 on
+2026-11-13: 10 GB failed under the default, passed at 0.95), and 13 spins
+need about 110 GB, so a 13-spin job sets the fraction; `mem_gb` does not
+know the cap. A library check against `memory_stats()["bytes_limit"]`
+waits until the H200 peak validates the model above 6 GB.
 
 **The tip coupling check reads open transitions, with a floor
 (2026-11-11).** `info["coupling"]` is |Jrho_s| times the largest

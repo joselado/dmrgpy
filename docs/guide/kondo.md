@@ -134,7 +134,10 @@ bare excitation energies. The derivation and its checks are in
     `from dmrgpy.pyitensor import backend` and `backend.set_backend("jax")`
     before the call. The memory grows as the square of the number of
     states, so a large impurity needs a card with much memory and full
-    double precision: 13 spins 1/2 take about 110 GB. Above 2000 states
+    double precision: 13 spins 1/2 take about 110 GB. JAX gives a process
+    only 75% of the card by default, so for such a run set
+    `XLA_PYTHON_CLIENT_MEM_FRACTION=0.95` in the environment before
+    Python starts. Above 2000 states
     the full diagonalization is refused unless
     `dmrgpy.algebra.algebra.maxsize` is raised first.
 

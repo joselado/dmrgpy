@@ -438,7 +438,14 @@ right-hand side and three chunks of the tip part. It gives 6.1 GB for
 the T=2 K run above, where 6.15 GB were measured, and it is the model
 `mem_gb` uses on this route. For 13 spins 1/2 (d=8192) on the real route
 it gives about 110 GB before the first bias, so only a 141 GB card holds
-it. Each energy then adds 5.2 MB per occupied state.
+it. Each energy then adds 5.2 MB per occupied state. JAX caps its
+allocator at 75% of the card by default, also with
+`XLA_PYTHON_CLIENT_PREALLOCATE=false`, and on the H200 the cap is close
+to 110 GB. So a 13-spin run needs `XLA_PYTHON_CLIENT_MEM_FRACTION=0.95`
+in its environment. On the A2000 a 10 GB array failed under the default
+and was allocated at 0.95. A run at 13 spins and 0.5 K on the chain
+above keeps 24 occupied states, which needs about 124 GB for 61 biases
+by the model, and only fits with the larger fraction.
 
 The tip part has two forms (`TIP_FORM`). "columns" is `_tip_bracket`
 line for line: the electron index is summed before the kernel is applied,
