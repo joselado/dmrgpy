@@ -517,12 +517,12 @@ the block form. So "auto" takes the block form when the column form needs
 (`BLOCK_COLUMNS`). The two forms agree to
 1.2e-15 at every size measured on the H200.
 
-**The S^z blocks (2026-11-14), opt-in.** For a Hamiltonian that
+**The S^z blocks (2026-11-14).** For a Hamiltonian that
 conserves S^z the vertices are block sparse. The index (s,a) of the 2d x
 2d block form, s the electron spin, carries s + M_a, and every vertex of
 the flow conserves it, since the bare one does and the kernel only
 multiplies entries. The electron transpose of a vertex conserves M_a - s
-instead. So `sz_blocks=True` runs the four products on blocks
+instead. So the four products run block by block
 (`_SzBlocks`, through flat indices of the 2d x 2d matrices; `_swap` is
 its own inverse, so one index map reads swap(Y) and writes swap(Z)). The
 tip sums are block sparse too (`_tip_bracket_blocks`). For a column b the
@@ -561,7 +561,7 @@ peak; on 4 to 6 spins at B=0 by 2.6e-12 to 4.1e-11, the rtol of the flow,
 as for any change of basis inside the degenerate levels. At 1 K on 8
 spins the gain is 3%: only the products are blocked at T>0, and there
 the thermal tip sum over the occupied states is what costs. It is CPU
-only; on the device it warns.
+only; on the device the flow is the dense one.
 
 On small chains the blocks do not pay (61 biases, T=0, one core): up to
 4 spins the call is 30 to 40% slower, on calls of 0.08 to 0.4 s, at 5
@@ -578,7 +578,11 @@ rotated tip spin leaks 2.6e-12.
 With every flow forced onto the blocks (a pytest plugin that wraps
 `_joint_flow`, the fallback warning muted) the 97 tests of the
 leading-log files pass, the values pinned at 1e-11 against the two-pass
-code included. The default stays off until the author picks it.
+code included. The default is `sz_blocks=None`, the author's pick of
+2026-11-14: the blocks from `SZ_BLOCKS_FROM` = 32 states on, and below
+that, or when the spectrum has no blocks, the dense flow without a
+warning. `sz_blocks=True` asks for the blocks at any size and warns when
+they cannot run; `sz_blocks=False` is the dense flow bit for bit.
 
 What is not done. The tip vertex is integrated as part of the state, so
 its 13 stages are kept like those of the couplings. It does not enter

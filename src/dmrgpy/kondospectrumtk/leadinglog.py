@@ -112,6 +112,12 @@ HOLE_TABLE_BYTES = 256e6
 # precision (see _block_is_real)
 REAL_TOL = 1e-12
 
+# sz_blocks=None (the default) runs the flow on the S^z blocks from this
+# many states on, when the spectrum has them: below it the blocks cost
+# more than they save (30 to 40% slower up to 16 states, even at 32, 1.7x
+# faster at 64, T=0 and 61 biases; the author's pick, 2026-11-14)
+SZ_BLOCKS_FROM = 32
+
 # an entry of the tip spin above this fraction of its largest one counts
 # for the S^z labels of the states (_sz_labels); what lies below it off the
 # blocks is the leak of the eigenbasis, 8e-13 on the 8-spin chain of
@@ -770,7 +776,7 @@ def _integrate(rhs, y0, Dmax, Dmin, sample_coupling, ref, rtol, atol):
 
 
 def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
-                pole_threshold, kernel=None, onshell_kernel=None, sz_blocks=False):
+                pole_threshold, kernel=None, onshell_kernel=None, sz_blocks=None):
     """One flow from Dmax to Dmin of the sample vertex G, of the on-shell
     tip vertex A_on and of the tip vertex at each incoming energy
     omegas[k], the last one for the columns cols only, all at U=0.
@@ -801,15 +807,19 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
     degenerate level mixes S^z sectors, from the eigenbasis of S^z_tot
     (_sz_rotation), in which the flow then runs; the tip vertex is rotated
     back. When neither works (H does not conserve S^z_tot) it warns and
-    the flow is the dense one. The info says which ran (sz_blocks,
-    sz_rotated)."""
+    the flow is the dense one. None (the default) does the same from
+    SZ_BLOCKS_FROM states on and falls back without a warning; False is
+    the dense flow. The info says which ran (sz_blocks, sz_rotated)."""
     if not Gamma0 > 0.:
         raise ValueError("Gamma0 must be positive, it cuts the logs")
     for k in (kernel, onshell_kernel):
         if k is not None and (k.omega0 != omega0 or k.Gamma0 != Gamma0):
             raise ValueError("the thermal kernel was built for another omega0 or Gamma0")
+    auto = sz_blocks is None # warns on a fallback only when asked for
+    if auto:
+        sz_blocks = len(ks.e) >= SZ_BLOCKS_FROM
     if _on_device():
-        if sz_blocks:
+        if sz_blocks and not auto:
             warnings.warn("leading-log flow: sz_blocks=True is for the CPU; the "
                           "flow on the device is the dense one", RuntimeWarning,
                           stacklevel=3)
@@ -844,7 +854,7 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
                 dE = e[:, None] - e[None, :]
                 smax = np.max(np.abs(S))/2.
                 ref = pole_threshold*smax
-        if labels is None:
+        if labels is None and not auto:
             warnings.warn("leading-log flow: sz_blocks=True, but %s; the flow is "
                           "the dense one" % ("the vertex is complex (the blocks "
                                              "are on the real route only)" if not real
@@ -853,7 +863,7 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
                                              "or a spectrum with no chain to read "
                                              "S^z_tot from)"),
                           RuntimeWarning, stacklevel=3)
-        else:
+        if labels is not None:
             blocks = _SzBlocks(*labels)
             bracket = blocks.bracket
             if kernel is None:
@@ -949,7 +959,7 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
 
 def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
                atol=1e-14, pole_threshold=1.0, cols=None, kernel=None,
-               onshell_kernel=None, sz_blocks=False):
+               onshell_kernel=None, sz_blocks=None):
     """The tip vertex A(omega) at D -> 0 for each incoming energy
     omegas[k], with bare potential scattering Us[k]; shape (n,4,d,d), or
     (n,4,d,m) for the columns (initial states) cols only, which is what
@@ -1042,7 +1052,7 @@ def usable_memory():
 
 
 def _ll_piece(ks, eVs, Jrho_s, U, T0, omega0, Gamma0, occ, rtol, atol,
-              pole_threshold, kernel, onshell_kernel, open_cut, sz_blocks=False):
+              pole_threshold, kernel, onshell_kernel, open_cut, sz_blocks=None):
     """dI/dV and the running tip coupling at the biases eVs, from one
     flow; the body of leading_log_dIdV."""
     p = ks.p[occ]
@@ -1086,7 +1096,7 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
                      Gamma0=5e-6, p_cut=P_CUT, rtol=1e-10, atol=1e-14,
                      pole_threshold=1.0, stop_margin=10.0, return_info=False,
                      onshell="thermal", open_cut=1e-2, mem_gb=None,
-                     sz_blocks=False):
+                     sz_blocks=None):
     """dI/dV with the leading logs summed to all orders, in the units of
     conductance.py (2*pi*e^2*T0^2/hbar). At first order in Jrho_s it is
     second_order_dIdV + third_order_kondo_dIdV + third_order_potential_dIdV
@@ -1133,12 +1143,15 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     ln(1/p_cut) kT of the ground state, and the tip part costs d^2 per
     energy and per occupied state.
 
-    sz_blocks=True (opt-in, CPU and real route only) runs the flow on the
-    blocks of total S^z when H conserves S^z (see _joint_flow): the
-    products of G and A_on, and at T=0 the two sums of the tip vertex. A
-    degenerate level that mixes S^z sectors (B=0, a level crossing) is
-    rotated to the eigenbasis of S^z_tot, read from ks.chain; with a
-    transverse field it warns and the flow is the dense one. The blocked
+    sz_blocks=None (the default) runs the flow on the blocks of total S^z
+    from SZ_BLOCKS_FROM states on when H conserves S^z, and the dense flow
+    otherwise, without a warning; True asks for the blocks at any size and
+    warns when they cannot run, False is the dense flow. On the blocks
+    (see _joint_flow, CPU and real route only) run the products of G and
+    A_on, and at T=0 the two sums of the tip vertex. A degenerate level
+    that mixes S^z sectors (B=0, a level crossing) is rotated to the
+    eigenbasis of S^z_tot, read from ks.chain; with a transverse field
+    the flow is the dense one. The blocked
     flow drops what the eigenbasis leaks off the blocks, below SZ_TOL of
     the largest entry, and a rotated one moves dI/dV at the rtol of the
     flow (below 4e-11 of the peak, measured).

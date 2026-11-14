@@ -124,11 +124,12 @@ class KondoSpectrumMixin():
               table per occupied state per bias (leadinglog.memory_model
               gives the size, and the call warns when it is above the
               memory the process can still take). sz_blocks (order="LL"
-              only, default False) runs the flow on the blocks of total
-              S^z when H conserves S^z (no field, or a field along z), on
-              the CPU, with the same dI/dV to the rtol of the flow; with a
-              transverse field, or on a GPU, it warns and runs the dense
-              flow.
+              only) runs the flow on the blocks of total S^z when H
+              conserves S^z (no field, or a field along z), on the CPU,
+              with the same dI/dV to the rtol of the flow. None (default)
+              does it from 32 states on and otherwise runs the dense flow;
+              True asks for it at any size and warns when it cannot run
+              (a transverse field, a GPU); False is the dense flow.
           mode: "ED" (default) always uses full ED diagonalization of this
               chain's Hamiltonian (every eigenstate is needed as a
               possible virtual intermediate state), via
@@ -332,9 +333,9 @@ class KondoSpectrumMixin():
             # T>0 call on the CPU runs every bias in one flow
             mem_gb = kwargs.pop("mem_gb", None) if (
                 order == "LL" and submode is None) else None
-            # the opt-in S^z blocks of the leading-log flow
-            sz_blocks = kwargs.pop("sz_blocks", False) if (
-                order == "LL" and submode is None) else False
+            # the S^z blocks of the leading-log flow (None: automatic)
+            sz_blocks = kwargs.pop("sz_blocks", None) if (
+                order == "LL" and submode is None) else None
             if kwargs:
                 raise TypeError(
                     "get_kondo_spectrum(mode=\"ED\"%s) got unexpected keyword "
@@ -385,7 +386,7 @@ class KondoSpectrumMixin():
                                                  omega0=omega0, Gamma0=Gamma0,
                                                  order=order)
     def _get_kondo_spectrum_ed(self, eV, site, Jrho_s, U, T, T0, omega0,
-                                Gamma0, order, kB, mem_gb=None, sz_blocks=False):
+                                Gamma0, order, kB, mem_gb=None, sz_blocks=None):
         from .edkondo import KondoSpectrum
         from . import conductance
         from .stepfunctions import cached_fbuilder

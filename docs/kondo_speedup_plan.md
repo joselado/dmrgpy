@@ -263,7 +263,7 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
 15. **Sz block structure.** For a Hamiltonian that conserves Sz the four
     2d x 2d products and the hole sum are block sparse: 2 to 3x at 9 spins
     and T=0. `leadinglog.py:163`.
-    Done on 2026-11-14 as the opt-in `sz_blocks=True` (CPU, real route),
+    Done on 2026-11-14 as `sz_blocks=` (CPU, real route),
     measured on the chain of `ll_chain` with the field along z only
     (0.3 meV, no x part, which would break S^z), 61 biases on 8 spins on
     the workstation and 241 biases on 9 spins on Triton (Xeon Gold 6248),
@@ -278,7 +278,10 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
     5B below the ferromagnetic multiplet, so four pairs of levels with S^z
     5 apart are degenerate, and the first Triton run timed the dense flow
     (no labels). The flow then runs in the eigenbasis of S^z_tot, which also
-    covers B=0. The thermal tip sum was not blocked.
+    covers B=0. The thermal tip sum was not blocked. Up to 4 spins the
+    blocks are 30 to 40% slower, on calls below 0.4 s, even at 5 spins and
+    1.7x faster at 6. The default is automatic from 32 states
+    (`sz_blocks=None`, `SZ_BLOCKS_FROM`), the author's pick of 2026-11-14.
 16. **On the GPU** the jitted right-hand side is compiled again for
     every flow (`leadinglog_device.py:346`), the tip sums re-read the whole
     operand for every bias (`:505`, 2 to 3x on the per-bias part at

@@ -1,5 +1,6 @@
 """Item 15 of docs/kondo_speedup_plan.md: the leading-log flow on the
-blocks of total S^z (leading_log_dIdV(sz_blocks=True), opt-in). The
+blocks of total S^z (leading_log_dIdV(sz_blocks=), automatic from
+SZ_BLOCKS_FROM states by the author's pick of 2026-11-14). The
 labels come from the tip spin, the blocked flow gives the dense one to
 roundoff; a degenerate level that mixes S^z sectors (B=0, a crossing in a
 field) is rotated to the eigenbasis of S^z_tot and gives the dense flow
@@ -66,7 +67,7 @@ def test_sz_blocks_give_the_dense_flow(T, tables, monkeypatch):
     if not tables:
         monkeypatch.setattr(leadinglog, "HOLE_TABLE_BYTES", 0)
     ks = edkondo.KondoSpectrum(_chain(), 0, T)
-    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2)
+    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=False)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         got, info = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=True,
@@ -83,7 +84,7 @@ def test_b0_multiplets_run_rotated_to_sz_tot(n, T):
     peak), as for any change of basis inside the degenerate levels."""
     ks = edkondo.KondoSpectrum(_chain(n, bz=0.), 0, T)
     assert leadinglog._sz_labels(leadinglog._spin_ops(ks)) is None
-    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2)
+    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=False)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         got, info = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=True,
@@ -94,32 +95,32 @@ def test_b0_multiplets_run_rotated_to_sz_tot(n, T):
 
 def test_a_level_crossing_in_a_field_is_rotated():
     """9 spins with J = 1 meV and 0.3 meV along z: a magnon level lies
-    exactly 5B below the ferromagnetic multiplet, four pairs of levels of
-    S^z 5 apart are degenerate, and the tip spin shows no blocks. The
+    exactly 5B below the ferromagnetic multiplet, so four pairs of levels
+    of S^z 5 apart are degenerate. Which basis eigh returns inside them is
+    rounding luck (the first Triton run got a mixed one, a later local
+    run a pure one), so the test turns each pair by 45 degrees, which is
+    still an eigenbasis: the tip spin then shows no blocks, and the
     rotation to S^z_tot keeps the energies and finds them."""
-    ks = edkondo.KondoSpectrum(_chain(9), 0, 0.)
+    sc = _chain(9)
+    ks = edkondo.KondoSpectrum(sc, 0, 0.)
+    Szt = np.asarray(MO2matrix(sum(sc.Sz[i] for i in range(9)), sc.get_ED_obj()).todense())
+    sz = np.real(np.einsum("ia,ij,ja->a", ks.vs.conj(), Szt, ks.vs))
+    W = np.ptp(ks.e)
+    pairs = [(a, a + 1) for a in range(len(ks.e) - 1)
+             if ks.e[a + 1] - ks.e[a] < 1e-12*W and abs(sz[a] - sz[a + 1]) > 0.5]
+    assert len(pairs) == 4
+    for a, b in pairs:
+        va, vb = ks.vs[:, a].copy(), ks.vs[:, b].copy()
+        ks.vs[:, a], ks.vs[:, b] = (va + vb)/np.sqrt(2.), (va - vb)/np.sqrt(2.)
+    ks.Sx, ks.Sy, ks.Sz = (ks._eigenbasis_spin_operator(x) for x in ("Sx", "Sy", "Sz"))
     S = leadinglog._spin_ops(ks)
     assert leadinglog._sz_labels(S) is None
     cols = np.nonzero(ks.p > 0)[0]
     U, e, Sr, new, Wc = leadinglog._sz_rotation(ks, cols)
-    assert np.max(np.abs(np.sort(e) - ks.e)) < 1e-10*np.ptp(ks.e)
+    assert np.max(np.abs(np.sort(e) - ks.e)) < 1e-10*W
     assert leadinglog._sz_labels(Sr) is not None
     assert len(new) == len(cols)
     assert np.max(np.abs(Wc.T @ Wc - np.eye(len(cols)))) < 1e-12
-
-
-def test_a_flow_that_stops_on_the_blocks():
-    """The quadrature below D_stop runs dense on the state of the blocks.
-    dI/dV of a stopped flow is NaN at every bias on this spectrum, so the
-    tip vertex itself is compared."""
-    ks = edkondo.KondoSpectrum(_chain(), 0, 0.)
-    cols = np.nonzero(ks.p > 0)[0]
-    kw = dict(pole_threshold=0.06, cols=cols)
-    ref, info = leadinglog.tip_vertex(ks, EV, 0.2, -0.05, **kw)
-    got, info2 = leadinglog.tip_vertex(ks, EV, 0.2, -0.05, sz_blocks=True, **kw)
-    assert info["D_stop"] is not None
-    assert info2["D_stop"] == pytest.approx(info["D_stop"], rel=1e-9)
-    assert np.max(np.abs(got - ref)) < 1e-12*np.max(np.abs(ref))
 
 
 @pytest.mark.parametrize("bz,bx", [(0., 0.3e-3), (0.3e-3, 0.1e-3)])
@@ -129,7 +130,7 @@ def test_a_transverse_field_warns_and_runs_dense(bz, bx):
     ks = edkondo.KondoSpectrum(_chain(bz=bz, bx=bx), 0, 0.)
     assert leadinglog._sz_labels(leadinglog._spin_ops(ks)) is None
     assert leadinglog._sz_rotation(ks, np.nonzero(ks.p > 0)[0]) is None
-    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2)
+    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=False)
     with pytest.warns(RuntimeWarning, match="sz_blocks"):
         got, info = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=True,
                                                 return_info=True)
@@ -139,7 +140,8 @@ def test_a_transverse_field_warns_and_runs_dense(bz, bx):
 
 def test_get_kondo_spectrum_takes_sz_blocks():
     sc = _chain()
-    _, ref = sc.get_kondo_spectrum(EV, site=0, Jrho_s=-0.05, U=0.2, order="LL")
+    _, ref = sc.get_kondo_spectrum(EV, site=0, Jrho_s=-0.05, U=0.2, order="LL",
+                                   sz_blocks=False)
     _, got = sc.get_kondo_spectrum(EV, site=0, Jrho_s=-0.05, U=0.2, order="LL",
                                    sz_blocks=True)
     assert np.max(np.abs(got - ref)) < 1e-12*np.max(np.abs(ref))
@@ -171,7 +173,7 @@ def test_sz_blocks_on_the_device_warn_and_run_the_device_flow():
     name = backend.backend_name()
     backend.set_backend("jax")
     try:
-        ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2)
+        ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=False)
         with pytest.warns(RuntimeWarning, match="for the CPU"):
             got = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=True)
     finally:
@@ -205,7 +207,7 @@ def test_hubbard_chains_run_on_the_blocks(native, nf, bz):
     cls = (fermionchain.Spinful_Fermionic_Chain_Native if native
            else fermionchain.Spinful_Fermionic_Chain)
     ks = edkondo.KondoSpectrum(_hubbard(cls, 3, bz, nf), 0, 0.)
-    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2)
+    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=False)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         got, info = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=True,
@@ -221,7 +223,7 @@ def test_a_stopped_flow_at_b0_runs_rotated():
     ks = edkondo.KondoSpectrum(_chain(bz=0.), 0, 0.)
     cols = np.nonzero(ks.p > 0)[0]
     kw = dict(pole_threshold=0.06, cols=cols)
-    ref, info = leadinglog.tip_vertex(ks, EV, 0.2, -0.05, **kw)
+    ref, info = leadinglog.tip_vertex(ks, EV, 0.2, -0.05, sz_blocks=False, **kw)
     got, info2 = leadinglog.tip_vertex(ks, EV, 0.2, -0.05, sz_blocks=True, **kw)
     assert info2["sz_blocks"] and info2["sz_rotated"]
     assert info["D_stop"] is not None
@@ -239,7 +241,25 @@ def test_a_field_along_y_warns_on_the_complex_route():
     sc.set_hamiltonian(h)
     ks = edkondo.KondoSpectrum(sc, 0, 0.)
     assert not leadinglog._block_is_real(leadinglog._spin_ops(ks))
-    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2)
+    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=False)
     with pytest.warns(RuntimeWarning, match="real route"):
         got = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=True)
+    assert np.array_equal(got, ref)
+
+
+def test_the_default_takes_the_blocks_from_32_states():
+    """sz_blocks=None: the blocks from SZ_BLOCKS_FROM = 32 states on, the
+    dense flow below, and a silent dense flow when the spectrum has no
+    blocks, bit for bit the one of sz_blocks=False."""
+    assert leadinglog.SZ_BLOCKS_FROM == 32
+    for n, used in ((4, False), (5, True)):
+        ks = edkondo.KondoSpectrum(_chain(n), 0, 0.)
+        _, info = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, return_info=True)
+        assert info["sz_blocks"] == used
+    ks = edkondo.KondoSpectrum(_chain(5, bx=0.1e-3), 0, 0.)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        got, info = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, return_info=True)
+    assert not info["sz_blocks"]
+    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=False)
     assert np.array_equal(got, ref)

@@ -553,13 +553,17 @@ core) is what is left; numba threads gave 0.38 s to 0.04 s and were not
 added, since they do not follow the BLAS thread settings. The author
 chose to leave it on one core (2026-11-11); do not thread it unasked.
 
-**The S^z blocks of the leading-log flow (2026-11-14)** are opt-in,
-`sz_blocks=True` on `leading_log_dIdV` and `get_kondo_spectrum(order="LL")`,
-CPU and real route only (item 15 of `docs/kondo_speedup_plan.md`, README
-section 7). Every vertex conserves s + M_a in block form and its electron
+**The S^z blocks of the leading-log flow (2026-11-14)**, `sz_blocks=` on
+`leading_log_dIdV` and `get_kondo_spectrum(order="LL")`, CPU and real
+route only (item 15 of `docs/kondo_speedup_plan.md`, README section 7).
+The default `None` takes them from `SZ_BLOCKS_FROM` = 32 states on and
+falls back to the dense flow without a warning (the author's pick,
+2026-11-14: below 32 states they are slower); `True` asks at any size and
+warns on a fallback; `False` is the old flow bit for bit, which a test
+that compares against the dense flow must pass explicitly. Every vertex conserves s + M_a in block form and its electron
 transpose M_a - s, so `_SzBlocks.bracket` and `_tip_bracket_blocks` run
 on blocks; the dense functions (`_bracket`, `_tip_bracket`, the hole
-sums) are untouched, and `sz_blocks=False` is the old flow bit for bit.
+sums) are untouched.
 Labels come from the tip spin (`_sz_labels`, `SZ_TOL` = 1e-10). When a
 degenerate level mixes S^z sectors (B=0, or a crossing in a field: 9
 spins at J = 1 meV, 0.3 meV along z have four) the flow runs in the
