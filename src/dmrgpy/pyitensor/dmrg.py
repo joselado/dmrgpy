@@ -460,12 +460,8 @@ def _heff_diagonal(L, Lbra, H, i, R, Rbra, order_in):
     else:
         dR = bk.asarray(np.ones((1, 1)))
         Wj = H_j.transpose_to([mid, s_j, s_j.prime(1)])[..., None]
-    # in pairs, chi^2 d^2 w: the order einsum(optimize=True) finds too, but
-    # its path search per call was most of this function, 9% of a 40-site
-    # sweep at maxm=32
-    x = xp.tensordot(dL, xp.einsum("assb->asb", Wi), axes=([1], [0]))
-    y = xp.tensordot(xp.einsum("bttc->btc", Wj), dR, axes=([2], [1]))
-    d = xp.tensordot(x, y, axes=([2], [0]))
+    d = xp.einsum("la,asb,btc,rc->lstr", dL, xp.einsum("assb->asb", Wi),
+                  xp.einsum("bttc->btc", Wj), dR, optimize=True)
     return d.reshape(-1).real
 
 
