@@ -38,8 +38,9 @@ For a real Hamiltonian the block form of every vertex is a real matrix,
 and the flow is run in real arithmetic (_block_is_real); a complex
 eigenbasis, as with a field along y, takes the complex route.
 
-For a Hamiltonian that conserves S^z, sz_blocks=True (opt-in, real route,
-CPU) runs the flow on the blocks of total S^z: an index (s,a) of a vertex
+For a Hamiltonian that conserves S^z the flow runs on the blocks of total
+S^z (real route, CPU; sz_blocks=None, the default, at T=0 from SZ_BLOCKS_FROM
+states on, True at any size and T, False never): an index (s,a) of a vertex
 carries s + M_a, which every vertex conserves, so the four products and
 the two sums of the tip vertex run on blocks (_SzBlocks,
 _tip_bracket_blocks). The labels M are read off the tip spin
@@ -112,10 +113,11 @@ HOLE_TABLE_BYTES = 256e6
 # precision (see _block_is_real)
 REAL_TOL = 1e-12
 
-# sz_blocks=None (the default) runs the flow on the S^z blocks from this
-# many states on, when the spectrum has them: below it the blocks cost
+# sz_blocks=None (the default) runs the flow on the S^z blocks at T=0 from
+# this many states on, when the spectrum has them: below it the blocks cost
 # more than they save (30 to 40% slower up to 16 states, even at 32, 1.7x
-# faster at 64, T=0 and 61 biases; the author's pick, 2026-11-14)
+# faster at 64, T=0 and 61 biases), and at T>0 they gain nothing (0.93 to
+# 1.11x on 5 to 7 spins at 1 and 2 K). The author's picks, 2026-11-14.
 SZ_BLOCKS_FROM = 32
 
 # an entry of the tip spin above this fraction of its largest one counts
@@ -807,17 +809,21 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
     degenerate level mixes S^z sectors, from the eigenbasis of S^z_tot
     (_sz_rotation), in which the flow then runs; the tip vertex is rotated
     back. When neither works (H does not conserve S^z_tot) it warns and
-    the flow is the dense one. None (the default) does the same from
-    SZ_BLOCKS_FROM states on and falls back without a warning; False is
-    the dense flow. The info says which ran (sz_blocks, sz_rotated)."""
+    the flow is the dense one. None (the default) does the same at T=0
+    (no kernel and no onshell_kernel) from SZ_BLOCKS_FROM states on and
+    falls back without a warning; False is the dense flow. The info says
+    which ran (sz_blocks, sz_rotated)."""
     if not Gamma0 > 0.:
         raise ValueError("Gamma0 must be positive, it cuts the logs")
     for k in (kernel, onshell_kernel):
         if k is not None and (k.omega0 != omega0 or k.Gamma0 != Gamma0):
             raise ValueError("the thermal kernel was built for another omega0 or Gamma0")
+    if sz_blocks not in (None, True, False):
+        raise ValueError("sz_blocks must be None, True or False, got %r" % (sz_blocks,))
     auto = sz_blocks is None # warns on a fallback only when asked for
-    if auto:
-        sz_blocks = len(ks.e) >= SZ_BLOCKS_FROM
+    if auto: # at T=0 only: at T>0 the thermal tip sum is what costs
+        sz_blocks = (len(ks.e) >= SZ_BLOCKS_FROM and kernel is None
+                     and onshell_kernel is None)
     if _on_device():
         if sz_blocks and not auto:
             warnings.warn("leading-log flow: sz_blocks=True is for the CPU; the "
@@ -1144,9 +1150,10 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     energy and per occupied state.
 
     sz_blocks=None (the default) runs the flow on the blocks of total S^z
-    from SZ_BLOCKS_FROM states on when H conserves S^z, and the dense flow
-    otherwise, without a warning; True asks for the blocks at any size and
-    warns when they cannot run, False is the dense flow. On the blocks
+    at T=0 from SZ_BLOCKS_FROM states on when H conserves S^z, and the
+    dense flow otherwise, without a warning; True asks for the blocks at
+    any size and temperature and warns when they cannot run, False is the
+    dense flow. On the blocks
     (see _joint_flow, CPU and real route only) run the products of G and
     A_on, and at T=0 the two sums of the tip vertex. A degenerate level
     that mixes S^z sectors (B=0, a level crossing) is rotated to the

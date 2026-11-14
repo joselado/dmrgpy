@@ -263,3 +263,22 @@ def test_the_default_takes_the_blocks_from_32_states():
     assert not info["sz_blocks"]
     ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=False)
     assert np.array_equal(got, ref)
+
+
+def test_sz_blocks_takes_none_true_or_false():
+    ks = edkondo.KondoSpectrum(_chain(3), 0, 0.)
+    with pytest.raises(ValueError, match="sz_blocks"):
+        leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks="yes")
+
+
+def test_the_default_runs_dense_at_finite_temperature():
+    """At T>0 the blocks gain nothing (0.93 to 1.11x measured), so None
+    runs the dense flow there, bit for bit; True still takes them."""
+    ks = edkondo.KondoSpectrum(_chain(5, bz=0.), 0, 2.0)
+    got, info = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, return_info=True)
+    assert not info["sz_blocks"]
+    assert np.array_equal(got, leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2,
+                                                           sz_blocks=False))
+    _, info = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=True,
+                                          return_info=True)
+    assert info["sz_blocks"] and info["sz_rotated"]

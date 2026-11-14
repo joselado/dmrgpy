@@ -280,8 +280,9 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
     (no labels). The flow then runs in the eigenbasis of S^z_tot, which also
     covers B=0. The thermal tip sum was not blocked. Up to 4 spins the
     blocks are 30 to 40% slower, on calls below 0.4 s, even at 5 spins and
-    1.7x faster at 6. The default is automatic from 32 states
-    (`sz_blocks=None`, `SZ_BLOCKS_FROM`), the author's pick of 2026-11-14.
+    1.7x faster at 6; at 1 and 2 K on 5 to 7 spins they give 0.93 to
+    1.11x. The default is automatic at T=0 from 32 states
+    (`sz_blocks=None`, `SZ_BLOCKS_FROM`), the author's picks of 2026-11-14.
 16. **On the GPU** the jitted right-hand side is compiled again for
     every flow (`leadinglog_device.py:346`), the tip sums re-read the whole
     operand for every bias (`:505`, 2 to 3x on the per-bias part at

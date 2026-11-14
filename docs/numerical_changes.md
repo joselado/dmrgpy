@@ -1835,18 +1835,19 @@ which fails on the old cut).
 ## The 2026-11-14 S^z blocks of the leading-log flow
 
 `get_kondo_spectrum(order="LL")` and `leading_log_dIdV` run the flow on
-the blocks of total $S^z$ by default when the spectrum has 32 states or
-more and H conserves $S^z$ (`sz_blocks=None`, the author's pick). In a
+the blocks of total $S^z$ by default at $T=0$ when the spectrum has 32
+states or more and H conserves $S^z$ (`sz_blocks=None`, the author's
+picks). In a
 field along $z$ the blocks drop only what the eigenbasis leaks off them,
 and dI/dV moves by $6.5\times10^{-16}$ of the peak on 8 spins and by
 $4.8\times10^{-13}$ on 9 spins, where four level crossings make the flow
 run in the eigenbasis of $S^z_{\rm tot}$. At $B=0$ every flow runs in that
 eigenbasis, and dI/dV moves at the rtol of the flow, as for any change of
-basis inside the degenerate levels: $2.2\times10^{-11}$ and
-$4.1\times10^{-11}$ of the peak on 5 and 6 spins, $3.6\times10^{-12}$ on 9
+basis inside the degenerate levels: $3.3\times10^{-11}$ and
+$2.2\times10^{-11}$ of the peak on 5 and 6 spins, $3.6\times10^{-12}$ on 9
 spins, and up to $3.3\times10^{-11}$ on 3 Hubbard sites. D_stop and the
 sample coupling of `info` are maxima over entries and are read in the
 rotated basis (D_stop of a stopped flow moved by $6\times10^{-10}$
-relative). Below 32 states, with a transverse field, at $T>0$ for the tip
-sum, and on a GPU nothing moves. `sz_blocks=False` gives the numbers of
+relative). Below 32 states, at $T>0$, with a transverse field and on a GPU
+nothing moves. `sz_blocks=False` gives the numbers of
 before bit for bit.

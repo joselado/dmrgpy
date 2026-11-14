@@ -110,8 +110,8 @@ temperature, and the excited states of the sample are occupied as in
 `mode="ED"`. At $T>0$ the memory grows with the number of occupied
 states, and `mem_gb=4` cuts the biases in groups so that each flow stays
 below about 4 GB. When $H$ conserves $S^z$ (no field, or a field along
-$z$) the flow uses this symmetry on its own from 32 states on, with the
-same result; `sz_blocks=False` turns this off.
+$z$) the flow at $T=0$ uses this symmetry on its own from 32 states on,
+with the same result; `sz_blocks=False` turns this off.
 
 ```python
 sc = spinchain.Spin_Chain(["S=1/2"])

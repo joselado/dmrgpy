@@ -547,7 +547,8 @@ and 10 spins, which is the leak of S^z_tot in the eigenbasis, 1e-12 to
 5e-11, turned into energy) and when it maps the occupied states onto
 as many rotated ones. The tip vertex is rotated back at the end. A
 transverse field fails the test (2.2e-4 eV off the diagonal), and the
-call warns and runs the dense flow, bit for bit. D_stop and the sample
+flow is the dense one, bit for bit, with a warning under
+`sz_blocks=True`. D_stop and the sample
 coupling are maxima over entries, so they are read in the rotated basis:
 on a stopped flow at B=0 D_stop moved by 6e-10 relative.
 
@@ -578,11 +579,14 @@ rotated tip spin leaks 2.6e-12.
 With every flow forced onto the blocks (a pytest plugin that wraps
 `_joint_flow`, the fallback warning muted) the 97 tests of the
 leading-log files pass, the values pinned at 1e-11 against the two-pass
-code included. The default is `sz_blocks=None`, the author's pick of
-2026-11-14: the blocks from `SZ_BLOCKS_FROM` = 32 states on, and below
-that, or when the spectrum has no blocks, the dense flow without a
-warning. `sz_blocks=True` asks for the blocks at any size and warns when
-they cannot run; `sz_blocks=False` is the dense flow bit for bit.
+code included. At T>0 the default would gain nothing: on 5 to 7 spins
+at 1 and 2 K (61 biases) the blocks give 0.93 to 1.11x, while at B=0 the
+rotation moves dI/dV by up to 4.1e-11 of the peak. The default is
+`sz_blocks=None`, the author's picks of 2026-11-14: the blocks at T=0
+from `SZ_BLOCKS_FROM` = 32 states on, and otherwise, or when the
+spectrum has no blocks, the dense flow without a warning. `sz_blocks=True`
+asks for the blocks at any size and temperature and warns when they
+cannot run; `sz_blocks=False` is the dense flow bit for bit.
 
 What is not done. The tip vertex is integrated as part of the state, so
 its 13 stages are kept like those of the couplings. It does not enter

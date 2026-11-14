@@ -127,9 +127,10 @@ class KondoSpectrumMixin():
               only) runs the flow on the blocks of total S^z when H
               conserves S^z (no field, or a field along z), on the CPU,
               with the same dI/dV to the rtol of the flow. None (default)
-              does it from 32 states on and otherwise runs the dense flow;
-              True asks for it at any size and warns when it cannot run
-              (a transverse field, a GPU); False is the dense flow.
+              does it at T=0 from 32 states on and otherwise runs the
+              dense flow; True asks for it at any size and T and warns
+              when it cannot run (a transverse field, a GPU); False is the
+              dense flow.
           mode: "ED" (default) always uses full ED diagonalization of this
               chain's Hamiltonian (every eigenstate is needed as a
               possible virtual intermediate state), via

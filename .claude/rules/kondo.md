@@ -556,10 +556,11 @@ chose to leave it on one core (2026-11-11); do not thread it unasked.
 **The S^z blocks of the leading-log flow (2026-11-14)**, `sz_blocks=` on
 `leading_log_dIdV` and `get_kondo_spectrum(order="LL")`, CPU and real
 route only (item 15 of `docs/kondo_speedup_plan.md`, README section 7).
-The default `None` takes them from `SZ_BLOCKS_FROM` = 32 states on and
-falls back to the dense flow without a warning (the author's pick,
-2026-11-14: below 32 states they are slower); `True` asks at any size and
-warns on a fallback; `False` is the old flow bit for bit, which a test
+The default `None` takes them at T=0 from `SZ_BLOCKS_FROM` = 32 states
+on and falls back to the dense flow without a warning (the author's
+picks, 2026-11-14: below 32 states they are slower, and at T>0 they gain
+0.93 to 1.11x while B=0 curves still move at the rtol); `True` asks at
+any size and T and warns on a fallback; `False` is the old flow bit for bit, which a test
 that compares against the dense flow must pass explicitly. Every vertex conserves s + M_a in block form and its electron
 transpose M_a - s, so `_SzBlocks.bracket` and `_tip_bracket_blocks` run
 on blocks; the dense functions (`_bracket`, `_tip_bracket`, the hole
@@ -570,7 +571,8 @@ spins at J = 1 meV, 0.3 meV along z have four) the flow runs in the
 eigenbasis of S^z_tot read from the chain (`_sz_rotation`,
 `KondoSpectrum.eigenbasis_operator`), accepted only when U^T diag(e) U is
 diagonal to `SZ_TOL` of the spread of e, and the tip vertex is rotated
-back; a transverse field warns and runs dense. Do NOT replace the
+back; a transverse field runs dense (with a warning under `True`). Do
+NOT replace the
 rotation by an energy tolerance on the levels, and do NOT detect from the
 tip spin alone: that missed the plan's own 9-spin chain and timed the
 fallback. The loops of `_hole_sum_blocks_table` run on slices with local
