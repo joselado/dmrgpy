@@ -3,7 +3,8 @@ docs/kondo_speedup_plan.md (item 11), pinned by their numbers against the
 old form kept here and by a count of what they save. The spaces here are
 truncated on purpose (small nkry): every test of test_kondo_krylov.py
 exhausts its space, and an exhausted space cannot see a change of the
-Krylov basis."""
+Krylov basis. The last test checks that the Krylov spectra of a real H
+take the real route of the sums of conductance.py."""
 import numpy as np
 import pytest
 
@@ -101,3 +102,17 @@ def test_state_spectrum_keeps_the_numbers_on_a_truncated_space(field, monkeypatc
         # the residual from the recurrence is the explicit one
         assert np.max(np.abs(new.residual - old.residual)) < 1e-12*krylovkondo.onenorm(kks.H) # 9e-17
     assert len(calls) == (2 if kks.real else 3)*min(3, len(kks.weights))
+
+
+def test_the_krylov_spectrum_of_a_real_hamiltonian_is_of_the_real_form():
+    """The third-order sums take conductance._spin_triplet's real route
+    (Sx and Sz real, Sy i times a real matrix) for a real H, also in the
+    SU(2) reduction, and the complex route for a field along y."""
+    for sc, su2, real in ((heisenberg(5, "xz"), False, True),
+                          (heisenberg(5), True, True),
+                          (heisenberg(5, "y"), False, False)):
+        kks = krylovkondo.KrylovKondoSpectrum(sc, 1, 1.0, nkry=6, su2=su2)
+        for k in range(min(2, len(kks.weights))):
+            assert conductance._spin_triplet(kks.state_spectrum(k))[1] == real
+
+
