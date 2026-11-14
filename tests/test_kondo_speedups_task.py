@@ -656,3 +656,43 @@ def test_a_copy_of_the_chain_solves_its_own_manifold():
     assert np.max(np.abs(out - first)) < 1e-6 * np.max(np.abs(first))
     _call(sc)
     assert not solves  # the original still holds its own
+
+
+# ---------------------------------------------------------------- the cache
+
+
+def _raw_builds(monkeypatch):
+    raw = []
+    build = task.spectrum_from_arrays
+
+    def spy(*args, **kwargs):
+        out = build(*args, **kwargs)
+        raw.append(out)
+        return out
+
+    monkeypatch.setattr(task, "spectrum_from_arrays", spy)
+    return raw
+
+
+def test_the_cache_keeps_a_real_basis_in_real_storage(monkeypatch):
+    sc = _chain()
+    raw = _raw_builds(monkeypatch)
+    for k in range(2):  # built, then served
+        ks = TaskKondoSpectrum(sc, 3, nkry=6)
+        (entry,) = sc._task_spectrum_cache.values()
+        assert [m[0] for m in entry[1]] == ["real", "imag", "real"]
+        assert not any(np.iscomplexobj(m[1]) for m in entry[1])
+        for M, R in zip((ks.Sx, ks.Sy, ks.Sz), raw[0][1]):
+            assert np.iscomplexobj(M) and np.array_equal(M, R)
+    assert len(raw) == 1
+    assert 2 * sum(m[1].nbytes for m in entry[1]) == sum(R.nbytes for R in raw[0][1])
+
+
+def test_the_cache_keeps_a_complex_basis_as_it_is(monkeypatch):
+    sc = _heisenberg(6, field_y=3e-4)
+    raw = _raw_builds(monkeypatch)
+    ks = TaskKondoSpectrum(sc, 0, nkry=5)
+    (entry,) = sc._task_spectrum_cache.values()
+    assert [m[0] for m in entry[1]] == ["as is"] * 3
+    for M, R in zip((ks.Sx, ks.Sy, ks.Sz), raw[0][1]):
+        assert np.array_equal(M, R) and M is not R

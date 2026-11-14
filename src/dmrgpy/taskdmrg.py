@@ -219,8 +219,31 @@ def _exported_real(Ms):
 
 # How many spectra a chain keeps (SPECTRUM_CACHE_SIZE of them, the most
 # recent ones): enough for the members of a small n_gs manifold on a few
-# sites. Each is a few matrices of the size of the Krylov space.
+# sites. Each holds three (n+1) x (n+1) matrices, n up to 3(nkry+1), kept
+# in real storage where they are real or imaginary (_stored): about 35 MB
+# at nkry=400. The bound is a count, not bytes.
 SPECTRUM_CACHE_SIZE = 8
+
+
+def _stored(M):
+    """A matrix of a spectrum as the cache keeps it: its real part when it
+    is real and its imaginary part when it is imaginary (S_y on a real
+    basis), by exact zeros, as it is otherwise. The first two take half
+    the memory of the complex matrix."""
+    if np.iscomplexobj(M):
+        if not np.any(M.imag): return ("real",np.ascontiguousarray(M.real))
+        if not np.any(M.real): return ("imag",np.ascontiguousarray(M.imag))
+    return ("as is",M)
+
+
+def _handed_out(entry):
+    """A new complex array with the values of a matrix kept by _stored."""
+    kind,A = entry
+    if kind=="as is": return A.copy()
+    out = np.zeros(A.shape,dtype=complex)
+    if kind=="real": out.real = A
+    else: out.imag = A
+    return out
 
 
 def _spectrum_key(Ms,Ws,ops,settings):
@@ -298,14 +321,15 @@ def session_spectrum(self,ops_terms,nkry,pad_bonds=None,expand_bonds=None,
     if key in cache:
         cache[key] = cache.pop(key) # most recent last
     else:
-        cache[key] = task.spectrum_from_arrays(Ms,Ws,ops,nkry,
+        e,mats,dim,res = task.spectrum_from_arrays(Ms,Ws,ops,nkry,
                 pad_bonds=pad_bonds,expand_bonds=expand_bonds,
                 expand_rounds=expand_rounds,residual=True,
                 column=bool(column))
+        cache[key] = (e,[_stored(m) for m in mats],dim,res)
         while len(cache)>SPECTRUM_CACHE_SIZE:
             cache.pop(next(iter(cache)))
     e,mats,dim,res = cache[key]
-    out = (e.copy(),[m.copy() for m in mats],dim)
+    out = (e.copy(),[_handed_out(m) for m in mats],dim)
     if residual: out = out+(res.copy(),)
     if gauge: out = out+(dropped,)
     return out
