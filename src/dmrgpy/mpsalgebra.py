@@ -522,5 +522,10 @@ from .mpsalgebratk.trace import inverse_trace
 from .mpsalgebratk.disentangle import disentangle_manifold
 
 
+from .mpsalgebratk.hadamard import hadamard_product
+from .mpsalgebratk.hadamard import elementwise_map
+from .mpsalgebratk.hadamard import participation_entropy
+
+
 
 

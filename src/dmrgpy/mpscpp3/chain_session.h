@@ -328,6 +328,23 @@ static inline int kpm_polynomials_for_broadening(double half_width,
     }
 
 
+// How Chain's METTS loops evolve a product state by beta/2: TDVP steps
+// (the default, `steps` empty) or the implicit steps of a logarithmic grid
+// (imaginarytime.py, arXiv:2606.02930), one entry of `steps` per step, each
+// the list of betas of Chain::implicit_step. At namespace scope because a
+// nested struct with default member initializers cannot be a default
+// argument of a member function of its enclosing class.
+struct ImplicitPlan
+    {
+    std::vector<std::vector<Cplx>> steps;
+    double shift = 0.0;
+    bool shift_energy = false;
+    int nsweeps = 1;
+    double tol = 1E-10;
+    int krylov = 10;
+    int maxiter = 100;
+    };
+
 class Chain
     {
     public:
@@ -387,6 +404,71 @@ class Chain
             site_vectors.push_back(T);
             }
         return build_product_state(site_vectors);
+        }
+
+    // The inverse of bindings.cc's mps_site_arrays(): an MPS on sites_
+    // from dense site arrays, data[j-1] being site j's (left link, site,
+    // right link) array flattened in row-major order with shape
+    // shapes[j-1], length-1 links at the open ends. The elementwise
+    // product of MPS (pyitensor/rsi.py) runs on arrays for every backend
+    // and comes back through here. Fresh dense links, no orthogonality
+    // centre assumed. Dense indices only.
+    MPS
+    mps_from_site_arrays(std::vector<std::vector<Cplx>> const& data,
+                         std::vector<std::vector<int>> const& shapes) const
+        {
+        reject_sector("mps_from_site_arrays");
+        int N = sites_.length();
+        if ((int)data.size()!=N || (int)shapes.size()!=N)
+            throw std::invalid_argument("Chain::mps_from_site_arrays: one array per site is needed");
+        for (int j=0;j<N;j++)
+            {
+            if (shapes[j].size()!=3)
+                throw std::invalid_argument("Chain::mps_from_site_arrays: every array must be (left, site, right)");
+            if (shapes[j][1]!=dim(sites_.si(j+1)))
+                throw std::invalid_argument("Chain::mps_from_site_arrays: an array has the wrong site dimension");
+            if ((long)data[j].size()!=(long)shapes[j][0]*shapes[j][1]*shapes[j][2])
+                throw std::invalid_argument("Chain::mps_from_site_arrays: an array does not match its shape");
+            if (j>0 && shapes[j][0]!=shapes[j-1][2])
+                throw std::invalid_argument("Chain::mps_from_site_arrays: neighbouring bond dimensions differ");
+            }
+        if (shapes[0][0]!=1 || shapes[N-1][2]!=1)
+            throw std::invalid_argument("Chain::mps_from_site_arrays: the open ends must have dimension 1");
+        std::vector<Index> links;
+        for (int k=1;k<N;k++)
+            links.push_back(Index(shapes[k-1][2],TagSet("Link,l="+std::to_string(k))));
+        MPS psi(N);
+        for (int i=1;i<=N;i++)
+            {
+            auto s = sites_.si(i);
+            std::vector<Index> inds;
+            if (i>1) inds.push_back(links[i-2]);
+            inds.push_back(s);
+            if (i<N) inds.push_back(links[i-1]);
+            auto T = ITensor(IndexSet(inds));
+            int dl = shapes[i-1][0], ds = shapes[i-1][1], dr = shapes[i-1][2];
+            auto const& v = data[i-1];
+            for (int a=0;a<dl;a++)
+            for (int b=0;b<ds;b++)
+            for (int c=0;c<dr;c++)
+                {
+                Cplx x = v[((long)a*ds+b)*dr+c];
+                std::vector<IndexVal> ivs;
+                if (i>1) ivs.push_back(links[i-2]=a+1);
+                ivs.push_back(s=b+1);
+                if (i<N) ivs.push_back(links[i-1]=c+1);
+                T.set(ivs,x);
+                }
+            psi.set(i,T);
+            }
+        // No gauge is known, so one sweep from the right end makes the
+        // state right-canonical with its centre on site 1, dropping only
+        // exactly-zero singular values (Cutoff 0), as the "python"
+        // Chain.mps_from_site_arrays does.
+        psi.leftLim(0);
+        psi.rightLim(N+1);
+        if (N>1) psi.position(1,{"Cutoff",0.0});
+        return psi;
         }
 
     // |1>> = prod_i sum_a |a>_{2i-1}|a>_{2i} on a doubled chain (ket and
@@ -1948,6 +2030,178 @@ class Chain
         return psi;
         }
 
+    // The local operator of an implicit factor, in the shape ITensor's
+    // gmres() (iterativesolvers.h) wants: product() and size().
+    struct ImplicitLocalOp
+        {
+        std::function<ITensor(ITensor const&)> mv;
+        long n;
+        void product(ITensor const& v, ITensor& w) const { w = mv(v); }
+        long size() const { return n; }
+        };
+
+    // One factor of an implicit imaginary-time step, the port of
+    // pyitensor/implicit.py's implicit_factor (arXiv:2606.02930, the
+    // implicit trapezoid rule and the factors of the Gauss-Legendre
+    // rule):
+    //
+    //   x = (1 + beta(H - shift))^-1 (1 - beta(H - shift)) psi,
+    //
+    // by two-site sweeps over x, x starting as psi. At bond (i,i+1) the
+    // two-site tensor theta solves the Galerkin-projected system
+    //   (1 - beta shift) theta + beta H_eff theta
+    //       = (1 + beta shift) P[psi] - beta P[H psi],
+    // with H_eff from the <x|H|x> environments (LM/RM), P[psi] from the
+    // overlap environments <x|psi> (Lo/Ro, as ddmrg_correction_vector's)
+    // and P[H psi] from the mixed environments <x|H|psi> (LX/RX), so
+    // neither an MPO for 1 + beta(H - shift) nor the right-hand side as an
+    // MPS is ever built and compressed. The local system is not Hermitian
+    // for a complex beta, so it is solved by ITensor's restarted GMRES
+    // (RestartIter krylov, MaxIter maxiter, relative ErrGoal tol); the
+    // split back into two sites is the only truncation, at the chain's
+    // cutoff_/maxm_. Returns x with its centre on site 1, not normalized.
+    MPS
+    implicit_factor(MPS const& psi, Cplx beta, double shift, int nsweeps,
+                    double tol, int krylov, int maxiter) const
+        {
+        auto const& H = H_;
+        Cplx a0 = 1.0 - beta*shift, b0 = 1.0 + beta*shift;
+        MPS x = psi;
+        int n = length(x);
+        x.position(1,{"Cutoff",-1.0,"MaxDim",std::max(maxm_,maxLinkDim(x))});
+        auto sargs = Args("Cutoff",cutoff_,"MaxDim",maxm_);
+        auto gargs = Args("MaxIter",maxiter,"RestartIter",krylov,"ErrGoal",tol);
+        std::vector<ITensor> LM(n+2), RM(n+2), LX(n+2), RX(n+2), Lo(n+2), Ro(n+2);
+        auto envM = [&](std::vector<ITensor>& E, int i, int prev)
+            {
+            ITensor T = E[prev] ? E[prev]*x.A(i) : x.A(i);
+            T *= H.A(i);
+            T *= dag(prime(x.A(i)));
+            E[i] = T;
+            };
+        auto envX = [&](std::vector<ITensor>& E, int i, int prev)
+            {
+            ITensor T = E[prev] ? E[prev]*psi.A(i) : psi.A(i);
+            T *= H.A(i);
+            T *= dag(prime(x.A(i)));
+            E[i] = T;
+            };
+        auto envO = [&](std::vector<ITensor>& E, int i, int prev)
+            {
+            ITensor bra = dag(x.A(i));
+            for (auto const& I : inds(bra))
+                if (hasTags(I,"Link")) bra = prime(bra,I);
+            ITensor T = E[prev] ? E[prev]*psi.A(i) : psi.A(i);
+            T *= bra;
+            E[i] = T;
+            };
+        auto local = [&](int i, bool right)
+            {
+            ITensor theta = x.A(i)*x.A(i+1);
+            auto mv = [&,i](ITensor const& v)
+                {
+                ITensor w = v;
+                if (LM[i-1]) w *= LM[i-1];
+                w *= H.A(i);
+                w *= H.A(i+1);
+                if (RM[i+2]) w *= RM[i+2];
+                w.noPrime();
+                return a0*v + beta*w;
+                };
+            ITensor hpsi = psi.A(i)*psi.A(i+1);
+            if (LX[i-1]) hpsi *= LX[i-1];
+            hpsi *= H.A(i);
+            hpsi *= H.A(i+1);
+            if (RX[i+2]) hpsi *= RX[i+2];
+            hpsi.noPrime();
+            ITensor ov = psi.A(i)*psi.A(i+1);
+            if (Lo[i-1]) ov *= Lo[i-1];
+            if (Ro[i+2]) ov *= Ro[i+2];
+            ov.mapPrime(1,0);
+            ITensor rhs = b0*ov - beta*hpsi;
+            ImplicitLocalOp A{mv,(long)dim(inds(theta))};
+            if (norm(rhs)==0.0) theta = 0.0*theta;
+            else gmres(A,rhs,theta,gargs);
+            if (right)
+                {
+                auto li = commonInds(theta,x.A(i));
+                auto [U,S,V] = svd(theta,li,sargs);
+                x.ref(i) = U;
+                x.ref(i+1) = S*V;
+                }
+            else
+                {
+                auto li = commonInds(theta,x.A(i+1));
+                auto [U,S,V] = svd(theta,li,sargs);
+                x.ref(i+1) = U;
+                x.ref(i) = V*S;
+                }
+            };
+        for (int sw=0;sw<nsweeps;++sw)
+            {
+            for (int i=n;i>=3;--i) { envM(RM,i,i+1); envX(RX,i,i+1); envO(Ro,i,i+1); }
+            for (int i=1;i<n;++i)
+                {
+                local(i,true);
+                if (i<n-1) { envM(LM,i,i-1); envX(LX,i,i-1); envO(Lo,i,i-1); }
+                }
+            for (int i=n-1;i>=1;--i)
+                {
+                local(i,false);
+                if (i>1) { envM(RM,i+1,i+2); envX(RX,i+1,i+2); envO(Ro,i+1,i+2); }
+                }
+            }
+        x.leftLim(0);
+        x.rightLim(2);
+        return x;
+        }
+
+    // One implicit imaginary-time step, pyitensor/implicit.py's
+    // implicit_step: the factors of `betas` in turn, then the state
+    // normalized. shift_energy takes the shift from <psi|H|psi>/<psi|psi>
+    // of the input state instead of `shift`.
+    MPS
+    implicit_step(MPS const& psi, std::vector<Cplx> const& betas,
+                  double shift, bool shift_energy, int nsweeps, double tol,
+                  int krylov, int maxiter) const
+        {
+        reject_sector("implicit_step");
+        if (!have_H_) throw std::runtime_error("Chain::implicit_step called before set_hamiltonian");
+        if (length(psi)<3) throw std::invalid_argument("Chain::implicit_step needs at least 3 sites");
+        if (nsweeps<1 || krylov<1 || maxiter<1)
+            throw std::invalid_argument("Chain::implicit_step: nsweeps, krylov and maxiter must be >= 1");
+        if (shift_energy)
+            shift = innerC(psi,H_,psi).real()/innerC(psi,psi).real();
+        MPS x = psi;
+        for (auto const& b : betas)
+            x = implicit_factor(x,b,shift,nsweeps,tol,krylov,maxiter);
+        double nrm = std::sqrt(innerC(x,x).real());
+        if (!(nrm>0.0)) throw std::runtime_error("Chain::implicit_step: the state vanished");
+        x /= nrm;
+        return x;
+        }
+
+    // How the METTS loops below evolve a product state by beta/2, see
+    // ImplicitPlan above the class.
+    MPS
+    metts_imaginary_evolve(MPS phi, int nsteps, Cplx dt, int niter,
+                           ImplicitPlan const& plan) const
+        {
+        if (plan.steps.empty())
+            {
+            for (int s=0; s<nsteps; ++s)
+                {
+                phi = tdvp_step(H_,phi,dt,2,niter);
+                phi /= sqrt(innerC(phi,phi).real());
+                }
+            return phi;
+            }
+        for (auto const& betas : plan.steps)
+            phi = implicit_step(phi,betas,plan.shift,plan.shift_energy,
+                                plan.nsweeps,plan.tol,plan.krylov,plan.maxiter);
+        return phi;
+        }
+
     // METTS (Minimally Entangled Typical Thermal States; E.M. Stoudenmire
     // and S.R. White, arXiv:1002.1305) -- a direct port of
     // pyitensor/metts.py's algorithm onto real ITensor v3 (see that
@@ -1982,7 +2236,8 @@ class Chain
     metts_vev(std::vector<std::vector<MOTerm>> const& terms_ops, double T, int nsamples,
               int nwarmup, double dbeta_half_step,
               std::vector<std::string> const& basis_ops,
-              unsigned long seed, int niter=30) const
+              unsigned long seed, int niter=30,
+              ImplicitPlan const& plan=ImplicitPlan()) const
         {
         reject_sector("metts_vev");
         if (!have_H_) Error("Chain::metts_vev called before set_hamiltonian");
@@ -2008,12 +2263,7 @@ class Chain
         int total_iters = nwarmup+nsamples;
         for (int it=0; it<total_iters; ++it)
             {
-            MPS phi = cps;
-            for (int s=0; s<nsteps; ++s)
-                {
-                phi = tdvp_step(H_,phi,dt,2,niter);
-                phi /= sqrt(innerC(phi,phi).real());
-                }
+            MPS phi = metts_imaginary_evolve(cps,nsteps,dt,niter,plan);
             if (it>=nwarmup)
                 {
                 for (int k=0; k<nops; ++k) samples[k].push_back(innerC(phi,ops[k],phi));
@@ -2081,7 +2331,8 @@ class Chain
               double T, int nt, double dt, int nsamples,
               int nwarmup, double dbeta_half_step,
               std::vector<std::string> const& basis_ops,
-              unsigned long seed, int niter=30, int tdvp_niter=50) const
+              unsigned long seed, int niter=30, int tdvp_niter=50,
+              ImplicitPlan const& plan=ImplicitPlan()) const
         {
         reject_sector("metts_dynamical_correlator");
         if (!have_H_) Error("Chain::metts_dynamical_correlator called before set_hamiltonian");
@@ -2109,12 +2360,7 @@ class Chain
         int total_iters = nwarmup+nsamples;
         for (int it=0; it<total_iters; ++it)
             {
-            MPS phi = cps;
-            for (int s=0; s<nsteps; ++s)
-                {
-                phi = tdvp_step(H_,phi,dtau,2,niter);
-                phi /= sqrt(innerC(phi,phi).real());
-                }
+            MPS phi = metts_imaginary_evolve(cps,nsteps,dtau,niter,plan);
             if (it>=nwarmup)
                 {
                 MPS v = apply_mpo(B,phi,args);

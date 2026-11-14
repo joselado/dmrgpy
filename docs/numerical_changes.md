@@ -1851,3 +1851,26 @@ rotated basis (D_stop of a stopped flow moved by $6\times10^{-10}$
 relative). Below 32 states, at $T>0$, with a transverse field and on a GPU
 nothing moves. `sz_blocks=False` gives the numbers of
 before bit for bit.
+
+## The 2026-11-14 implicit imaginary-time steps of METTS
+
+`metts_vev` and `metts_dynamical_correlator` on `itensor_version=3` and
+`"python"` evolve each sample by the implicit trapezoid steps of a
+logarithmic grid (arXiv:2606.02930) whenever these are fewer than the TDVP
+steps of `dbeta_half_step` (`itime=None`, the author's choice, "if this is
+more efficient, just make it the default"). The implicit steps take 8 steps
+per panel, which matches the time-step error of the TDVP default: on a
+12-site Heisenberg chain from the Néel state, against ED at $\tau=\beta/2$,
+TDVP with `dbeta_half_step=0.05` is off by $2.1\times10^{-5}$,
+$1.7\times10^{-6}$ and $5.9\times10^{-8}$ in the energy at $\beta/2=5$, 10
+and 25, and the implicit steps by $2.0\times10^{-5}$, $1.4\times10^{-5}$ and
+$4.6\times10^{-8}$. With the default 0.05 the switch is below
+$T\approx0.12$ in units of the largest coupling. On a 16-site Heisenberg
+chain, the same seed and 8 samples, the mean energy moved by
+$9\times10^{-5}$ at $T=0.1$, $2\times10^{-5}$ at $T=0.05$ and $10^{-6}$ at
+$T=0.02$, in runs 1.4, 2.6 and 4.1 times faster. Such a run first solves the
+ground state, whose energy is the shift of the steps (on a clone when the
+chain holds a state the caller set). At $T\geq0.15$ there, on
+`"julia_live"` and with `itime="tdvp"` the numbers are those of before, bit
+for bit.
+

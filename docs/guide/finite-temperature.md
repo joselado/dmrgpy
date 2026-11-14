@@ -6,6 +6,7 @@ $$\langle O\rangle_T=\frac{\mathrm{Tr}\,[e^{-\beta H}O]}{\mathrm{Tr}\,e^{-\beta 
 \qquad\beta=1/T.$$
 
 There are three methods: purification, METTS and exact diagonalization.
+METTS is built on imaginary-time evolution, which has its own section.
 
 ## Purification
 
@@ -67,6 +68,56 @@ METTS points are discussed in [METTS](#metts).
     --8<-- "finite-temperature_specific_heat/plot.py"
     ```
 
+## Imaginary-time evolution
+
+Imaginary-time evolution projects a state onto the low energies,
+
+$$|\psi(\tau)\rangle\propto e^{-\tau H}|\psi\rangle
+=\sum_n e^{-E_n\tau}|n\rangle\langle n|\psi\rangle .$$
+
+At long $\tau$ it gives the ground state, and at $\tau=\beta/2$ it is the
+step of METTS below. Each eigenstate decays as $e^{-(E_n-E_0)\tau}$, so the
+energy scale that matters falls as $\tau$ grows, and the time steps can grow
+with it (Zima, Stoudenmire, White, Parcollet and Kaye, arXiv:2606.02930).
+The grid has panels $[0,\tau_0]$, $[\tau_0,2\tau_0]$, $[2\tau_0,4\tau_0]$,
+... up to $\tau$, with a few equal steps in each, so the number of steps
+grows as $\log\tau$ and not as $\tau$. A long step needs an implicit
+rule, the trapezoid rule
+
+$$\Big(1+\tfrac{\Delta\tau}{2}(H-E_0)\Big)|\psi_k\rangle=
+\Big(1-\tfrac{\Delta\tau}{2}(H-E_0)\Big)|\psi_{k-1}\rangle ,$$
+
+which is stable for any step size. Each step needs one linear solve. Here
+`h` is the Hamiltonian of the chain and
+`wf` the initial state, for example a Néel state:
+
+```python
+wft = sc.evolve_imaginary_time(wf, 100.)     # normalized e^{-100 H}|wf>
+taus, e = sc.evolve_imaginary_time_and_measure(h, wf, 100.)
+```
+
+The second call returns the grid times and $\langle\psi(\tau)|h|\psi(\tau)\rangle$
+on them. With an ED state, `mode="ED"` gives the exact evolution on the
+same grid. In `examples/finite_temperature/imaginary_time_log_grid` the
+Néel state of a 12-site Heisenberg chain reaches $\tau=1000$ in 72 steps,
+and its energy ends $5\times10^{-12}$ above $E_0$. The error of the trapezoid
+rule falls as $1/n^2$ with the number $n$ of steps per panel. It is largest
+at intermediate $\tau$, where the energy is off by about $2\times10^{-3}$
+(in units of the exchange) at $n=4$ in that example. The keywords are:
+
+- `nsteps`: the steps per panel (default 4).
+- `tau0`: the end of the first panel (default 0.01 over the largest
+  coupling of $H$). The first steps must resolve the highest energies the
+  initial state contains.
+- `order`: 2 for the trapezoid rule, 4, 6, ... for the Gauss-Legendre
+  rules, more accurate per step, with `order/2` complex linear solves each.
+- `shift`: the energy subtracted from $H$, by default the ground-state
+  energy. It must be the ground-state energy: with a lower shift the long
+  steps stop projecting.
+
+It works with `itensor_version=3` (at least 3 sites) and `"python"`, for a
+Hermitian $H$.
+
 ## METTS
 
 Minimally entangled typical thermal states (Stoudenmire and
@@ -99,6 +150,15 @@ are:
   `("Sz","Sx")`). Alternating them reduces autocorrelation.
 - `njobs`: runs independent Markov chains in parallel processes. Only
   for `itensor_version="python"`.
+- `itime`: how each sample is evolved to $\beta/2$. By default the cheaper
+  of two ways at the same accuracy: TDVP steps of `dbeta_half_step` at
+  high temperature, and below $T\approx0.12$ (in units of the largest
+  coupling) the implicit steps of
+  [Imaginary-time evolution](#imaginary-time-evolution), whose number
+  grows as $\log\beta$ instead of $\beta$. `itime="tdvp"` or
+  `itime="implicit"` forces one, and `itime_options` takes the keywords of
+  `evolve_imaginary_time`, with 8 steps per panel by default here.
+  `"julia_live"` always takes TDVP steps.
 
 METTS works with `itensor_version=3` (at least 3 sites), `"python"` and
 `"julia_live"`. It

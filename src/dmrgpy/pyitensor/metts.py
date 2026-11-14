@@ -226,7 +226,7 @@ def collapse_to_cps(psi, sites, opname, rng, eigcache=None):
 
 
 def imaginary_time_evolve(psi, H, dbeta_half, nsteps, cutoff, maxdim, niter=30,
-                          hermitian=None):
+                          hermitian=None, implicit=None):
     """Evolve psi by e^{-dbeta_half*H}, via nsteps of imaginary-time TDVP
     (dt=-1j*(dbeta_half/nsteps) passed to tdvp_step's own -i*dt real-time
     convention -- see this module's docstring for why that gives genuine
@@ -234,6 +234,19 @@ def imaginary_time_evolve(psi, H, dbeta_half, nsteps, cutoff, maxdim, niter=30,
     imaginary-time evolution isn't norm-preserving (unlike the real-time
     case tdvp_step was originally written for). `hermitian` is
     tdvp_step's, decided here once for all nsteps when None."""
+    if implicit is not None:
+        # the implicit steps of a logarithmic grid (implicit.py,
+        # arXiv:2606.02930): `implicit` is the plan imaginarytime.py
+        # builds, one list of betas per step, and replaces the TDVP steps
+        from .implicit import implicit_step
+        for betas in implicit["steps"]:
+            psi = implicit_step(psi, H, betas, implicit["shift"], cutoff,
+                                maxdim, nsweeps=implicit["nsweeps"],
+                                tol=implicit["tol"],
+                                krylov=implicit["krylov"],
+                                maxiter=implicit["maxiter"],
+                                shift_energy=implicit["shift_energy"])
+        return psi
     if hermitian is None:
         hermitian = mpo_is_hermitian(H)
     dt = -1j * (dbeta_half / nsteps)
@@ -246,7 +259,7 @@ def imaginary_time_evolve(psi, H, dbeta_half, nsteps, cutoff, maxdim, niter=30,
 
 def _metts_single_chain(H, sites, ops, beta, nsamples, nwarmup,
                          dbeta_half_step, cutoff, maxdim, basis_ops,
-                         initial_cps, seed, niter):
+                         initial_cps, seed, niter, implicit=None):
     """One full METTS Markov chain (nwarmup discarded + nsamples retained
     iterations), sequential -- the body metts_thermal_average() always ran
     before njobs= was added. Returns (means, stderrs, nsamples) -- the
@@ -265,7 +278,7 @@ def _metts_single_chain(H, sites, ops, beta, nsamples, nwarmup,
     herm = mpo_is_hermitian(H)  # once, not per step; see tdvp_step
     for it in range(total_iters):
         phi = imaginary_time_evolve(cps, H, beta_half, nsteps, cutoff, maxdim, niter=niter,
-                                    hermitian=herm)
+                                    hermitian=herm, implicit=implicit)
         if it >= nwarmup:
             for j, A in enumerate(ops):
                 samples[j].append(inner(phi, A, phi))
@@ -353,7 +366,7 @@ def _pool_chain_results(results, nops):
 def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
                            dbeta_half_step=0.05, cutoff=1e-10, maxdim=200,
                            basis_ops=("Sz",), initial_cps=None, seed=None,
-                           niter=30, njobs=1):
+                           niter=30, njobs=1, implicit=None):
     """Estimate Tr[A e^{-beta H}]/Tr[e^{-beta H}] for each MPO A in `ops`
     via METTS sampling (arXiv:1002.1305).
 
@@ -419,7 +432,7 @@ def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
     if njobs == 1:
         means, stderrs, _ = _metts_single_chain(
             H, sites, ops, beta, nsamples, nwarmup, dbeta_half_step,
-            cutoff, maxdim, basis_ops, initial_cps, seed, niter)
+            cutoff, maxdim, basis_ops, initial_cps, seed, niter, implicit)
         return means, stderrs
 
     if initial_cps is not None:
@@ -431,13 +444,13 @@ def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
     if len(chunk_sizes) == 1:
         means, stderrs, _ = _metts_single_chain(
             H, sites, ops, beta, chunk_sizes[0], nwarmup, dbeta_half_step,
-            cutoff, maxdim, basis_ops, None, seed, niter)
+            cutoff, maxdim, basis_ops, None, seed, niter, implicit)
         return means, stderrs
 
     seeds = np.random.SeedSequence(seed).spawn(len(chunk_sizes))
     tasks = [
         (H, sites, ops, beta, n_local, nwarmup, dbeta_half_step, cutoff,
-         maxdim, basis_ops, None, seeds[k], niter)
+         maxdim, basis_ops, None, seeds[k], niter, implicit)
         for k, n_local in enumerate(chunk_sizes)
     ]
     # 'spawn', not the Linux default 'fork': confirmed directly this
@@ -491,7 +504,8 @@ def metts_thermal_average(H, sites, ops, beta, nsamples, nwarmup=20,
 def _metts_dynamical_single_chain(H, sites, A, B, beta, nt, dt, nsamples,
                                    nwarmup, dbeta_half_step, cutoff, maxdim,
                                    basis_ops, initial_cps, seed, niter,
-                                   tdvp_cutoff, tdvp_maxdim, tdvp_niter):
+                                   tdvp_cutoff, tdvp_maxdim, tdvp_niter,
+                                   implicit=None):
     """One full METTS Markov chain (nwarmup discarded + nsamples retained
     iterations) producing the time-dependent correlator C^i(t) for every
     retained sample -- the dynamical analog of _metts_single_chain()
@@ -511,7 +525,7 @@ def _metts_dynamical_single_chain(H, sites, A, B, beta, nt, dt, nsamples,
     herm = mpo_is_hermitian(H)  # once, not per step; see tdvp_step
     for it in range(total_iters):
         phi = imaginary_time_evolve(cps, H, beta_half, nsteps, cutoff, maxdim, niter=niter,
-                                    hermitian=herm)
+                                    hermitian=herm, implicit=implicit)
         if it >= nwarmup:
             v = applyMPO(B, phi, cutoff=tdvp_cutoff, maxdim=tdvp_maxdim)
             v.noPrime("Site")
@@ -569,7 +583,7 @@ def metts_dynamical_correlator(H, sites, A, B, beta, nt, dt, nsamples,
                                 basis_ops=("Sz", "Sx"), initial_cps=None,
                                 seed=None, niter=30,
                                 tdvp_cutoff=None, tdvp_maxdim=None,
-                                tdvp_niter=50, njobs=1):
+                                tdvp_niter=50, njobs=1, implicit=None):
     """Estimate the real-time finite-temperature correlator
     C_AB(t) = <A(t)B>_beta = <e^{iHt} A e^{-iHt} B>_beta via dynamical
     METTS sampling (arXiv:2405.18484, Sec. II, Algorithm 1).
@@ -634,7 +648,7 @@ def metts_dynamical_correlator(H, sites, A, B, beta, nt, dt, nsamples,
         means, stderrs, _ = _metts_dynamical_single_chain(
             H, sites, A, B, beta, nt, dt, nsamples, nwarmup, dbeta_half_step,
             cutoff, maxdim, basis_ops, initial_cps, seed, niter,
-            tdvp_cutoff, tdvp_maxdim, tdvp_niter)
+            tdvp_cutoff, tdvp_maxdim, tdvp_niter, implicit)
         return means, stderrs
 
     if initial_cps is not None:
@@ -647,14 +661,14 @@ def metts_dynamical_correlator(H, sites, A, B, beta, nt, dt, nsamples,
         means, stderrs, _ = _metts_dynamical_single_chain(
             H, sites, A, B, beta, nt, dt, chunk_sizes[0], nwarmup, dbeta_half_step,
             cutoff, maxdim, basis_ops, None, seed, niter,
-            tdvp_cutoff, tdvp_maxdim, tdvp_niter)
+            tdvp_cutoff, tdvp_maxdim, tdvp_niter, implicit)
         return means, stderrs
 
     seeds = np.random.SeedSequence(seed).spawn(len(chunk_sizes))
     tasks = [
         (H, sites, A, B, beta, nt, dt, n_local, nwarmup, dbeta_half_step,
          cutoff, maxdim, basis_ops, None, seeds[k], niter,
-         tdvp_cutoff, tdvp_maxdim, tdvp_niter)
+         tdvp_cutoff, tdvp_maxdim, tdvp_niter, implicit)
         for k, n_local in enumerate(chunk_sizes)
     ]
     # 'spawn', not fork -- see metts_thermal_average()'s own comment on

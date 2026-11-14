@@ -1090,6 +1090,47 @@ class Many_Body_Chain():
   def scale_mps(self,x,wf,**kwargs):
       """Multiply an MPS by a number (see mpsalgebra.scale_mps)"""
       return mpsalgebra.scale_mps(self,wf,x,**kwargs)
+  def evolve_imaginary_time(self,wf,tau,**kwargs):
+      """The normalized state e^{-tau H}|wf>, by implicit steps on a
+      logarithmic time grid (arXiv:2606.02930, imaginarytime.py).
+
+      nsteps: steps per panel (default 4); the error of the trapezoid
+          rule falls as 1/nsteps^2.
+      tau0: end of the first panel (default 0.01 over the largest
+          coefficient of H); the smallest step is tau0/nsteps.
+      order: 2 for the implicit trapezoid rule, 2s for the s-stage
+          Gauss-Legendre rule (s linear solves per step).
+      shift: "ground" (default, the ground-state energy, A-stable),
+          "energy" (the running energy of the state) or a number, which
+          must be the ground-state energy too: a shift m below it stops
+          the projection once the steps exceed about 1/m.
+      nsweeps, tol, krylov, maxiter: sweeps per linear solve, and the
+          local GMRES tolerance, restart length and matrix-vector cap.
+      mode: "DMRG" (itensor_version=3 or "python") or "ED"."""
+      from . import imaginarytime
+      return imaginarytime.evolve(self,wf,tau,**kwargs)[2]
+  def evolve_imaginary_time_and_measure(self,operators,wf,tau,**kwargs):
+      """(taus, values): the logarithmic grid times and the expectation
+      values of the operators (one or a list) in the normalized
+      e^{-tau H}|wf> at each of them. Keywords as in
+      evolve_imaginary_time."""
+      from . import imaginarytime
+      single = not isinstance(operators,(list,tuple))
+      ops = [operators] if single else list(operators)
+      taus,vals,_ = imaginarytime.evolve(self,wf,tau,operators=ops,**kwargs)
+      return (taus,vals[:,0]) if single else (taus,vals)
+  def hadamard_product(self,*wfs,**kwargs):
+      """Elementwise product of states in the computational basis
+      (mpsalgebratk/hadamard.py)"""
+      return mpsalgebra.hadamard_product(self,*wfs,**kwargs)
+  def elementwise_map(self,wf,func,**kwargs):
+      """State with amplitudes func(psi(s)) in the computational basis
+      (mpsalgebratk/hadamard.py)"""
+      return mpsalgebra.elementwise_map(self,wf,func,**kwargs)
+  def get_participation_entropy(self,wf=None,q=2,**kwargs):
+      """Renyi participation entropy in the computational basis
+      (mpsalgebratk/hadamard.py)"""
+      return mpsalgebra.participation_entropy(self,wf=wf,q=q,**kwargs)
   def trace(self,A,**kwargs):
       """Compute the trace of an operator"""
       return mpsalgebra.trace(self,A,**kwargs)

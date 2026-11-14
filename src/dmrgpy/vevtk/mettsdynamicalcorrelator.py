@@ -35,7 +35,8 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
                                 nwarmup=20, dbeta_half_step=0.05,
                                 basis_ops=("Sz", "Sx"), seed=None, niter=30,
                                 tdvp_cutoff=None, tdvp_maxdim=None,
-                                tdvp_niter=50, njobs=1):
+                                tdvp_niter=50, njobs=1, itime=None,
+                                itime_options=None):
     """Real-time dynamical correlator C_AB(t) = <A(t)B>_T at temperature T
     via dynamical METTS sampling (arXiv:2405.18484, Sec. II).
 
@@ -57,9 +58,10 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
     nt, dt: number of real-time measurements and the (uniform) time step
         between them, i.e. C(t) is sampled at t=0,dt,...,(nt-1)*dt --
         same convention as Many_Body_Chain.evolution_DC's own (nt,dt).
-    nsamples, nwarmup, dbeta_half_step, basis_ops, seed, niter: as in
-        MB.metts_vev() -- control the shared METTS Markov chain
-        (imaginary-time sampling) each retained sample is measured from.
+    nsamples, nwarmup, dbeta_half_step, basis_ops, seed, niter, itime,
+        itime_options: as in MB.metts_vev() -- control the shared METTS
+        Markov chain (imaginary-time sampling) each retained sample is
+        measured from.
     tdvp_cutoff, tdvp_maxdim: truncation controls for the *real-time*
         evolution of |v_i(t)>/|w_i(t)> specifically, separate from this
         chain's own cutoff/maxm (used for the imaginary-time METTS
@@ -155,6 +157,16 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
     # one, rather than silently becoming deterministic.
     seed_arg = seed if seed is not None else random.getrandbits(63)
 
+    if itime == "implicit" and MB.itensor_version == "julia_live":
+        raise NotImplementedError("metts_dynamical_correlator: itime=%r is "
+                "implemented for itensor_version=3 and 'python'; julia_live "
+                "takes TDVP steps" % (itime,))
+    from ..imaginarytime import metts_plan, session_plan_kwargs
+    if itime_options and MB.itensor_version == "julia_live":
+        raise ValueError("itime_options= has no effect on julia_live, which "
+                         "takes TDVP steps")
+    plan = None if MB.itensor_version == "julia_live" else \
+        metts_plan(MB, T, itime, itime_options, dbeta_half_step)
     if MB.itensor_version == "julia_live":
         # This backend has no MB._session at all (its state lives in the
         # live Julia session instead, via MB.hamiltonian/MB.jlsites) --
@@ -175,10 +187,12 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
         means, stderrs = MB._session.metts_dynamical_correlator(
             terms_a, terms_b, T, nt, dt, nsamples, nwarmup, dbeta_half_step,
             list(basis_ops), seed_arg, niter, tdvp_cutoff=tdvp_cutoff,
-            tdvp_maxdim=tdvp_maxdim, tdvp_niter=tdvp_niter, njobs=njobs)
+            tdvp_maxdim=tdvp_maxdim, tdvp_niter=tdvp_niter, njobs=njobs,
+            **session_plan_kwargs(MB, plan))
     else:
         means, stderrs = MB._session.metts_dynamical_correlator(
             terms_a, terms_b, T, nt, dt, nsamples, nwarmup, dbeta_half_step,
-            list(basis_ops), seed_arg, niter, tdvp_niter)
+            list(basis_ops), seed_arg, niter, tdvp_niter,
+            **session_plan_kwargs(MB, plan))
     ts = np.array([dt * k for k in range(nt)])
     return ts, np.array(means), np.array(stderrs)

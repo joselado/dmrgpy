@@ -78,7 +78,8 @@ def _check_basis(MB, basis_ops):
 
 
 def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
-              basis_ops=("Sz", "Sx"), seed=None, niter=30, njobs=1):
+              basis_ops=("Sz", "Sx"), seed=None, niter=30, njobs=1,
+              itime=None, itime_options=None):
     """Thermal <Op> at temperature T via METTS sampling.
 
     MB: a Many_Body_Chain with itensor_version in ("python", 3, "julia_live")
@@ -114,6 +115,17 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
         per-shape compile tax never gets amortized within a realistic
         sample count -- confirmed directly, ~4x-24x slower with
         kernels.USE_NUMBA=True depending on chain length, not faster.
+    itime: how each sample is evolved to beta/2. "tdvp" takes steps of
+        dbeta_half_step by two-site TDVP; "implicit" takes the implicit
+        steps of a logarithmic grid (imaginarytime.py, arXiv:2606.02930),
+        whose number grows as log(beta), with itime_options the keywords
+        of evolve_imaginary_time (nsteps, default 8 here, tau0, order,
+        shift, nsweeps, tol, krylov, maxiter), itensor_version=3 and
+        "python" only. None (the default) takes whichever needs fewer
+        steps at the accuracy of the TDVP default, see
+        imaginarytime.metts_plan: TDVP at high T, on julia_live and for a
+        non-Hermitian H, the implicit steps below T of about 0.12 in units
+        of the largest coupling.
     Returns (mean, stderr) for a single Op, or a list of (mean, stderr)
     pairs -- one per operator, same order as given -- for a list/tuple of
     Ops. See pyitensor.metts.metts_thermal_average's own docstring for
@@ -192,6 +204,16 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
     # non-reproducible-by-default behavior every other seed= kwarg in
     # this codebase has, rather than silently becoming deterministic.
     seed_arg = seed if seed is not None else random.getrandbits(63)
+    if itime == "implicit" and MB.itensor_version == "julia_live":
+        raise NotImplementedError("metts_vev: itime=%r is implemented for "
+                "itensor_version=3 and 'python'; julia_live takes TDVP steps"
+                % (itime,))
+    from ..imaginarytime import metts_plan, session_plan_kwargs
+    if itime_options and MB.itensor_version == "julia_live":
+        raise ValueError("itime_options= has no effect on julia_live, which "
+                         "takes TDVP steps")
+    plan = None if MB.itensor_version == "julia_live" else \
+        metts_plan(MB, T, itime, itime_options, dbeta_half_step)
     if MB.itensor_version == "julia_live":
         # This backend has no MB._session at all (its state lives in the
         # live Julia session instead, via MB.hamiltonian/MB.jlsites) --
@@ -210,11 +232,13 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
     if MB.itensor_version == "python":
         means, stderrs = MB._session.metts_vev(
             terms_ops, T, nsamples, nwarmup,
-            dbeta_half_step, list(basis_ops), seed_arg, niter, njobs=njobs)
+            dbeta_half_step, list(basis_ops), seed_arg, niter, njobs=njobs,
+            **session_plan_kwargs(MB, plan))
     else:
         means, stderrs = MB._session.metts_vev(
             terms_ops, T, nsamples, nwarmup,
-            dbeta_half_step, list(basis_ops), seed_arg, niter)
+            dbeta_half_step, list(basis_ops), seed_arg, niter,
+            **session_plan_kwargs(MB, plan))
     if single:
         return means[0], stderrs[0]
     return list(zip(means, stderrs))

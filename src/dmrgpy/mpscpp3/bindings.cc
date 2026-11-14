@@ -229,8 +229,31 @@ PYBIND11_MODULE(_dmrgcpp, m)
         .def("clik_random_starts",&Chain::clik_random_starts,py::arg("m"),py::arg("seed"),
              "Two random MPS of bond dimension m from ITensor's generator "
              "seeded with seed (the CLIK-MPS branch starts)")
+        .def("implicit_step",&Chain::implicit_step,py::arg("wf"),
+             py::arg("betas"),py::arg("shift"),py::arg("shift_energy")=false,
+             py::arg("nsweeps")=1,py::arg("tol")=1E-10,py::arg("krylov")=10,
+             py::arg("maxiter")=100,
+             "One implicit imaginary-time step of wf under the chain's H, "
+             "normalized: x -> (1 + b(H-shift))^-1 (1 - b(H-shift)) x for "
+             "each b in betas, by two-site sweeps with local GMRES "
+             "(arXiv:2606.02930; pyitensor/implicit.py)")
         .def("product_mps",&Chain::product_mps,py::arg("vecs"),
              "The product state with one local vector per site")
+        .def("mps_from_site_arrays",[](Chain& self,
+                std::vector<py::array_t<Cplx,py::array::c_style|py::array::forcecast>> const& arrs) {
+                std::vector<std::vector<Cplx>> data;
+                std::vector<std::vector<int>> shapes;
+                for (auto const& a : arrs)
+                    {
+                    if (a.ndim()!=3)
+                        throw std::invalid_argument("mps_from_site_arrays: every array must be 3-dimensional");
+                    shapes.push_back({(int)a.shape(0),(int)a.shape(1),(int)a.shape(2)});
+                    data.emplace_back(a.data(),a.data()+a.size());
+                    }
+                return self.mps_from_site_arrays(data,shapes);
+            }, py::arg("arrays"),
+             "An MPS from (left link, site, right link) arrays, the inverse "
+             "of mps_site_arrays")
         .def("doubled_identity_mps",&Chain::doubled_identity_mps,
              "The vectorized identity |1>> of a doubled chain")
         .def("sector_identity_mps",&Chain::sector_identity_mps,py::arg("q"),
@@ -871,17 +894,28 @@ PYBIND11_MODULE(_dmrgcpp, m)
                              double T, int nsamples, int nwarmup,
                              double dbeta_half_step,
                              std::vector<std::string> const& basis_ops,
-                             unsigned long seed, int niter) {
+                             unsigned long seed, int niter,
+                             std::vector<std::vector<Cplx>> const& itime_steps,
+                             double itime_shift, bool itime_shift_energy,
+                             int itime_nsweeps, double itime_tol,
+                             int itime_krylov, int itime_maxiter) {
                 std::vector<std::vector<MOTerm>> terms_ops_cpp;
                 terms_ops_cpp.reserve(terms_ops.size());
                 for (auto const& terms_op : terms_ops)
                     terms_ops_cpp.push_back(terms_from_python(terms_op));
+                ImplicitPlan plan{itime_steps,itime_shift,
+                    itime_shift_energy,itime_nsweeps,itime_tol,itime_krylov,
+                    itime_maxiter};
                 return self.metts_vev(terms_ops_cpp,T,nsamples,
-                    nwarmup,dbeta_half_step,basis_ops,seed,niter);
+                    nwarmup,dbeta_half_step,basis_ops,seed,niter,plan);
             }, py::arg("terms_ops"),py::arg("T"),py::arg("nsamples")=200,
                py::arg("nwarmup")=20,py::arg("dbeta_half_step")=0.05,
                py::arg("basis_ops")=std::vector<std::string>{"Sz","Sx"},
                py::arg("seed")=0,py::arg("niter")=30,
+               py::arg("itime_steps")=std::vector<std::vector<Cplx>>{},
+               py::arg("itime_shift")=0.0,py::arg("itime_shift_energy")=false,
+               py::arg("itime_nsweeps")=1,py::arg("itime_tol")=1E-10,
+               py::arg("itime_krylov")=10,py::arg("itime_maxiter")=100,
                "Finite-temperature <A> for one or more operators via METTS "
                "sampling (White & Stoudenmire, arXiv:1002.1305 -- see "
                "Chain::metts_vev's own comment and pyitensor/metts.py for "
@@ -894,16 +928,27 @@ PYBIND11_MODULE(_dmrgcpp, m)
                double T, int nt, double dt, int nsamples, int nwarmup,
                double dbeta_half_step,
                std::vector<std::string> const& basis_ops,
-               unsigned long seed, int niter, int tdvp_niter) {
+               unsigned long seed, int niter, int tdvp_niter,
+               std::vector<std::vector<Cplx>> const& itime_steps,
+               double itime_shift, bool itime_shift_energy,
+               int itime_nsweeps, double itime_tol,
+               int itime_krylov, int itime_maxiter) {
+                ImplicitPlan plan{itime_steps,itime_shift,
+                    itime_shift_energy,itime_nsweeps,itime_tol,itime_krylov,
+                    itime_maxiter};
                 return self.metts_dynamical_correlator(
                     terms_from_python(terms_a),terms_from_python(terms_b),
                     T,nt,dt,nsamples,nwarmup,dbeta_half_step,basis_ops,
-                    seed,niter,tdvp_niter);
+                    seed,niter,tdvp_niter,plan);
             }, py::arg("terms_a"),py::arg("terms_b"),py::arg("T"),
                py::arg("nt")=200,py::arg("dt")=0.1,py::arg("nsamples")=100,
                py::arg("nwarmup")=20,py::arg("dbeta_half_step")=0.05,
                py::arg("basis_ops")=std::vector<std::string>{"Sz","Sx"},
                py::arg("seed")=0,py::arg("niter")=30,py::arg("tdvp_niter")=50,
+               py::arg("itime_steps")=std::vector<std::vector<Cplx>>{},
+               py::arg("itime_shift")=0.0,py::arg("itime_shift_energy")=false,
+               py::arg("itime_nsweeps")=1,py::arg("itime_tol")=1E-10,
+               py::arg("itime_krylov")=10,py::arg("itime_maxiter")=100,
                "Real-time finite-temperature correlator C_AB(t)=<A(t)B>_T "
                "via dynamical METTS sampling (Wang, McClarty, Dankova, "
                "Honecker & Wietek, arXiv:2405.18484, Sec. II -- see "

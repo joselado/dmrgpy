@@ -113,6 +113,37 @@ difference is a finite-size effect.
     --8<-- "entanglement_central_charge/plot.py"
     ```
 
+## Participation entropy
+
+A measurement of every site in the computational basis ($S^z$ for spins,
+the occupation for fermions) gives a snapshot $s$ with probability
+$p(s)=|\langle s|\psi\rangle|^2$. Snapshots are what a quantum gas
+microscope or a Rydberg array records. The Rényi participation entropies
+
+$$S_q=\frac{1}{1-q}\log\sum_s p(s)^q$$
+
+measure how much the state spreads over the basis. They grow linearly with
+the length of the chain. We build $p(s)$ as an MPS, the elementwise product
+of $\psi^*$ and $\psi$, by recursive sketched interpolation (Meng, Khoo, Li
+and Stoudenmire, arXiv:2602.17974), whose cost grows as $\chi^3$, against
+$\chi^4$ for the exact product followed by a compression. The sum
+$\sum_s p(s)^q$ is then an overlap.
+
+```python
+s2 = sc.get_participation_entropy(q=2)             # of the ground state
+s3 = sc.get_participation_entropy(wf, q=3, maxm=80)
+```
+
+- `q`: an integer, at least 2.
+- `maxm`: the bond dimension of $p$ (default the chain's `maxm`). $p$
+  needs more than $\psi$ itself, so check that the result is converged in
+  it.
+- `mode="ED"`: the exact value, for a small chain.
+
+In `examples/entanglement/participation_entropy` the ground state of the
+Heisenberg chain from 4 to 12 sites agrees with ED to $10^{-7}$, the
+accuracy of its own DMRG state.
+
 ## Single-particle correlation matrix
 
 For fermions, the correlation

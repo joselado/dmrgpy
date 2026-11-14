@@ -4073,6 +4073,91 @@ Neel quench of a Heisenberg chain, L=30, maxm=64, dt=0.1, 20 steps, costs
 0.092 s/step with TDVP and 0.145 with TDVP_CBE on v3, against 0.186 and
 0.117 on `"python"`, with `<Sz_15>` equal between backends to 3e-10.
 
+### Implicit imaginary-time steps and elementwise products (`imaginarytime.py`, `pyitensor/implicit.py`, `pyitensor/rsi.py`)
+
+Two methods of 2026, both on `itensor_version=3` and `"python"` only, and
+both with one implementation of the numerics shared by the two backends
+wherever the numerics allow it.
+
+**Imaginary time on a logarithmic grid** (arXiv:2606.02930). The grid and
+the factors of a step live in Python (`imaginarytime.py`): panels
+$[0,\tau_0],[\tau_0,2\tau_0],\dots,[\tau/2,\tau]$ with `nsteps` equal steps
+each, and for each step a list of complex $b$ such that the step is the
+product of $x\to(1+b(H-s))^{-1}(1-b(H-s))x$. The trapezoid rule is one
+factor, $b=\Delta\tau/2$; the $s$-stage Gauss-Legendre rule is the diagonal
+Pade approximant of $e^{-z}$, $s$ factors with $b=-\Delta\tau/q_j$ and $q_j$
+the roots of its denominator. The paper solves its spectral variant as one
+coupled system per panel and leaves the details to a later paper; the
+product form gives the same end-of-step propagator and needs nothing but
+the factor solver. The session method is `implicit_step(wf, betas, shift,
+shift_energy, nsweeps, tol, krylov, maxiter)` on both backends
+(`pyitensor/implicit.py`, `Chain::implicit_step`), one call per step. A
+factor is a Galerkin two-site sweep over $x$, starting from $\psi$: the
+local operator is $(1-bs)\theta+bH_{\rm eff}\theta$ from the $\langle x|H|x\rangle$
+environments, and the right-hand side $(1+bs)P[\psi]-bP[H\psi]$ comes from
+the overlap environments $\langle x|\psi\rangle$ and the mixed ones
+$\langle x|H|\psi\rangle$. So no MPO for $1+b(H-s)$ and no MPS for the
+right-hand side are built, which the paper does and compresses. The local
+system is solved by restarted GMRES (`implicit.gmres` on the backend
+namespace; ITensor's `gmres` of `iterativesolvers.h` on v3), since it is
+not Hermitian for a complex $b$.
+
+What limits the accuracy, measured on a 10-site Heisenberg chain from the
+Neel state against the exact rational propagator (order 4, 4 steps per
+panel): $7\times10^{-6}$ in the energy at `cutoff=1e-12`, $5\times10^{-8}$
+at `1e-16`, $10^{-10}$ with no cutoff and the default single sweep, and
+$10^{-13}$ with 4 sweeps and a tight GMRES. More sweeps change nothing at
+a finite cutoff: the truncation of the new directions, not the solve, is
+the floor. The two backends agree to every printed digit.
+
+The shift must be the ground-state energy (the default, `gs_energy()`).
+Neither rule is L-stable: the propagator of a mode tends to $(-1)^s$ when
+the step is long against its energy, so with the shift a distance $m$
+below $E_0$ the ground state is sent to $-1$ like everything else once
+the steps exceed about $1/m$, and the projection stops
+(`tests/test_imaginary_time_implicit.py::test_state_and_running_shift`
+pins it). `shift="energy"`, the running energy of the paper's Anderson
+run, is the other option. The ED reference shifts $H$ by its own $E_0$
+too, or `expm_multiply` overflows on a step of order 100.
+
+METTS takes the same steps through `metts_plan`, which hands the session's
+METTS loop the list of factors of every step of the grid to $\beta/2$:
+`implicit=` (a dict) on `"python"`, through `metts.py`'s workers, and
+`itime_*` keywords on v3, which become an `ImplicitPlan` (namespace scope,
+since GCC refuses a nested struct with default member initializers as a
+default argument of its enclosing class) for `metts_imaginary_evolve`, the
+loop both METTS methods now share. `itime=None`, the default, takes the
+implicit steps whenever they can run and their solves are fewer than the
+TDVP steps, $\lceil\beta/(2\,{\tt dbeta\_half\_step})\rceil$, with 8 steps per
+panel, which matches the time-step error of TDVP at `dbeta_half_step=0.05`
+(12 sites from the Néel state, against ED at $\tau=\beta/2$: $2.0\times10^{-5}$
+against $2.1\times10^{-5}$ at $\beta/2=5$, $4.6\times10^{-8}$ against
+$5.9\times10^{-8}$ at 25; 4 steps per panel are 5 to 30 times worse at
+intermediate $\beta$). One solve costs about one TDVP step, so this is the
+cheaper of the two at matched accuracy: TDVP above $T\approx0.12$ and the
+implicit steps below, 1.4, 2.6 and 4.1 times faster at $T=0.1$, 0.05 and
+0.02 on a 16-site METTS run (v3). The complex Gauss-Legendre factors cost
+more per solve on v3, whose real storage the trapezoid rule keeps for a
+real state: 3.4 times the trapezoid rule at equal solve count on that METTS
+run, 1.4 times on the 12-site evolution. `itime="tdvp"` is the code of
+before.
+
+**Elementwise products by recursive sketched interpolation**
+(arXiv:2602.17974). The kernel is one array function,
+`rsi.hadamard_arrays`, on the backend namespace like `task.py`. The states
+go out through the sessions' `mps_site_arrays` and come back through
+`mps_from_site_arrays`, new on v3 (`Chain::mps_from_site_arrays`, fresh
+links on `sites_`, one sweep from the right with `Cutoff` 0) and on
+`"python"` (two exact sweeps, since `position()` needs a known centre).
+Both refuse a conserved sector. The authors' Python code has no licence,
+so it is not used. Two departures from the paper: the interpolation
+tolerance is relative to the first pivot, and the sketch columns and the
+re-interpolated inputs are rescaled as they are built, with the scale put
+back at the end, since amplitudes of order $2^{-n/2}$ underflow in a
+product past a thousand sites. `method="direct"` (the Kronecker product,
+then a sum with the zero state, which every session truncates to its
+cutoff and `maxm`) is the reference.
+
 ### 4.6 The Julia backend (`mpsjulialive/`)
 
 `itensor_version="julia_live"` drives a live, in-process Julia session

@@ -89,6 +89,8 @@ operator:
 | `wf.dot(wf2)`, `wf.norm()` | $\langle\psi\vert \psi_2\rangle$, $\lVert\psi\rVert$ |
 | `wf.normalize()` | $\vert \psi\rangle/\lVert\psi\rVert$ |
 | `wf.get_conjugate()` | the complex conjugate state |
+| `sc.hadamard_product(a, b, conj=(True, False))` | the state with amplitudes $a(s)^*b(s)$ |
+| `sc.elementwise_map(wf, f)` | the state with amplitudes $f(\psi(s))$ |
 
 A state remembers the backend that made it (an MPS for DMRG, a vector for
 `mode="ED"`), and these operations run on that backend. Give `mode="ED"`
@@ -96,3 +98,14 @@ to `overlap` and `aMb` when the states come from ED. On DMRG,
 `exponential` needs a Hermitian or an anti-Hermitian `A`, so
 `sc.exponential(-1j*t*h, wf)` is a real-time step. For a general `A` use
 `mode="ED"` on a small chain.
+
+The elementwise products are taken in the computational basis $s$ of the
+sites. On `itensor_version=3` and `"python"` they use recursive sketched
+interpolation (arXiv:2602.17974), with `maxm=` the bond dimension of the
+result; `method="direct"` is the exact product compressed by SVD, more
+accurate and more expensive. `elementwise_map` is the extension of the
+same method to a nonlinear `f`, exact once the bond dimension holds the
+result. For fermions a product of two amplitudes depends on the sign
+convention of the basis states, while $|\psi(s)|^2$ does not. The
+[Participation entropy](entanglement.md#participation-entropy) is built on
+them.

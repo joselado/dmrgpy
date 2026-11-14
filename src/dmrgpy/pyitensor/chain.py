@@ -30,8 +30,10 @@ from . import sector as sectortk
 from .sites import SiteX, site_qn_names
 from .svd import svd
 from .sweeps import Sweeps
-from .mpscontainer import _link_at
+from .mpscontainer import _link_at, MPS
+from .index import Index
 from .tdvp import tdvp_step as _tdvp_step_fn
+from .implicit import implicit_step as _implicit_step
 from .clik import krylov_spectrum as _clik_krylov_spectrum
 from .tebd import TEBDEvolver as _TEBDEvolver
 from .gse import global_subspace_expand as _global_subspace_expand_fn
@@ -874,6 +876,50 @@ class Chain:
             out.set_A(i, dag(out.A(i)))
         return out
 
+    def mps_site_arrays(self, wf):
+        """The site tensors of wf as (left link, site, right link) arrays,
+        length-1 links at the open ends (mpscpp3/bindings.cc's
+        mps_site_arrays)."""
+        return _mps_arrays_lpr(wf)
+
+    def mps_from_site_arrays(self, arrays):
+        """An MPS on this chain's sites from (left link, site, right link)
+        arrays, the inverse of mps_site_arrays: fresh links, then one
+        exact sweep each way, so the result is canonical with its centre
+        on site 1. Dense sites only (the charge grading of a sector would
+        have to be rebuilt from the data)."""
+        self._reject_sector("mps_from_site_arrays")
+        n = self.sites.length()
+        if len(arrays) != n:
+            raise ValueError("mps_from_site_arrays: one array per site is needed")
+        links = []
+        for k in range(1, n):
+            dl, dr = arrays[k - 1].shape[2], arrays[k].shape[0]
+            if dl != dr:
+                raise ValueError("mps_from_site_arrays: neighbouring bond "
+                                 "dimensions differ")
+            links.append(Index(int(dl), tags="Link,l={}".format(k)))
+        tensors = []
+        for i in range(1, n + 1):
+            A = arrays[i - 1]
+            s = self.sites.si(i)
+            if A.ndim != 3 or A.shape[1] != s.dim:
+                raise ValueError("mps_from_site_arrays: an array has the "
+                                 "wrong site dimension")
+            inds, shape = [], []
+            if i > 1:
+                inds.append(links[i - 2])
+            inds.append(s)
+            if i < n:
+                inds.append(links[i - 1])
+            shape = tuple(ind.dim for ind in inds)
+            tensors.append(ITensor(tuple(inds), A.reshape(shape)))
+        psi = MPS(tensors)
+        psi.center = 1
+        psi.position(n)
+        psi.position(1)
+        return psi
+
     def reduced_dm(self, wf, site):
         # The state is normalized by its norm, sqrt(<psi|psi>), so rho has
         # trace 1 for any wf. This used to divide by <psi|psi> itself, the
@@ -970,6 +1016,23 @@ class Chain:
 
     def apply_pure_operator(self, A, wf):
         return self._apply_mpo(A, wf)
+
+    def implicit_step(self, wf, betas, shift, shift_energy=False, nsweeps=1,
+                      tol=1e-10, krylov=10, maxiter=100):
+        """One implicit imaginary-time step of wf under the chain's own H,
+        normalized: the factors x -> (1 + b(H-shift))^-1 (1 - b(H-shift)) x
+        for b in betas (pyitensor/implicit.py, arXiv:2606.02930), each a
+        two-site sweep with local GMRES, truncated to this chain's
+        cutoff/maxm. shift_energy=True takes the shift from the energy of
+        wf. Mirrors mpscpp3's Chain::implicit_step."""
+        if not self.have_H:
+            raise RuntimeError("Chain.implicit_step called before set_hamiltonian")
+        self._reject_sector("implicit_step")
+        return _implicit_step(wf, self.H, [complex(b) for b in betas],
+                              float(shift), self.cutoff, self.maxm,
+                              nsweeps=int(nsweeps), tol=float(tol),
+                              krylov=int(krylov), maxiter=int(maxiter),
+                              shift_energy=bool(shift_energy))
 
     def tdvp_step(self, H, wf, dt, num_center=2):
         """One TDVP step of size dt, given an already-built MPO H (e.g.
@@ -1851,7 +1914,7 @@ class Chain:
 
     def metts_vev(self, terms_ops, T, nsamples=200, nwarmup=20,
                   dbeta_half_step=0.05, basis_ops=("Sz", "Sx"), seed=None, niter=30,
-                  njobs=1):
+                  njobs=1, implicit=None):
         """Finite-temperature <A> for one or more operators A via METTS
         sampling (White & Stoudenmire, arXiv:1002.1305 -- see metts.py for
         the full algorithm). Reuses self.H (already built by
@@ -1883,13 +1946,14 @@ class Chain:
         return _metts_thermal_average(
             self.H, self.sites, ops, beta, nsamples, nwarmup=nwarmup,
             dbeta_half_step=dbeta_half_step, cutoff=self.cutoff, maxdim=self.maxm,
-            basis_ops=basis_ops, seed=seed, niter=niter, njobs=njobs)
+            basis_ops=basis_ops, seed=seed, niter=niter, njobs=njobs,
+            implicit=implicit)
 
     def metts_dynamical_correlator(self, terms_a, terms_b, T, nt, dt, nsamples,
                                     nwarmup=20, dbeta_half_step=0.05,
                                     basis_ops=("Sz", "Sx"), seed=None, niter=30,
                                     tdvp_cutoff=None, tdvp_maxdim=None,
-                                    tdvp_niter=50, njobs=1):
+                                    tdvp_niter=50, njobs=1, implicit=None):
         """Real-time finite-temperature correlator C_AB(t)=<A(t)B>_T via
         dynamical METTS sampling (arXiv:2405.18484, Sec. II) -- see
         metts.py's metts_dynamical_correlator() for the algorithm itself.
@@ -1919,7 +1983,7 @@ class Chain:
             dbeta_half_step=dbeta_half_step, cutoff=self.cutoff, maxdim=self.maxm,
             tdvp_cutoff=tdvp_cutoff, tdvp_maxdim=tdvp_maxdim,
             basis_ops=basis_ops, seed=seed, niter=niter, tdvp_niter=tdvp_niter,
-            njobs=njobs)
+            njobs=njobs, implicit=implicit)
 
     def nhkpm_moments(self, terms_hs, terms_hs_dag, wfa, wfb, n, kpmmaxm, kpmcutoff):
         """Non-Hermitian KPM (port of NHKPM.jl, see
