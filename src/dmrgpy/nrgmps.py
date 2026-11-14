@@ -582,6 +582,28 @@ def handover_shell(fc, k0, U=0.0, imp=None, export=None, pad_bonds=None,
 MIN_HANDOVER = 100 # a hand-over basis below this warns (README section 5)
 N_MAX = 120 # the longest Wilson chain the tail is given, before its stop rule
 OMEGA_MIN = 1e-30 # and the chain ends before its hoppings fall below this
+JOINS = ("cut", "fade") # how head_tail_poles joins the tail and TASK at w_join
+
+
+def join_share(omega, w_join, window, join="cut"):
+    """The share f(|w|) of a tail pole at omega in the joined spectrum;
+    a TASK pole gets 1 - f. join="cut" is a step, f = 1 below w_join and
+    0 from it on. join="fade" goes from 1 at w_join/window to 0 at
+    w_join*window as a cosine in log|w|, f = 1/2 at w_join, so that both
+    routes contribute in the overlap window where both are valid (README
+    section 6: the step put the weight of the two routes on different
+    lines and left an error of a few percent of A there that did not fall
+    with nkry)."""
+    a = np.abs(np.asarray(omega, dtype=float))
+    if join == "cut":
+        return (a < w_join).astype(float)
+    if join != "fade":
+        raise ValueError("join must be one of %s, got %r" % (JOINS, join))
+    if not window > 1.0:
+        raise ValueError("join=\"fade\" needs window > 1, got %r" % (window,))
+    with np.errstate(divide="ignore"):
+        x = (np.log(a) - np.log(w_join/window))/(2.0*np.log(window))
+    return 0.5*(1.0 + np.cos(np.pi*np.clip(x, 0.0, 1.0)))
 
 
 def max_sites(Lambda, D=1.0):
@@ -654,15 +676,16 @@ def _check_prefix(eps, t, eps_h, t_h):
 
 class HeadTailSpectrum(object):
     """Result of head_tail_poles: omega, weight (the joined poles: the tail
-    below w_join, TASK above), tail (the NRGSpectrum of the tail), task
+    below w_join, TASK above, or both in the window with join="fade", each
+    weight times its share of join_share), tail (the NRGSpectrum of the tail), task
     (the TASK poles of the head, the dict of head_task_poles, or None),
     w_join, omega_k0 (the scale of the hand-over shell), k0, chi (the
     size of the hand-over basis), E0 (of the head), sum_rule (sum over
     sigma of <{X, X^dag}> on the head state), missing_weight (sum_rule
     minus the weight of the tail poles at every energy: the part of
     X^dag|GS> outside the hand-over basis), overlap (the weights of both
-    routes in the window w_join/window to w_join*window, by sign of w)
-    and the head chain (chain)."""
+    routes in the window w_join/window to w_join*window, by sign of w,
+    and on each side of w_join), join and the head chain (chain)."""
 
     def __init__(self, **kw):
         self.__dict__.update(kw)
@@ -672,7 +695,7 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
                     nkry=90, w_join=None, stop_tol=1e-4, stop_extra=6,
                     wilson_tail=None, task=True, Nf=None, Sz=None,
                     window=None, solved=False, pad_bonds=None, symmetric="auto",
-                    flip=None):
+                    flip=None, join="cut"):
     """Poles of the STM spectrum A(w) of ysr.py on the chain fc (a
     ysr.spin_chain_on_metal, or a spin-1/2 ysr.kondo_chain at Delta = 0),
     with a DMRG head and an NRG tail (docs/nrg_mps_kondo_plan.md, N3
@@ -688,9 +711,15 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     (stop_tol, nrgspectral.iterate); at T > 0 at the first shell below
     T/100. task=True adds the TASK poles of the head state
     (head_task_poles, nkry blocks of four) above w_join (default omega_k0,
-    the scale of the hand-over shell) and keeps the tail below it. T > 0
-    applies to the tail only: TASK is a T = 0 method, so T has to be far
-    below w_join (a RuntimeWarning above w_join/10). pad_bonds goes to
+    the scale of the hand-over shell) and keeps the tail below it. join
+    says how (join_share): "cut" (the default) is a step at w_join,
+    "fade" a cosine in log|w| from w_join/window to w_join*window
+    (window: default Lambda), which keeps each route where it is valid
+    and both in between. With task=False the tail is kept below w_join
+    whatever join is. T > 0 applies to the tail only: TASK is a T = 0
+    method, so T has to be far below the lowest energy where TASK enters
+    (a RuntimeWarning above a tenth of w_join, or of w_join/window with
+    "fade"). pad_bonds goes to
     handover_shell ("full" completes the hand-over basis, for tests). It
     warns when the hand-over basis holds fewer than MIN_HANDOVER states, and
     when the MPO of H has dropped a Wilson bond inside the hand-over block
@@ -713,6 +742,8 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     if symmetric not in (True, False, "auto"):
         raise ValueError("symmetric must be True, False or \"auto\", got %r"
                          % (symmetric,))
+    if join not in JOINS:
+        raise ValueError("join must be one of %s, got %r" % (JOINS, join))
     if solved:
         c, e0 = fc, float(np.real(fc.gs_energy()))
     else:
@@ -758,10 +789,14 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
                       stacklevel=2)
     if w_join is None:
         w_join = omega_k0
-    if task and T > 0.1*w_join:
-        warnings.warn("head_tail_poles: T = %.3g is not far below w_join = "
-                      "%.3g, where the T = 0 TASK spectrum of the head takes "
-                      "over" % (T, w_join), RuntimeWarning, stacklevel=2)
+    if window is None:
+        window = Lambda
+    w_task = w_join/window if join == "fade" else w_join
+    if task and T > 0.1*w_task:
+        warnings.warn("head_tail_poles: T = %.3g is not far below %.3g, where "
+                      "the T = 0 TASK spectrum of the head enters (w_join = "
+                      "%.3g, join=%r)" % (T, w_task, w_join, join),
+                      RuntimeWarning, stacklevel=2)
     r = nrgspectral.spectral_poles(
         sh, eps[k0+1:], t[k0:], keep=keep, T=T, flip=flip,
         stop_tol=stop_tol if T == 0.0 else None, stop_extra=stop_extra,
@@ -771,16 +806,16 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     for X in Xs:
         Xd = X.get_dagger()
         sum_rule += float(np.real(c.vev(X*Xd + Xd*X)))
-    if window is None:
-        window = Lambda
-    sel = np.abs(r.omega) < w_join
-    om, wt = [r.omega[sel]], [r.weight[sel]]
+    f = join_share(r.omega, w_join, window, join if task else "cut")
+    sel = f > 0.0
+    om, wt = [r.omega[sel]], [r.weight[sel]*f[sel]]
     p = None
     if task:
         p = head_task_poles(c, U=U, nkry=nkry)
-        selp = np.abs(p["omega"]) >= w_join
+        g = 1.0 - join_share(p["omega"], w_join, window, join)
+        selp = g > 0.0
         om.append(p["omega"][selp])
-        wt.append(p["weight"][selp])
+        wt.append(p["weight"][selp]*g[selp])
     lo, hi = w_join/window, w_join*window
     ov = {}
     for name, (o, w) in (("tail", (r.omega, r.weight)),
@@ -800,7 +835,7 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
                             sum_rule=sum_rule,
                             missing_weight=r.sum_rule - r.total,
                             overlap=ov, window=(lo, hi), chain=c, T=T,
-                            omega_N=r.omega_n[-1])
+                            omega_N=r.omega_n[-1], join=join)
 
 
 def stm_spectrum(es, ns=1, n_head=12, site=None, Js=0.5, JK=0.2, Lambda=4.0,
@@ -872,7 +907,7 @@ def twin_chain(fc, z):
 def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
                      T=0.0, keep=800, m=4, k0=None, n_tail=None, nkry=90,
                      stop_tol=1e-4, stop_extra=6, tip_fermi=True,
-                     return_poles=False, symmetric="auto"):
+                     return_poles=False, symmetric="auto", join="cut"):
     """ysr.get_stm_spectrum(fc, es, submode="NRG"): A(w) at the energies es,
     in the units of the TASK route (the chain's own normalization;
     multiply by fc.dos_factor for the continuum), averaged over nz twists
@@ -880,7 +915,7 @@ def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
     the parameters fc stores, with fc's solver settings).
 
     head="dmrg" (the default) is head_tail_poles(fc, m, k0, n_tail, keep,
-    T, U, nkry, stop_tol, stop_extra, symmetric) for every twist: the
+    T, U, nkry, stop_tol, stop_extra, symmetric, join) for every twist: the
     DMRG head (fc's own maxm, nsweeps and cutoff), the NRG tail and the
     TASK poles of the
     head above the scale of the hand-over. head="exact" skips DMRG: the
@@ -925,7 +960,8 @@ def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
         else:
             r = head_tail_poles(c, m=m, k0=k0, n_tail=n_tail, keep=keep, T=T,
                                 U=U, nkry=nkry, stop_tol=stop_tol,
-                                stop_extra=stop_extra, symmetric=symmetric)
+                                stop_extra=stop_extra, symmetric=symmetric,
+                                join=join)
             scales.append(r.omega_N)
         results.append(r)
     floor = nrgspectral.FLOOR*max(scales)

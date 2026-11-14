@@ -192,6 +192,66 @@ def test_head_tail_join_carries_the_sum_rule():
     assert abs(np.sum(r.weight) - r.sum_rule) < 0.02*r.sum_rule
 
 
+def test_join_share_is_a_step_or_a_cosine_in_log_w():
+    """The share of a tail pole: a step at w_join for "cut", and for
+    "fade" 1 below w_join/window, 0 above w_join*window, 1/2 at w_join,
+    monotone, the same on both signs of w; a TASK pole takes the rest."""
+    w = np.concatenate([-np.logspace(-6, 1, 141), np.logspace(-6, 1, 141)])
+    cut = nrgmps.join_share(w, 1e-2, 4.0, "cut")
+    assert np.array_equal(cut, (np.abs(w) < 1e-2).astype(float))
+    f = nrgmps.join_share(w, 1e-2, 4.0, "fade")
+    a = np.abs(w)
+    assert np.all(f[a <= 1e-2/4] == 1.0) and np.all(f[a >= 4e-2] == 0.0)
+    assert nrgmps.join_share([1e-2, -1e-2], 1e-2, 4.0, "fade") == \
+        pytest.approx([0.5, 0.5], abs=1e-15)
+    pos = w > 0
+    assert np.all(np.diff(f[pos]) <= 0.0)
+    assert np.array_equal(f[pos], f[~pos]) # -w runs over the same |w|
+    with pytest.raises(ValueError):
+        nrgmps.join_share(w, 1e-2, 4.0, "smooth")
+    with pytest.raises(ValueError):
+        nrgmps.join_share(w, 1e-2, 1.0, "fade")
+
+
+def test_cut_and_fade_joins_of_tail_and_task():
+    """On one head state: join="cut" is the tail poles below w_join and
+    the TASK poles from it on, exactly as before join existed; "fade" is
+    every pole of both routes times its share, the tail alone below
+    w_join/window and TASK alone above w_join*window, and it carries the
+    sum rule as the cut does (measured on 3 spins: the cut 0.02 to 0.3%
+    off, the fade 0.2 to 0.4%, README section 6)."""
+    J = 0.4*ysr.lambda_factor(4.0)
+    fc = ysr.spin_chain_on_metal(1, 7, JK=J, Lambda=4.0,
+                                 itensor_version="python")
+    fc.maxm, fc.nsweeps = 64, 20
+    kw = dict(m=4, keep=200, nkry=80)
+    rc = nrgmps.head_tail_poles(fc, join="cut", **kw)
+    c = rc.chain
+    rf = nrgmps.head_tail_poles(c, solved=True, join="fade", **kw)
+    t, p, w, s = rc.tail, rc.task, rc.w_join, rc.window
+    assert rc.join == "cut" and rf.join == "fade" and s[0] == w/4.0
+    below, above = np.abs(t.omega) < w, np.abs(p["omega"]) >= w
+    assert np.array_equal(rc.omega, np.concatenate([t.omega[below],
+                                                    p["omega"][above]]))
+    assert np.array_equal(rc.weight, np.concatenate([t.weight[below],
+                                                     p["weight"][above]]))
+    np.testing.assert_allclose(rf.task["weight"], p["weight"], atol=1e-14)
+    f = nrgmps.join_share(rf.tail.omega, w, 4.0, "fade")
+    g = 1.0 - nrgmps.join_share(rf.task["omega"], w, 4.0, "fade")
+    total = np.sum(rf.tail.weight*f) + np.sum(rf.task["weight"]*g)
+    assert np.sum(rf.weight) == pytest.approx(total, rel=1e-12)
+    a = np.abs(rf.omega)
+    low = np.sort(rf.weight[a < w/4.0])
+    assert np.array_equal(low, np.sort(rf.tail.weight[np.abs(rf.tail.omega)
+                                                      < w/4.0]))
+    high = np.sort(rf.weight[a > 4.0*w])
+    assert np.array_equal(high, np.sort(rf.task["weight"][
+        np.abs(rf.task["omega"]) > 4.0*w]))
+    assert abs(np.sum(rf.weight) - rf.sum_rule) < 0.02*rf.sum_rule
+    with pytest.raises(ValueError):
+        nrgmps.head_tail_poles(c, solved=True, join="smooth", **kw)
+
+
 def test_real_gauge_with_tiny_schmidt_values():
     """A 6-site "python" state whose smallest Schmidt values are 1e-6: the
     weighted real gauge gives a residual at the accuracy of the solve, where
