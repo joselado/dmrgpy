@@ -90,11 +90,12 @@ def julia_available():
     also what boots the Julia session and precompiles ITensors.jl, hence
     the cache -- it is slow the first time and free afterward.
 
-    Mirrors cppext.available(2)/(3) for the compiled C++ extensions, and
-    the module-level try/except tests/test_julia_live.py already uses;
+    Mirrors cppext.available(2)/(3) for the compiled C++ extensions;
     factored out here so the several multi-backend test files that
     parametrize over julia_live share one probe instead of each paying
-    for (and hand-rolling) their own.
+    for (and hand-rolling) their own. Call it from a test body or a string
+    skipif condition (julia_live_param()), never at module level, or
+    collecting the file boots Julia.
 
     Only ImportError counts as "unavailable". That import also runs
     juliasession.initialize(), which sevals every mpsjulialive/*.jl file,
