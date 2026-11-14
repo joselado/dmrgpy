@@ -58,6 +58,15 @@ Rayleigh-Ritz step in the whole space gives the Ritz states. With a field
 in the xz plane H is real, the start vectors S+|i>, S-|i>, Sz|i> are real,
 and everything stays real.
 
+Nothing of the size of the Hilbert space is built twice. The products H B
+of the loop give Q^T H Q, the residual of each Ritz state comes from the
+same recurrence (the part of H B outside the space for the last block),
+and the spin matrices are taken in Krylov coordinates, Q^T S Q rotated by
+the Ritz vectors of the small problem, so the Ritz vectors are never formed
+in the Hilbert space. In a real basis the matrix of S- is the transpose of
+that of S+. The matrices then come out with Sx and Sz real and Sy i times
+a real matrix, so the sums of `conductance.py` run in real arithmetic.
+
 ## 3. How the sums are assembled
 
 The initial state is projected out of the starting block, and the Krylov
@@ -83,9 +92,10 @@ the full width of the spectrum. Here the width is not known, and we use
 
 ## 4. The SU(2) reduction
 
-With `su2=True` the route takes one member of each spin multiplet, in the
-sector of the smallest |S^z_tot| (0, or 1/2 for a half-integer total
-spin), with the weight (2S+1) exp(-(E-E0)/kT). For an unpolarized tip each
+With `su2=True` the route takes one member of each spin multiplet, the
+one at S^z_tot = 0 for an integer total spin and at S^z_tot = +1/2 for a
+half-integer one (a chain of spinful fermions with no Nf sector has both
+kinds), with the weight (2S+1) exp(-(E-E0)/kT). For an unpolarized tip each
 term of dI/dV is the expectation value of a rotation-invariant operator in
 the initial state, so all members of a multiplet give the same result,
 and this is the sum over all of them. The code checks that H commutes
@@ -93,7 +103,20 @@ with the total spin on a random state and raises otherwise. Inside a
 degenerate level it rotates the states to a definite S with S^2_tot, and
 raises when 2S is not an integer. On a 7-spin Heisenberg chain at 1.5 K
 it takes 30 initial states instead of 96, and the result is the same to
-the digits of the test.
+the digits of the test. On the 12-spin chain of section 6 at zero field and
+1 K it takes 19 multiplets instead of 47 states, 26 s instead of 66 s.
+
+The weight cut is not quite the one of the full sum. A multiplet is kept
+when (2S+1) exp(-(E-E0)/kT) is above `p_cut` times the largest weight,
+while the full sum keeps a state when exp(-(E-E0)/kT) is above `p_cut`. So
+the reduction keeps the multiplets that sit just below the cut of the full
+sum, and the two results differ by about `p_cut`: by 2.4e-8 of the peak on
+the 12-spin chain (an S=2 and an S=1 multiplet at 18.5 kT, with
+exp(-(E-E0)/kT) of 9e-9), against 3e-12 between `nkry=100` and 200; on the 7-spin
+chain at 1.5 K, where no level falls between the two cuts, by 2e-15. With
+the cut of the full sum the 12-spin chain agrees to 2.5e-12 and takes 19 s.
+This is why `su2` stays opt-in for now (2026-11-14,
+`docs/kondo_speedup_plan.md`).
 
 ## 5. Checks
 
@@ -139,7 +162,11 @@ xz plane, T=1 K, `nkry=100` and the default `p_cut`:
   sums and the rest the Krylov spaces. Full ED refuses this size
   (`algebra.maxsize` = 2000); with the limit raised it had not finished
   after 43 minutes on one core, and it was stopped, so at this size the
-  agreement with ED is not measured here.
+  agreement with ED is not measured here. Since 2026-11-14 a Krylov space
+  takes 0.60 s per initial state (0.67 s before), and 90% of the
+  third-order term of one state is the two tables of the exchange log F,
+  one per tunneling direction, each over all the final and intermediate
+  states of the space.
 
 Per initial state the cost is the block Krylov space (3 `nkry` sparse
 products and the reorthogonalization, O(dim nkry^2)) and the sums of

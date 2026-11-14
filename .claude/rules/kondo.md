@@ -351,6 +351,42 @@ keyword, TypeError), and order="LL" with it raises. Full ED refuses
 above 2000 states (`algebra.maxsize`), so above 10 spins 1/2 this is the
 only ED route. README: `docs/new_methods/kondo_krylov_thermal/`.
 
+**The 2026-11-14 work on the Krylov route** (`docs/kondo_speedup_plan.md`
+items 11 and 12 and the `su2` choice; `tests/test_kondo_speedups_krylov.py`
+keeps the old `state_spectrum` and compares on a TRUNCATED space, since an
+exhausted one cannot see a change of the basis). `state_spectrum` builds
+nothing of the size of the Hilbert space twice: Q^H H Q from the products
+H B of the loop, the residual from the recurrence (W, the part of H B
+outside the space for the last block, taken BEFORE the DROP_TOL cut, or a
+deflated direction reports zero), the matrices in Krylov coordinates, and
+S- as the transpose of S+ when that is exact (`_minus_is_transpose`). The
+basis is the same to the last bit; dI/dV moved by 6e-16 of the peak, and
+`state_spectrum` went from 0.67 to 0.60 s per state on 12 spins. Four
+rules. (1) The reorthogonalization against each earlier block stays as it
+is: one block Gram-Schmidt over the whole space was 1.7x faster on 12
+spins but changes the basis at roundoff and moved dI/dV by 3e-13 of the
+peak, above the 1e-13 asked (branch `krylov-block-gram-schmidt`, for the
+author to pick); an unexhausted space is that sensitive (the
+old code with its three start vectors in another order moves by 2.5e-14
+on 10 spins and 6.7e-12 on 12). (2) Compare two versions with eigsh
+seeded (a `v0`): SciPy 1.18's eigsh draws its start vector from fresh
+entropy, and two runs of the same code on 12 spins differ by 9e-12 of the
+peak. (3) The Krylov spectra of a real H already have the real form of
+`_spin_triplet` (since 84090c0, pinned by a test); what costs is the two
+exchange F tables, 90% of the third-order term of one state, with n_f
+about the whole basis here (plan item 2 would halve them on this route; not
+done). (4) `su2` stays opt-in, so do NOT make it the default without
+changing its weight cut: it keeps a multiplet when (2S+1) exp(-x) is above
+p_cut times the largest weight, the full sum keeps a state when exp(-x) is
+above p_cut, and on the zero-field 12-spin chain at 1 K the two differed by
+2.4e-8 of the peak (two multiplets at 18.5 kT), against 3e-12 between
+nkry=100 and 200; on 7 spins at 1.5 K, with no level between the cuts,
+by 2e-15. With the full sum's cut (measured in a scratch copy, not
+committed) they agree to 2.5e-12 and the 12-spin chain is 3.5x faster;
+that change and the default are the author's pick. The residual stop of item 12 is on the branch
+`krylov-residual-stop`, not here: it fired only above the default nkry on
+the chains of the plan and cost 8% of `state_spectrum` there.
+
 **Leading-log resummation (2026-11-06)**, `kondospectrumtk/leadinglog.py`,
 is a new method documented in `docs/new_methods/kondo_leading_log/README.md`
 (derivation, references, measured checks): one-loop poor man's scaling with
