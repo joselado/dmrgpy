@@ -244,22 +244,25 @@ def _project(M, psi, Q, y):
     return out
 
 
-def _total_spin(chain, edobj):
-    """The sparse matrices of the total spin sum_j S^a_j, a = x, y, z."""
-    out = []
-    for name in ("Sx", "Sy", "Sz"):
-        ops = getattr(chain, name)
-        tot = ops[0]
-        for j in range(1, len(ops)):
-            tot = tot + ops[j]
-        M = edobj.get_operator(tot)
-        out.append(sp.csr_matrix(M) if not sp.issparse(M) else M.tocsr())
-    return out
+def _total_spin(chain, edobj, name):
+    """The sparse matrix of the total spin sum_j S^a_j, name "Sx", "Sy"
+    or "Sz"."""
+    ops = getattr(chain, name)
+    tot = ops[0]
+    for j in range(1, len(ops)):
+        tot = tot + ops[j]
+    M = edobj.get_operator(tot)
+    return sp.csr_matrix(M) if not sp.issparse(M) else M.tocsr()
 
 
 # The commutator [H, S^a_tot] counts as zero below this fraction of
 # onenorm(H)*onenorm(S^a_tot), on a random state.
 SU2_TOL = 1e-10
+
+
+class SU2Error(ValueError):
+    """A check of the SU(2) reduction failed: su2=True raises it, and
+    su2=None takes the full sum instead."""
 
 
 def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
@@ -272,31 +275,34 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
     rotation-invariant operator, the same for every member of a multiplet,
     so this is the sum over all of them. A multiplet is kept when its
     members pass the cut of initial_states, exp(-(E-E0)/kT) > p_cut, so the
-    states are those of the full sum. Raises ValueError unless H
-    commutes with the total spin (checked on a random state) and S^z_tot is
-    diagonal in the ED basis. Inside a degenerate level the states are
-    rotated to a definite S with S^2_tot, and the call raises when 2S is
-    not an integer there."""
+    states are those of the full sum. Raises SU2Error (a ValueError)
+    unless H commutes with the total spin (checked on a random state, one
+    component at a time, so a field along x stops the check at the first)
+    and S^z_tot is diagonal in the ED basis. Inside a degenerate level the
+    states are rotated to a definite S with S^2_tot, and the call raises
+    SU2Error when 2S is not an integer there."""
     edobj = chain.get_ED_obj()
-    Stot = _total_spin(chain, edobj)
     dim = H.shape[0]
     rng = np.random.default_rng(1)
     v = rng.standard_normal(dim) + 1j*rng.standard_normal(dim)
     v /= np.linalg.norm(v)
     nH = onenorm(H)
-    for a, M in zip("xyz", Stot):
+    Stot = []
+    for a in "xyz":
+        M = _total_spin(chain, edobj, "S" + a)
         c = np.linalg.norm(H @ (M @ v) - M @ (H @ v))
         if c > SU2_TOL*nH*max(onenorm(M), 1e-300):
-            raise ValueError(
+            raise SU2Error(
                 "get_kondo_spectrum(submode=\"KRYLOV\", su2=True): H does not "
                 "commute with the total spin (|[H, S%s_tot] v| = %.2g on a "
                 "random state), so the members of a multiplet are not "
                 "equivalent. Use su2=False." % (a, c))
+        Stot.append(M)
     Sz = Stot[2]
     offdiag = Sz - sp.diags(Sz.diagonal())
     if offdiag.nnz and np.max(np.abs(offdiag.data)) > 1e-12:
-        raise ValueError("get_kondo_spectrum(submode=\"KRYLOV\", su2=True): "
-                         "S^z_tot is not diagonal in the ED basis of this chain")
+        raise SU2Error("get_kondo_spectrum(submode=\"KRYLOV\", su2=True): "
+                       "S^z_tot is not diagonal in the ED basis of this chain")
     m = np.real(Sz.diagonal())
     # an integer S has one member at m=0 and a half-integer S one at
     # m=+1/2; a chain of spinful fermions with no Nf sector holds both
@@ -327,7 +333,7 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
         s2, U = np.linalg.eigh(B)
         S = (-1. + np.sqrt(1. + 4.*np.clip(np.real(s2), 0., None)))/2.
         if np.any(np.abs(2*S - np.round(2*S)) > 1e-6):
-            raise ValueError(
+            raise SU2Error(
                 "get_kondo_spectrum(submode=\"KRYLOV\", su2=True): a level "
                 "at %.6g has S^2_tot eigenvalues %s, not of a definite spin"
                 % (E[a], np.array2string(np.real(s2), precision=6)))
@@ -348,17 +354,23 @@ class KrylovKondoSpectrum():
 
     chain, site, T, kB: as edkondo.KondoSpectrum. nkry: the block Krylov
     space of each initial state has at most 3*nkry states. p_cut: relative
-    Boltzmann weight below which an initial state is dropped. su2: take one
-    member per spin multiplet (see SU2 below); H must then commute with the
-    total spin, which is checked."""
+    Boltzmann weight below which an initial state is dropped. su2: True
+    takes one member per spin multiplet (see su2_initial_states), and H must
+    then commute with the total spin, which is checked (SU2Error); False
+    takes every state; None, the default, takes the reduction when its
+    checks pass and every state otherwise. self.su2 says which was taken."""
     def __init__(self, chain, site, T, kB=8.617333262e-5, nkry=100, p_cut=P_CUT,
-                 su2=False, degeneracy_tol=1e-9):
+                 su2=None, degeneracy_tol=1e-9):
         if T < 0.:
             raise ValueError("T must be >= 0, got %r" % (T,))
         if isinstance(nkry, bool) or not isinstance(nkry, (int, np.integer)) or nkry < 1:
             raise ValueError("nkry must be a positive integer, got %r" % (nkry,))
         if not 0. < p_cut < 1.:
             raise ValueError("p_cut must be between 0 and 1, got %r" % (p_cut,))
+        if su2 is not None:
+            if not isinstance(su2, (bool, np.bool_)):
+                raise ValueError("su2 must be None, True or False, got %r" % (su2,))
+            su2 = bool(su2)
         self.chain, self.site, self.T, self.kB = chain, site, float(T), kB
         self.nkry = int(nkry)
         self.degeneracy_tol = degeneracy_tol
@@ -387,9 +399,19 @@ class KrylovKondoSpectrum():
         self.H = H
         kT = kB*self.T
         self.tol_degenerate = degeneracy_tol*2.*onenorm(H)
-        if su2:
-            self.E, self.V, self.weights, self.spins = su2_initial_states(
-                chain, H, kT, p_cut, degeneracy_tol)
+        reduced = None
+        if su2 is not False:
+            # su2=None: the reduction when its checks pass, and the full sum
+            # otherwise; only a failed check (SU2Error) falls back, an error
+            # of the eigensolver is raised either way
+            try:
+                reduced = su2_initial_states(chain, H, kT, p_cut, degeneracy_tol)
+            except SU2Error:
+                if su2:
+                    raise
+        self.su2 = reduced is not None # whether the reduction is taken
+        if reduced is not None:
+            self.E, self.V, self.weights, self.spins = reduced
         else:
             self.E, self.V, self.weights = initial_states(H, kT, p_cut, degeneracy_tol)
             self.spins = None

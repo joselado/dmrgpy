@@ -46,6 +46,22 @@ def impurity_chain(nb=3):
     return sc
 
 
+def hubbard_no_sector(n=3):
+    """A Hubbard chain with no Nf sector and no field: even and odd
+    electron numbers, so integer and half-integer total spins together
+    (the chain of test_audit_2026_11_13_reread.py, kept here so that this
+    file does not import that one)."""
+    fc = fermionchain.Spinful_Fermionic_Chain_Native(n)
+    h = 0
+    for i in range(n - 1):
+        h = h - (fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1])
+    h = h + h.get_dagger()
+    for i in range(n):
+        h = h + 8.*(fc.Nup[i] - 0.5)*(fc.Ndn[i] - 0.5)
+    fc.set_hamiltonian(h)
+    return fc
+
+
 def compare(sc, T, nkry=40, p_cut=1e-14, su2=False, **kw):
     kw = {**KW, **kw}
     _, ed = sc.get_kondo_spectrum(EV, mode="ED", T=T, **kw)
@@ -96,7 +112,7 @@ def test_sparse_eigensolver_finds_the_multiplets(monkeypatch):
         return eigsh(*a, **k)
     monkeypatch.setattr(krylovkondo.sla, "eigsh", counted)
     sc = heisenberg(8)
-    kks = krylovkondo.KrylovKondoSpectrum(sc, 1, 0.5, p_cut=1e-12)
+    kks = krylovkondo.KrylovKondoSpectrum(sc, 1, 0.5, p_cut=1e-12, su2=False)
     # eigsh, not the dense fallback: the weight cut alone keeps the same
     # states on both paths, so it cannot tell them apart
     assert calls and max(calls) < 256//3
@@ -112,7 +128,7 @@ def test_su2_reduction_matches_ed_and_refuses_a_field():
     # one member per multiplet, in the sector M=1/2 of the odd chain
     assert np.all(np.mod(2*kks.spins, 2) == 1) and 1.5 in kks.spins
     assert len(kks.weights) < len(krylovkondo.KrylovKondoSpectrum(
-        sc, 1, 1.5, p_cut=1e-12).weights)
+        sc, 1, 1.5, p_cut=1e-12, su2=False).weights)
     with pytest.raises(ValueError, match="does not commute with the total spin"):
         krylovkondo.KrylovKondoSpectrum(heisenberg(5, "xz"), 1, 1.0, su2=True)
 
@@ -200,3 +216,45 @@ def test_keywords():
     for bad in (dict(nkry=0), dict(nkry=2.5), dict(p_cut=0.)):
         with pytest.raises(ValueError):
             sc.get_kondo_spectrum(EV, submode="KRYLOV", **bad, **kw)
+
+
+@pytest.mark.parametrize("chain", ["spins", "hubbard"])
+@pytest.mark.parametrize("extra", [dict(nkry=40, p_cut=1e-14), {}], ids=["tight", "defaults"])
+def test_su2_auto_takes_the_reduction_and_agrees_with_the_full_sum(chain, extra):
+    """su2=None, the default, takes one member per multiplet when H
+    commutes with the total spin, and the result is the full sum: on a
+    Heisenberg chain at 1.5 K, and on a Hubbard chain with no Nf sector,
+    where integer and half-integer total spins occur together; at
+    p_cut=1e-14 and at the defaults."""
+    if chain == "spins":
+        sc, T, kw, eV = heisenberg(7), 1.5, dict(KW), EV
+    else:
+        sc, T, eV = hubbard_no_sector(), 0.3, np.linspace(-0.6, 0.6, 9) + 1e-3
+        kw = dict(site=0, Jrho_s=-0.05, U=0.2, kB=1., omega0=4., Gamma0=1e-2, order=3)
+    kB = kw.get("kB", 8.617333262e-5)
+    auto = krylovkondo.KrylovKondoSpectrum(sc, kw["site"], T, kB=kB, **extra)
+    full = krylovkondo.KrylovKondoSpectrum(sc, kw["site"], T, kB=kB, su2=False, **extra)
+    assert auto.su2 and not full.su2 and len(auto.weights) < len(full.weights)
+    out = {}
+    for su2 in (None, False):
+        _, out[su2] = sc.get_kondo_spectrum(eV, mode="ED", submode="KRYLOV", T=T,
+                                            su2=su2, **extra, **kw)
+    _, default = sc.get_kondo_spectrum(eV, mode="ED", submode="KRYLOV", T=T, **extra, **kw)
+    peak = np.max(np.abs(out[False]))
+    assert np.max(np.abs(default - out[None])) < 1e-14*peak
+    # measured 3.5e-14 and 2.1e-15 (spins), 2.3e-15 and 1.9e-15 (hubbard)
+    assert np.max(np.abs(out[None] - out[False])) < 1e-11*peak
+
+
+def test_su2_auto_takes_the_full_sum_without_the_symmetry():
+    """A field breaks the symmetry: su2=None runs the full sum silently,
+    su2=True still raises, and anything but None, True or False raises."""
+    sc = heisenberg(5, "xz")
+    auto = krylovkondo.KrylovKondoSpectrum(sc, 1, 1.0)
+    assert not auto.su2 and auto.spins is None
+    off = krylovkondo.KrylovKondoSpectrum(sc, 1, 1.0, su2=False)
+    assert np.max(np.abs(auto.weights - off.weights)) < 1e-14
+    with pytest.raises(krylovkondo.SU2Error, match="does not commute"):
+        krylovkondo.KrylovKondoSpectrum(sc, 1, 1.0, su2=True)
+    with pytest.raises(ValueError, match="su2 must be"):
+        krylovkondo.KrylovKondoSpectrum(sc, 1, 1.0, su2="auto")

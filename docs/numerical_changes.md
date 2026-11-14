@@ -1674,3 +1674,12 @@ $2.4\times 10^{-8}$ of the peak, and it agrees with `su2=False` to
 $2.5\times 10^{-12}$, the size of the Krylov error at `nkry=100`. On 7
 spins at 1.5 K, where no level lies between the two cuts, nothing moves
 above roundoff. At $T=0$ nothing changes.
+
+On the same day `su2=None` became the default of the route. A call
+without `su2` now takes the reduction when $H$ commutes with the total
+spin, and the full sum otherwise; `su2=False` gives the old default. On
+a chain with that symmetry a default call moves by the difference
+between the Krylov spaces of the two routes: $2.5\times 10^{-12}$ of the
+peak on the zero-field 12-spin chain at 1 K (`nkry=100`), and
+$2.5\times 10^{-15}$ or less on 7 spins at 1.5 K and on a 3-site Hubbard
+chain with no Nf sector. With a field nothing moves.
