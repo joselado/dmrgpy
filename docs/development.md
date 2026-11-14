@@ -5745,9 +5745,29 @@ digest of the arrays it was computed from (the state, $H$, the operators,
 the settings), so a scan of `get_kondo_spectrum` over `Jrho_s`, `U`,
 `omega0` or the bias grid builds one Krylov space; the key is the content,
 so a state set with `set_gs`, a new Hamiltonian or a re-solve gives a new
-key and nothing is invalidated by hand. With `n_gs>1` every call gets new
-members from `get_excited_states`, so there the spectra are built again
-(`tests/test_task_batched_spectrum.py`).
+key and nothing is invalidated by hand (`tests/test_task_batched_spectrum.py`).
+
+Five more changes of 2026-11-14 (`docs/kondo_speedup_plan.md`, items 6 to
+10; `tests/test_kondo_speedups_task.py`). `order=2` builds only row and
+column 0 of the three matrices, the transitions out of the ground state
+that the second-order sum reads, under its own cache key. On a real basis
+$S_y$ is applied as $i$ times a real operator (`task.real_up_to_phase`),
+so every application and the Ritz transform run in real arithmetic, and
+its matrix is imaginary with exact zeros, the form `conductance.py` reads
+to run real. `block_krylov` takes the overlaps of $H_q$ from its first
+projection pass instead of a second product with the basis, and forms
+the residual on the backend. On `"python"` the state of a real $H$ is
+rotated to a real gauge and $H$ is written as a real MPO before the
+tangent space is built (`taskdmrg.real_gauge_state`, `task.real_mpo`),
+since the `"python"` state and MPO are complex entry by entry; this
+moves numbers by the imaginary part the solve left, which the spectrum
+keeps as `imaginary_dropped`, and it halves the store and about halves
+the build. With `n_gs>1` the members of the manifold are kept on the chain
+(`kondomethod._task_manifold`) under a digest of the solved state, $H$,
+`n_gs` and the solver settings, so a repeat call takes the same members
+and the spectrum cache serves them; the entry is dropped wherever the
+excited states of `dcex.py` are. The spectrum cache keeps real and
+imaginary matrices in real storage.
 
 Which poles are converged is measured. `block_krylov(residual=True)`
 returns the Gram matrix of what $P(H-E_0)P$ takes out of the basis from

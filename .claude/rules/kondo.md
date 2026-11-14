@@ -114,10 +114,12 @@ keeps the last `SPECTRUM_CACHE_SIZE` spectra on the chain
 (`_task_spectrum_cache`) under a digest of the exported arrays. The key is
 the content on purpose: do NOT replace it by a flag of the chain, since
 `n_gs` sets each member with `set_gs` and a flag would return the first
-member's spectrum for all of them. The cache serves `n_gs=1` only: with
-`n_gs>1` every call gets new members from `get_excited_states`, so every
-call builds again (measured, 2 builds per `n_gs=2` call). The MPOs of the
-starts and of H are left uncompressed, which is not tested either way. At
+member's spectrum for all of them. Since 2026-11-14 it serves `n_gs>1`
+too, because the members are kept on the chain (see the paragraph on the
+2026-11-14 speedups of the TASK route); before, every call got new members
+from `get_excited_states` and built again (2 builds per `n_gs=2` call).
+The MPOs of the starts, and that of H on v3, are left uncompressed, which
+is not tested either way. At
 `maxm=100` the factor is 3.9 (172 s to 45 s, with `BATCH_BYTES` at 256 MB;
 1 GB was slower and doubled the peak memory). Two fresh v3 solves of that
 chain at `maxm=40` differ by 3e-3 of the peak with the same code, so
@@ -276,6 +278,82 @@ applied: after the cut of final states it saves n_f/(2 dim) of the F
 entries, and it gave 0, 4 and 2% on the three chains, the copies of the
 transposed block eating the rest. The plan's cache of the eigenbasis spin
 operators per ED object and site (item 3) was not done.
+
+**The 2026-11-14 speedups of the TASK route** (`docs/kondo_speedup_plan.md`
+items 6 to 10, with the measurements; `tests/test_kondo_speedups_task.py`
+pins each one against the old form kept there and by a count of what it
+saves). On one core the 20-site chain of the plan went from 2.6 s to 1.1 s
+at order 2 (nkry=100) and from 22.4 s to 14.2 s at order 3 (nkry=300,
+0.3 K), and the scan of 4 values of U at n_gs=2 from 17.5 s to 4.9 s.
+The rules that come with it.
+(1) `order=2` builds row and column 0 of Sx, Sy and Sz only
+(`TaskKondoSpectrum(order=2)`, `column_only`), under its own key of the
+spectrum cache, and the third-order sums refuse such a spectrum
+(`conductance._require_full_matrices`). Do NOT serve an order=3 call from
+a column entry; `connected_to_ground_state` on a column sees the direct
+transitions only, which is what order 2 sums over.
+(2) On a real basis an operator that is a phase times a real one is
+applied as the real one (`task.real_up_to_phase`, the phase snapped to
+1, -1, i or -i), and its matrix comes out as that phase times a real
+matrix with exact zeros (`_exact_phase_form`), the form
+`conductance._spin_triplet` reads. A complex basis keeps the complex
+code bit for bit.
+(3) `block_krylov` takes the overlaps of Hq from the first projection
+pass of `add()` (of the residual on the last block, of `_overlap_columns`
+when no residual is asked for or a candidate is skipped at a full basis),
+and does not gauge a Krylov candidate before its passes, since
+`apply_many` ends with the gauge; the starts are still gauged first. Once
+Ritz pairs converge, the next Krylov vectors are set by what rounding
+leaves of the residual, so the entries of Hq differ between two codes far
+above rounding (8.7e-3 of max|Hq| between the old and the new code, and
+2.7e-2 between the old code and itself with its starts scaled by
+1+1e-15). Compare the converged Ritz values (4e-15), never the entries.
+(4) On "python" the export copy of the state is rotated to a real gauge
+and H is written as a real MPO before the tangent space is built
+(`taskdmrg.real_gauge_state`, `task.real_mpo`), and the spectrum keeps
+`imaginary_dropped`, the norm of the part of the state this drops
+(below 3e-8, the floor of its measure, on the chain of the plan). Above
+`REAL_GAUGE_DROP` = 1e-6, for a complex H, and for a state that is not
+real up to a phase the arrays are used as exported and nothing moves;
+the last is every `n_gs` member that is a complex mixture of a doublet,
+so n_gs>1 does not gain from it. Do NOT test the realness of the
+"python" H entry by entry: AutoMPO writes S_y S_y with imaginary site
+tensors and its compression mixes the channels, so the MPO of a real H
+is complex entry by entry (`real_mpo` decides on the span of the real
+and imaginary parts, bond by bond). It moves numbers, see the ledger:
+the converged poles by 4e-15 of the width, dI/dV by 3e-14 of its peak at
+nkry=300 and by up to 1.5e-6 at nkry=100 and T=0, where the loose poles
+are steps. This is what makes rules (2) and (3) count on "python": before,
+its basis was complex.
+(5) With `n_gs>1` on TASK the manifold is kept on the chain
+(`kondomethod._task_manifold`, `_n_gs_manifold`, one entry) under a
+digest of the site arrays of the solved state gs0 and of H, n_gs, the
+chain's `_gs_solver_key` and `excited_gram_schmidt`; a repeat call takes
+the same members, as detached copies, and the spectrum cache serves their
+spectra (a scan of 4 values of U: 4 solves and 8 builds became 1 and 2,
+17.8 s to 4.9 s). It was one of the plan's choices for the author,
+taken on 2026-11-14 knowing that it fixes the manifold between calls, so
+repeated calls no longer differ by solver noise (4e-9 of the peak on the
+9-site doublet). H stays in the key although
+`set_hamiltonian` drops the entry: `set_gs` of the old state after a new
+H must miss. The entry is dropped wherever `_dcex_excited_cache` is
+(`restart`, `set_hamiltonian`, `_reset_dmrg_state`, `__deepcopy__`),
+since its members are MPS of the session. Other submodes solve the
+manifold at every call, as before.
+(6) The residual of `block_krylov` is formed on the backend: the
+remainders of the last block stay there, and only their Gram matrix and
+the overlaps of Hq come to the host. `tests/test_task_gpu_backend.py`
+reaches that branch with nkry=2 on `impurity_chain(nb=3)` (9 of 23
+states; the older JAX test runs on an exhausted space, which has no
+residual) and spies on `to_host` for a tangent vector, which the code
+before brought over for every remainder. It was not timed: on a device
+it saves the transfer of one block of tangent vectors per spectrum.
+(7) The spectrum cache keeps a matrix that is real as its real part and
+one that is imaginary (Sy on a real basis) as its imaginary part, by
+exact zeros (`taskdmrg._stored`), so an entry of a real basis takes half
+the memory (35 MB at nkry=400); what it hands out is a new complex array
+with the same values, as before. The bound is still a count
+(`SPECTRUM_CACHE_SIZE` = 8), not bytes, which was left as it is.
 
 **Spinful fermion chains (2026-10-22).** `get_kondo_spectrum` lives on
 `kondospectrumtk/kondomethod.py::KondoSpectrumMixin`, inherited by
