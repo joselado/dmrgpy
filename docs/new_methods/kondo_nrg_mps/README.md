@@ -20,14 +20,16 @@ bandwidth, and where TASK (the tangent-space Krylov route of
 `get_stm_spectrum`) does not resolve the Kondo resonance below about
 T_K/3?
 
-The answer is yes up to at least 6 spins, where the exact route is enough:
-the spins and the first Wilson site are diagonalized exactly and the NRG
-goes on from there. Beyond that, DMRG solves the spins and the first
-Wilson sites (the head), and the NRG goes on from the bond basis of that
-state (the tail). The tail gives the spectrum below the energy of the
-hand-over, and TASK on the head gives it above. This second route agrees
-with the exact one on 3 spins; at 7 and 8 spins it runs and gives the
-expected physics, but it was not converged in maxm (section 6).
+The answer is yes. Up to 7 spins the exact route is enough: the spins and
+the first Wilson site are diagonalized exactly and the NRG goes on from
+there, with keep = 3200 at 7 spins (section 3). Beyond that, DMRG solves
+the spins and the first Wilson sites (the head), and the NRG goes on from
+the bond basis of that state (the tail). The tail gives the spectrum below
+the energy of the hand-over, and TASK on the head gives it above. This
+second route agrees with the exact one on 3 spins to 3e-4 below the
+hand-over and on 7 spins to 1.6% of the peak, and on 8 to 10 spins, where
+there is no exact reference, it converges in the size of the hand-over
+basis to 1.4% of the peak or better (section 6).
 
 ## 2. The spectral NRG
 
@@ -211,7 +213,8 @@ It is mostly the different keep of the two runs: at 3 spins keep = 800 is
 1.0% off keep = 3200 (section 3), and two chain lengths differ by up to
 0.7% at a fixed energy on one mesh. With keep = 1600 on both sides the
 head and the tail agree with the exact route to 8e-4 below 1e-3 (the
-example below). A hand-over basis of 64 states is not enough. So
+example below). A hand-over basis of 64 states is not enough.
+
 At T > 0 the same head (maxm = 160, 146 states at the hand-over, keep =
 1600 on both sides) gives dI/dV with the Fermi function of the tip at
 T = 1e-4, about omega_k0/100, to 0.93% of the exact route below
@@ -283,22 +286,43 @@ at nkry = 80.
 
 The whole curve was compared with the exact route on 3 spins (Js =
 1e-2 D, rho JK = 0.15, the metal under the end spin), averaged over two
-meshes with b = 0.6: a head of 12 Wilson sites at maxm = 160 with the
-hand-over 4 sites before its end (146 and 159 states, w_join = 1e-2 and
-2e-2), keep = 800 in the tail and 1600 in the exact route. The largest
-relative error and its mean, on three ranges of |eV|:
+meshes (z = 0 and 0.5) with b = 0.6: a head of 12 Wilson sites at maxm =
+160 with the hand-over 4 sites before its end (the joined bases of
+section 5, 272 and 318 states; w_join = 9.8e-3 and 2.0e-2), keep = 1600
+in the tail and in the exact route. The two meshes cut at different
+energies, so the ranges are read from the smaller w_join below and from
+the larger one above. The largest relative error and its mean, with the
+nkry of TASK on the head:
 
-| nkry | below w_join/2 | w_join/2 to 2 w_join | above 2 w_join | time, 2 meshes |
-|---|---|---|---|---|
-| 30 | 1.5%, 0.1% | 8%, -2% | 12%, -2.5% | 476 s |
-| 90 | 1.1%, 0.2% | 5%, -3% | 3.8%, -0.5% | 1268 s |
+| nkry | below w_join/2 | w_join/2 to 2 w_join | above 2 w_join |
+|---|---|---|---|
+| 30 | 1.2%, -0.1% | 16%, -3.6% | 11%, -0.9% |
+| 60 | 0.3%, 0.0% | 13%, -3.7% | 3.0%, -0.2% |
+| 90 | 0.2%, 0.0% | 4.5%, -1.6% | 0.7%, 0.0% |
+| 120 | 0.1%, 0.0% | 1.1%, -0.5% | 0.7%, +0.1% |
+| 150 | 0.1%, 0.0% | 4.1%, -2.4% | 0.8%, 0.0% |
 
-Below the cut the error is that of the tail, here mostly the keep of 800
-against 1600 (section 5). Above it the error is the Krylov resolution of
-TASK, which falls with nkry; 90 is the default. Around the cut the two
-routes put their weight on different lines, and the joined curve is 3%
-low on average there. The joined poles carry the sum rule of the head
-state to +0.3% and -0.2% at nkry = 90 (+0.5% and -1.2% at 30).
+One block Krylov space of 150 blocks was built per mesh (604 vectors of
+6.4e5 numbers, 3.1 GB, 950 s on one core), and the smaller nkry are its
+leading blocks, since the space is nested. Below the cut the error is that
+of the tail. Above both cuts TASK alone is converged at nkry = 90: against
+nkry = 150 its curve moves by 4.5% at nkry = 30, 0.2% at 60 and 0.02% at
+90, and what is left, 0.7%, is the head against the exact route. Around
+the cut the error does not fall with nkry (4.5%, 1.1% and 4.1% at 90, 120
+and 150): the step at w_join puts the weight of the two routes on
+different lines, and which TASK lines fall on each side of it moves with
+nkry. (An earlier version of this table read every range from the w_join
+of the first mesh, so its range above held the cut of the second mesh,
+where that run was 3.8% off at nkry = 90; above both cuts it was 0.8%.)
+The joined poles carry the sum rule of the head state to +0.2% and
++0.02% at nkry = 150.
+
+The weights in the overlap window w_join/4 to 4 w_join, which
+`head_tail_poles` returns in `overlap`, are the check that needs no
+reference. At nkry = 150 the tail and TASK put 0.0216 and 0.0220 there
+on each sign of w on the first mesh, and 0.0356 and 0.0363 on the second,
+2% apart; at nkry = 30 TASK has 0.0153 and 0.0328, 29% and 8% below the
+tail. So both routes are valid in that window once TASK is converged.
 
 Step 9 of the plan's ladder takes the route past 3 spins. It was run on 7
 and 8 spins (Js = 1e-2 D, rho JK = 0.15, one mesh, b = 0.8, the tail
@@ -393,8 +417,9 @@ that for 60, and at maxm = 160 the full joined spectrum took about 4 min
 per mesh at nkry = 30 and 10 min at nkry = 90. TASK grows as chi^3,
 which is why `head_task_poles` builds one block Krylov space for the four
 starts (three times faster than four separate recursions on a short
-chain). A coarse Krylov space is not enough above w_join: nkry = 30 was
-12% off there, nkry = 90 3.8% (section 6).
+chain). A coarse Krylov space is not enough above w_join: with the
+ranges of section 6, nkry = 30 was 11% off above both cuts, 60 3.0%, and
+90 or more 0.7%.
 
 ## 9. What the route does not contain
 
