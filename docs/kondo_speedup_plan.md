@@ -251,6 +251,15 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
 14. **The thermal kernel recomputes its D-independent parts** for every
     right-hand side and builds a 2 ms table: 1.3 to 3x at 7 to 8 spins at
     low T, nothing at 9 spins with many biases. `thermalkernel.py:84`.
+    Measured on 2026-11-14 (workstation, one core, the chain of
+    `ll_chain` at 0.5 K, 61 biases) and not applied: the tables are 21%
+    of the call on 6 spins (2.7 s of 12.9 s, 585 tables) and 7% on 7
+    spins (2.6 s of 37.4 s), so even free tables give at most 1.27x and
+    1.08x. A table is 3.4 ms, and 2.0 ms of it is the quadrature product
+    `M @ f(y)` (1537 x 1792), which depends on D through f; the parts that
+    do not depend on D (the square roots, the far grid |x+u|) are about
+    0.5 ms, at most 3% of the 6-spin call. The number of tables is set by
+    the stages of the integrator, one new D per stage.
 15. **Sz block structure.** For a Hamiltonian that conserves Sz the four
     2d x 2d products and the hole sum are block sparse: 2 to 3x at 9 spins
     and T=0. `leadinglog.py:163`.
