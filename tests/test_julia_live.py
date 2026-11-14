@@ -17,17 +17,13 @@ import pytest
 
 from dmrgpy import fermionchain, spinchain, timedependent
 
-try:
-    from dmrgpy.mpsjulialive import juliasession as _juliasession  # noqa: F401
-    _JULIA_AVAILABLE = True
-    _JULIA_UNAVAILABLE_REASON = ""
-except Exception as _e:  # pragma: no cover - environment dependent
-    _JULIA_AVAILABLE = False
-    _JULIA_UNAVAILABLE_REASON = str(_e)
-
-pytestmark = pytest.mark.skipif(not _JULIA_AVAILABLE,
-        reason="requires a working juliacall/Julia toolchain: %s"
-                % _JULIA_UNAVAILABLE_REASON)
+# The probe boots the Julia session, so it runs when a test is set up and
+# not at collection (a string condition is evaluated by pytest only then):
+# a run with -k "not julia_live" never starts Julia.
+pytestmark = pytest.mark.skipif(
+        "not __import__('_helpers').julia_available()[0]",
+        reason="requires a working juliacall/Julia toolchain (see "
+               "_helpers.julia_available() for the error)")
 
 DELTA = 0.05
 HEISENBERG_4_GAP = 0.658919  # see test_dynamical_correlator.py
