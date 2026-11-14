@@ -412,6 +412,28 @@ def test_the_mpo_keeps_the_deep_wilson_bonds(version):
         assert 0.0 < f < 1e-12
 
 
+def test_a_python_sector_solve_keeps_the_deep_wilson_hoppings():
+    """On "python" a sector solve minimizes H plus a charge penalty, summed
+    by mps_sum. Cut at a relative 1e-14, that sum lost the deep Wilson
+    hoppings next to the penalty's constant lambda*q^2 (about 1.3e4 on 20
+    Wilson sites): <H + P> on the solved state was 2.4e-4 above
+    <H> + <P>. Chain._penalized_cutoff lowers the cutoff by the per-bond
+    factor of H and by (cmax/scale)^2; what is left, 5.6e-7, is the same
+    with no cutoff at all, the rounding of the sum next to that constant."""
+    from dmrgpy.pyitensor.mpsalgebra import inner
+    J = 0.3*ysr.lambda_factor(4.0)
+    n = 20
+    fc = ysr.spin_chain_on_metal(1, n, Js=0.01, JK=J, Lambda=4.0,
+                                 itensor_version="python")
+    fc.maxm, fc.nsweeps = 16, 4
+    fc.set_conserved_sector(Nf=n + 1, Sz=1)
+    fc.gs_energy()
+    s = fc._session
+    psi = s.wf0
+    E = lambda m: complex(inner(psi, m, psi)).real
+    assert abs(E(s._solve_H()) - E(s.H) - E(s._penalty_mpo())) < 1e-5
+
+
 def test_bond_cutoff_factor_reads_the_weakest_bond():
     """m^2 of the per-bond rule: 1 for a uniform chain, s^2 for a weak link
     of strength s (merged over duplicate terms), and a one-site term sets

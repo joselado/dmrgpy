@@ -524,13 +524,23 @@ ranges of section 6, nkry = 30 was 11% off above both cuts, 60 3.0%, and
   of the chain, where the bond holds 54 and 16 states). The heads of
   12 to 14 Wilson sites of this record have the same MPO as before, to
   the bit. `head_tail_poles` warns for a hand-over whose block holds a
-  bond `lost_wilson_bonds` reports. On "python" a head of 30 Wilson
-  sites still fails `real_gauge` after the change (residual 1.9e-3 at
-  maxm 128 and 30 sweeps, against the tolerance 1e-4), so that failure is
-  not the MPO: the deep sites keep part of the complex random start. The
-  local solves stop on a residual relative to the scale of the whole H,
-  far above the energy of those sites, which is the likely cause; it was
-  not measured further. The heads of this record (12 to 14 sites) pass.
+  bond `lost_wilson_bonds` reports. On "python" a sector solve adds
+  the charge penalty to H, and that sum was cut at 1e-14 of the weight
+  of each bond, which the constant of the penalty sets. On 30 Wilson
+  sites this removed the hoppings from the Wilson site 13 on (link
+  dimension 9 down to 4) while the bare MPO kept them all, so the deep
+  sites were decoupled and kept part of the complex random start: the
+  head failed `real_gauge` (residual 1.9e-3 at maxm 128 and 30 sweeps,
+  against the tolerance 1e-4). Since 2026-11-14 the cut of that sum is
+  lowered by the per-bond factor of H and by the square of the largest
+  coefficient of H over the penalty constant (`Chain._penalized_cutoff`).
+  On 20 Wilson sites <H+P> - <H> - <P> went from 2.4e-4 to 5.6e-7, and
+  5.6e-7 is rounding, since a cutoff of 0 gives the same. The 30-site
+  head then passes `real_gauge` and stops at `graded_basis`: a block
+  charge of its left basis is off an integer by 3.3e-8, against the
+  tolerance 1e-8, which is the leak of dense storage across charges at
+  that rounding. This is open. The heads of this record (12 to 14 sites)
+  pass.
 - `head_tail_poles` also warns when the hand-over basis holds fewer than
   `MIN_HANDOVER` = 100 states.
 

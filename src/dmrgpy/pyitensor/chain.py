@@ -19,7 +19,7 @@ import numpy as np
 
 from .autompo import AutoMPO
 from .dmrg import dmrg, dmrg_excited, dmrg_generalized
-from .mpobuilder import to_mpo
+from .mpobuilder import to_mpo, _bond_cutoff_factor, MPO_CUTOFF_FLOOR
 from .mpsalgebra import applyMPO, inner, nmultMPO, BatchedBras
 from .mpsalgebra import sum as mps_sum
 from .mpsalgebra import randomMPS, traceC, mpo_dagger, mpo_is_hermitian
@@ -560,8 +560,28 @@ class Chain:
         and why nothing else does."""
         if not self.sector:
             return mpo
-        return mps_sum(mpo, self._penalty_mpo(), cutoff=_BUILD_CUTOFF,
+        penalty = self._penalty_mpo()
+        return mps_sum(mpo, penalty, cutoff=self._penalized_cutoff(),
                        maxdim=self.mpomaxm)
+
+    def _penalized_cutoff(self):
+        """The cutoff of the sum H + penalty: _BUILD_CUTOFF lowered by the
+        per-bond factor of H (mpobuilder._bond_cutoff_factor) and by
+        (cmax/scale)^2, cmax the largest coefficient of H and scale the
+        penalty's, lambda*sum_k max(1, q_k^2) (its constant term), floored
+        at MPO_CUTOFF_FLOOR. The sum is cut relative to each bond's weight,
+        which the penalty's constant sets: at 1e-14 a 30-site Wilson chain
+        in a sector lost its hoppings from the Wilson site 13 on (link
+        dimension 9 down to 4) while its bare MPO kept them all, so the
+        sector solve saw deep sites decoupled from the chain."""
+        cmax = max((abs(complex(c)) for c, _ in self._h_terms), default=0.0)
+        if not cmax > 0.0:
+            return _BUILD_CUTOFF
+        f = _bond_cutoff_factor(self._ampo(self._h_terms))
+        lam = self._penalty_strength if self._penalty_strength else cmax
+        scale = abs(lam)*sum(max(1.0, float(q)**2) for _, q in self.sector)
+        r = min(1.0, cmax/scale) if scale > 0.0 else 1.0
+        return min(_BUILD_CUTOFF, max(_BUILD_CUTOFF*f*r*r, MPO_CUTOFF_FLOOR))
 
     def _solve_H(self):
         if not self.sector:

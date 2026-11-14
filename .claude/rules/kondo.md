@@ -752,10 +752,17 @@ have the same MPO to the bit. What is left is H's own clean threshold,
 1e-12 of its largest coefficient (no hopping past the Wilson site 37 at
 Lambda = 4 on one spin). Do NOT look for a floor in maxm or the sweeps.
 `nrgmps.lost_wilson_bonds` reads the missing bonds off the MPO and
-`head_tail_poles` warns for a hand-over whose block holds one. A
-"python" head of 30 Wilson sites still fails `real_gauge` (1.9e-3) with
-every bond in the MPO, so that is the solve, not the MPO (open)
-(`tests/test_nrgmps.py`). Keeping
+`head_tail_poles` warns for a hand-over whose block holds one. On
+"python" the sum of H and the charge penalty of a sector solve was cut
+at 1e-14 of each bond's weight, which the penalty constant sets, and a
+30-site head lost its hoppings from the Wilson site 13 on there
+(`real_gauge` failed at 1.9e-3); `Chain._penalized_cutoff` lowers that
+cut by the per-bond factor of H and by (cmax/penalty constant)^2, floored
+at (1e-14)^2. Do NOT put the sum back at a cutoff relative to the
+penalty alone. The 30-site head now stops at `graded_basis` (a block
+charge off an integer by 3.3e-8, against 1e-8), the leak of dense
+storage at the rounding of the penalty (open) (`tests/test_nrgmps.py`).
+Keeping
 only the lowest states of the bare spin chain as the impurity is
 uncontrolled (42 times too narrow a resonance on 3 spins); `project=`
 exists for that test only. The exact route needs keep 800 up to 4 spins

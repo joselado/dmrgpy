@@ -1800,3 +1800,34 @@ about $3\times10^{-7}$ of the unit of H were out of the MPO, and the
 lowest block levels of a 30-site chain were off NRG by 0.36 to 1.8 of the
 shell energy past the Wilson site 21; they now agree to $8\times 10^{-4}$
 down to the site 25.
+
+## The 2026-11-14 sum of H and the charge penalty on `"python"`
+
+A `"python"` sector solve runs on H plus the charge penalty
+$\lambda\sum_k (Q_k-q_k)^2$, summed by `mps_sum` (`Chain._penalized`). That
+sum was cut at $10^{-14}$ of the weight of each bond, and the constant of the
+penalty sets that weight, so a bond of H far below it left the solve. On 20
+Wilson sites (one spin, $\Lambda=4$) $\langle H+P\rangle - \langle
+H\rangle - \langle P\rangle$ was $2.4\times10^{-4}$, and a chain of 30 Wilson
+sites lost its hoppings from the Wilson site 13 on, while the MPO of H alone
+kept them all. The cut is now lowered by the per-bond factor of H
+(`mpobuilder._bond_cutoff_factor`) and by $(c_{\max}/s)^2$, with $c_{\max}$ the
+largest coefficient of H and $s=\lambda\sum_k \max(1,q_k^2)$ the constant of
+the penalty, floored at $(10^{-14})^2$ (`Chain._penalized_cutoff`). On the 20
+Wilson sites the difference is now $5.6\times10^{-7}$, which is rounding, since
+a cutoff of 0 gives the same.
+
+Measured from the same seed on `"python"`: the Heisenberg chain of 20 sites
+at $S^z=0$, the t-V chain of 16 sites at $N_f=8$ and the Hubbard chain of 8
+sites at $N_f=8$, $S^z=0$ are unchanged to the last digit, with the same
+link dimension of the solve H. The NRG heads of 12 Wilson sites move: the
+ground-state energy by $2\times10^{-15}$ with one spin and by
+$1.8\times10^{-11}$ with three spins, where the old sum was off by
+$7\times10^{-10}$ and $9.5\times10^{-8}$ on the solved state. Their solve H
+has link dimension 10 and 11 instead of 8, and in one run each the solves
+took 17% and 28% longer. Longer Wilson heads move more: the 30-site head
+passes `nrgmps.real_gauge` now (it failed at $1.9\times10^{-3}$) and stops
+at `graded_basis`, with a block charge off an integer by
+$3.3\times10^{-8}$ against the tolerance $10^{-8}$
+(`tests/test_nrgmps.py::test_a_python_sector_solve_keeps_the_deep_wilson_hoppings`,
+which fails on the old cut).
