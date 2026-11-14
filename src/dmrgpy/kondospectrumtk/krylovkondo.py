@@ -179,49 +179,60 @@ def block_krylov(H, starts, psi, nkry):
     dimension at most 3*nkry, and the Ritz vectors as Q @ y, with Q the
     orthonormal Krylov basis (Q @ y is not formed: state_spectrum works in
     Krylov coordinates). Each new block H@B is projected twice on psi and
-    on every earlier block, and an SVD keeps its directions with a singular
-    value above DROP_TOL of its largest column norm; the space stops
-    growing when a block is empty (the space is exhausted) or would pass
-    3*nkry columns.
+    on the whole space so far (block Gram-Schmidt, two passes, one product
+    with Q per pass), and an SVD keeps its directions with a singular value
+    above DROP_TOL of its largest column norm; the space stops growing when
+    a block is empty (the space is exhausted) or would pass 3*nkry columns.
 
-    The products H@B of the loop are kept, so H@Q is not formed again.
-    residual is ||(H - theta_k) Q y_k||, read off the recurrence: H Q = Q
-    Hk + W E^T, W being the part of H@B outside the space for the last
-    block B, taken before the DROP_TOL cut, so the norm is that of W times
-    the rows of y_k on the last block. The directions DROP_TOL dropped
-    from earlier blocks are not in it (below DROP_TOL of the scale of
-    H)."""
-    blocks, hblocks = [], []
+    Hk = Q^H H Q is read off the same recurrence, so H@Q is never formed:
+    H B_j = psi a + Q c + U s Vh, with c the sum of the coefficients of the
+    two passes (column block j of Hk) and s Vh, on the directions kept, the
+    coupling of the next block to B_j. residual is ||(H - theta_k) Q y_k||
+    from the same relation, H Q = Q Hk + W E^T, with W = U s Vh the part of
+    H@B outside the space for the last block B, taken before the DROP_TOL
+    cut: the norm of s Vh times the rows of y_k on the last block. The
+    directions DROP_TOL dropped from earlier blocks are not in it (below
+    DROP_TOL of the scale of H)."""
+    dim, cap = len(psi), 3*nkry
+    dtype = np.result_type(H.dtype, starts.dtype, psi.dtype)
+    size = min(cap, dim) # the space never holds more than dim columns
+    Q = np.empty((dim, size), dtype=dtype, order="F")
+    Hk = np.zeros((size, size), dtype=dtype)
 
-    def orth(V):
-        """V projected on the complement of psi and of the space, the
-        directions kept, and the factor s Vh of its SVD before the cut."""
+    def orth(V, n):
+        """V projected on the complement of psi and of Q[:, :n]: the
+        directions kept, their mask, the coefficients on Q[:, :n] and the
+        factor s Vh of the SVD before the cut."""
+        c = np.zeros((n, V.shape[1]), dtype=dtype)
         scale = float(np.max(np.linalg.norm(V, axis=0))) if V.size else 0.
         if scale == 0.:
-            return V[:, :0], np.zeros((0, V.shape[1]))
+            return V[:, :0], np.zeros(0, dtype=bool), c, np.zeros((0, V.shape[1]))
+        Qn = Q[:, :n]
         for _ in range(2):
             V = V - np.outer(psi, psi.conj() @ V)
-            for Q in blocks:
-                V = V - Q @ (Q.conj().T @ V)
+            d = Qn.conj().T @ V
+            V = V - Qn @ d
+            c += d
         U, s, Vh = np.linalg.svd(V, full_matrices=False)
-        return U[:, s > DROP_TOL*scale], s[:, None]*Vh
+        keep = s > DROP_TOL*scale
+        return U[:, keep], keep, c, s[:, None]*Vh
 
-    B, W = orth(starts)
-    n = 0
-    while B.shape[1] > 0 and n + B.shape[1] <= 3*nkry:
-        blocks.append(B)
-        n += B.shape[1]
-        HB = H @ B
-        hblocks.append(HB)
-        B, W = orth(HB)
-    if not blocks:
-        return (np.zeros(0), np.zeros((0, 0)),
-                np.zeros((len(psi), 0), dtype=psi.dtype), np.zeros(0))
-    Q = np.concatenate(blocks, axis=1)
-    Hk = Q.conj().T @ np.concatenate(hblocks, axis=1)
+    B, keep, _, W = orth(starts, 0)
+    n = k = 0
+    while B.shape[1] > 0 and n + B.shape[1] <= size:
+        if n: # coupling of the new block to the previous one
+            Hk[n:n+B.shape[1], n-k:n] = W[keep]
+        k = B.shape[1]
+        Q[:, n:n+k] = B
+        n += k
+        B, keep, c, W = orth(H @ B, n)
+        Hk[:n, n-k:n] = c
+    if n == 0:
+        return (np.zeros(0), np.zeros((0, 0)), Q[:, :0], np.zeros(0))
+    Hk = Hk[:n, :n]
     theta, y = np.linalg.eigh((Hk + Hk.conj().T)/2.)
-    residual = np.linalg.norm(W @ y[n - blocks[-1].shape[1]:], axis=0)
-    return theta, y, Q, residual
+    residual = np.linalg.norm(W @ y[n-k:], axis=0)
+    return theta, y, Q[:, :n], residual
 
 
 def _project(M, psi, Q, y):
