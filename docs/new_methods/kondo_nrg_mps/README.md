@@ -410,6 +410,37 @@ spins, so the resonance is checked against the exact route only up to 7
 spins, and beyond it by convergence in the hand-over basis. Each run of
 the head took 3 to 6 min on one core.
 
+Three more questions were run on Triton the same day (2026-11-14, tail
+alone, one mesh, b = 0.8, the hand-over basis joined where the head has
+a moment). On 7 spins with the metal under the end spin, the 1.6% below
+1e-5 is not the keep of the tail: from one head (m = 6, maxm 512, 764
+states at the hand-over, twice the 422 of the plain basis) the tail at
+keep 1600, 3200 and 6400 is +1.56%, +1.58% and +1.58% of the peak at
+most there, and the plain basis gave +1.56% too, while the exact route
+moves by 0.08% between keep 3200 and 6400. The length of the chain is
+not it either: the exact route on 44 Wilson sites and the exact route
+stopped at its fixed point (38 shells, as the tail stops) differ by
+0.2% of the peak below 1e-5 at keep 1600 (where both are still 14 to 17%
+off keep 6400, so this is only indicative). The difference changes sign
+inside that range (-0.8% to +1.6%), as a small shift of the lines of one
+mesh would; a twist average would test that, and it is open.
+Between keep 1600 and 6400 the tail itself changes by 0.11% of the peak
+at most. Under spin 3 keep 3200 changes it by 0.11% below 1e-3 against
+1600; its keep 6400 ran out of 40 GB. On 9 spins the hand-over at the
+Wilson site 6, 7 or 8 (512, 868 and 376 states; the heads of 13 and 15
+Wilson sites have an even number of electrons) gives the same A below
+1e-3 to 0.03% of the peak, and keep 3200 against 1600 changes it by
+0.23% (end spin) and 0.03% (middle spin); a new solve of last night's
+head gives last night's curve to 1e-4. On 11 spins, the first chain past
+10, the metal under the end spin gives a Kondo resonance (A at 0.998 of
+its peak of 4.20 at 1e-9, 0.84 at 1e-5, 0.40 at 1e-4) and under spin 5
+none (A at 0.04 of its peak of 0.33 at 1e-9), as on 7 spins with the
+metal under spin 3. Between the two largest hand-over bases (936 states
+under the end spin, 780 under spin 5, maxm 512 and 768) A changes by
+0.01% of the peak below 1e-3, and the bases of m = 4 and 5 (418 to 452
+states) are within 0.02% below 1e-3 and 0.8% above. Each group of runs
+took 7 to 12 min on one core (20 min with the keep 6400 tail).
+
 ## 7. Checks
 
 - Untruncated, the poles are those of a dense diagonalization of the same
