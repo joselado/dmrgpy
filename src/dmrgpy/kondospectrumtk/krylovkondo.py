@@ -103,6 +103,14 @@ def _as_real(M):
     return np.real(M)
 
 
+def _same(A, B):
+    """Whether two matrices are equal entry by entry (sparse or dense)."""
+    if sp.issparse(A) or sp.issparse(B):
+        D = sp.csr_matrix(A) - sp.csr_matrix(B)
+        return D.nnz == 0 or not np.any(D.data)
+    return bool(np.array_equal(np.asarray(A), np.asarray(B)))
+
+
 def onenorm(H):
     """The 1-norm of H (largest column sum of |H|), a bound of its
     spectral radius, so 2*onenorm(H) bounds the width of the spectrum."""
@@ -166,59 +174,95 @@ def initial_states(H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
 
 
 def block_krylov(H, starts, psi, nkry):
-    """(theta, F, residual): the Ritz values and vectors of H in the block
-    Krylov space started from the columns of starts, orthogonal to psi, of
-    dimension at most 3*nkry. Each new block H@B is projected twice on psi
-    and on every earlier block, and an SVD keeps its directions with a
-    singular value above DROP_TOL of its largest column norm; the space
-    stops growing when a block is empty (the space is exhausted) or would
-    pass 3*nkry columns."""
-    blocks = []
+    """(theta, y, Q, residual): the Ritz values of H in the block Krylov
+    space started from the columns of starts, orthogonal to psi, of
+    dimension at most 3*nkry, and the Ritz vectors as Q @ y, with Q the
+    orthonormal Krylov basis (Q @ y is not formed: state_spectrum works in
+    Krylov coordinates). Each new block H@B is projected twice on psi and
+    on every earlier block, and an SVD keeps its directions with a singular
+    value above DROP_TOL of its largest column norm; the space stops
+    growing when a block is empty (the space is exhausted) or would pass
+    3*nkry columns.
+
+    The products H@B of the loop are kept, so H@Q is not formed again.
+    residual is ||(H - theta_k) Q y_k||, read off the recurrence: H Q = Q
+    Hk + W E^T, W being the part of H@B outside the space for the last
+    block B, taken before the DROP_TOL cut, so the norm is that of W times
+    the rows of y_k on the last block. The directions DROP_TOL dropped
+    from earlier blocks are not in it (below DROP_TOL of the scale of
+    H)."""
+    blocks, hblocks = [], []
 
     def orth(V):
+        """V projected on the complement of psi and of the space, the
+        directions kept, and the factor s Vh of its SVD before the cut."""
         scale = float(np.max(np.linalg.norm(V, axis=0))) if V.size else 0.
         if scale == 0.:
-            return V[:, :0]
+            return V[:, :0], np.zeros((0, V.shape[1]))
         for _ in range(2):
             V = V - np.outer(psi, psi.conj() @ V)
             for Q in blocks:
                 V = V - Q @ (Q.conj().T @ V)
-        U, s, _ = np.linalg.svd(V, full_matrices=False)
-        return U[:, s > DROP_TOL*scale]
+        U, s, Vh = np.linalg.svd(V, full_matrices=False)
+        return U[:, s > DROP_TOL*scale], s[:, None]*Vh
 
-    B = orth(starts)
+    B, W = orth(starts)
     n = 0
     while B.shape[1] > 0 and n + B.shape[1] <= 3*nkry:
         blocks.append(B)
         n += B.shape[1]
-        B = orth(H @ B)
+        HB = H @ B
+        hblocks.append(HB)
+        B, W = orth(HB)
     if not blocks:
-        return np.zeros(0), np.zeros((len(psi), 0), dtype=psi.dtype), np.zeros(0)
+        return (np.zeros(0), np.zeros((0, 0)),
+                np.zeros((len(psi), 0), dtype=psi.dtype), np.zeros(0))
     Q = np.concatenate(blocks, axis=1)
-    HQ = H @ Q
-    Hk = Q.conj().T @ HQ
+    Hk = Q.conj().T @ np.concatenate(hblocks, axis=1)
     theta, y = np.linalg.eigh((Hk + Hk.conj().T)/2.)
-    F = Q @ y
-    residual = np.linalg.norm(HQ @ y - F*theta[None, :], axis=0)
-    return theta, F, residual
+    residual = np.linalg.norm(W @ y[n - blocks[-1].shape[1]:], axis=0)
+    return theta, y, Q, residual
 
 
-def _total_spin(chain, edobj):
-    """The sparse matrices of the total spin sum_j S^a_j, a = x, y, z."""
-    out = []
-    for name in ("Sx", "Sy", "Sz"):
-        ops = getattr(chain, name)
-        tot = ops[0]
-        for j in range(1, len(ops)):
-            tot = tot + ops[j]
-        M = edobj.get_operator(tot)
-        out.append(sp.csr_matrix(M) if not sp.issparse(M) else M.tocsr())
+def _project(M, psi, Q, y):
+    """<a|M|b> on the basis [psi, Q y_1, Q y_2, ...], from M Q in Krylov
+    coordinates: one product of the size of Q^H M Q and two small
+    rotations by y, instead of forming Q y."""
+    Mpsi = M @ psi
+    if Q.shape[1] == 0: # the spin annihilates psi
+        return np.array([[psi.conj() @ Mpsi]])
+    MQ = M @ Q
+    QH = Q.conj().T
+    yH = y.conj().T
+    n = y.shape[1]
+    dtype = np.result_type(MQ.dtype, Mpsi.dtype, y.dtype)
+    out = np.empty((n + 1, n + 1), dtype=dtype)
+    out[0, 0] = psi.conj() @ Mpsi
+    out[0, 1:] = (psi.conj() @ MQ) @ y
+    out[1:, 0] = yH @ (QH @ Mpsi)
+    out[1:, 1:] = yH @ (QH @ MQ) @ y
     return out
+
+
+def _total_spin(chain, edobj, name):
+    """The sparse matrix of the total spin sum_j S^a_j, name "Sx", "Sy"
+    or "Sz"."""
+    ops = getattr(chain, name)
+    tot = ops[0]
+    for j in range(1, len(ops)):
+        tot = tot + ops[j]
+    M = edobj.get_operator(tot)
+    return sp.csr_matrix(M) if not sp.issparse(M) else M.tocsr()
 
 
 # The commutator [H, S^a_tot] counts as zero below this fraction of
 # onenorm(H)*onenorm(S^a_tot), on a random state.
 SU2_TOL = 1e-10
+
+
+class SU2Error(ValueError):
+    """A check of the SU(2) reduction failed: su2=True raises it, and
+    su2=None takes the full sum instead."""
 
 
 def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
@@ -229,31 +273,36 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
     chain with no Nf sector), with the weight (2S+1) exp(-(E-E0)/kT), normalized. With an
     unpolarized tip each term of dI/dV is the expectation value of a
     rotation-invariant operator, the same for every member of a multiplet,
-    so this is the sum over all of them. Raises ValueError unless H
-    commutes with the total spin (checked on a random state) and S^z_tot is
-    diagonal in the ED basis. Inside a degenerate level the states are
-    rotated to a definite S with S^2_tot, and the call raises when 2S is
-    not an integer there."""
+    so this is the sum over all of them. A multiplet is kept when its
+    members pass the cut of initial_states, exp(-(E-E0)/kT) > p_cut, so the
+    states are those of the full sum. Raises SU2Error (a ValueError)
+    unless H commutes with the total spin (checked on a random state, one
+    component at a time, so a field along x stops the check at the first)
+    and S^z_tot is diagonal in the ED basis. Inside a degenerate level the
+    states are rotated to a definite S with S^2_tot, and the call raises
+    SU2Error when 2S is not an integer there."""
     edobj = chain.get_ED_obj()
-    Stot = _total_spin(chain, edobj)
     dim = H.shape[0]
     rng = np.random.default_rng(1)
     v = rng.standard_normal(dim) + 1j*rng.standard_normal(dim)
     v /= np.linalg.norm(v)
     nH = onenorm(H)
-    for a, M in zip("xyz", Stot):
+    Stot = []
+    for a in "xyz":
+        M = _total_spin(chain, edobj, "S" + a)
         c = np.linalg.norm(H @ (M @ v) - M @ (H @ v))
         if c > SU2_TOL*nH*max(onenorm(M), 1e-300):
-            raise ValueError(
+            raise SU2Error(
                 "get_kondo_spectrum(submode=\"KRYLOV\", su2=True): H does not "
                 "commute with the total spin (|[H, S%s_tot] v| = %.2g on a "
                 "random state), so the members of a multiplet are not "
                 "equivalent. Use su2=False." % (a, c))
+        Stot.append(M)
     Sz = Stot[2]
     offdiag = Sz - sp.diags(Sz.diagonal())
     if offdiag.nnz and np.max(np.abs(offdiag.data)) > 1e-12:
-        raise ValueError("get_kondo_spectrum(submode=\"KRYLOV\", su2=True): "
-                         "S^z_tot is not diagonal in the ED basis of this chain")
+        raise SU2Error("get_kondo_spectrum(submode=\"KRYLOV\", su2=True): "
+                       "S^z_tot is not diagonal in the ED basis of this chain")
     m = np.real(Sz.diagonal())
     # an integer S has one member at m=0 and a half-integer S one at
     # m=+1/2; a chain of spinful fermions with no Nf sector holds both
@@ -263,12 +312,13 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
     Hs = H[idx][:, idx]
     S2 = (Stot[0] @ Stot[0] + Stot[1] @ Stot[1] + Stot[2] @ Stot[2]).tocsr()[idx][:, idx]
     tol = degeneracy_tol*2.*nH
-    # the (2S+1) of a multiplet is at most 2 max|m| + 1, so the cut on
-    # exp(-x/kT) is lowered by that much to keep every state above p_cut
-    pc = p_cut/(2.*np.max(np.abs(m)) + 1.)
-    E, V = low_states(Hs, kT, pc, tol)
+    # the cut of the full sum (initial_states) on each state, exp(-x/kT) >
+    # p_cut, whatever the 2S+1 of its multiplet: so a multiplet is kept
+    # exactly when its members are (a cut on (2S+1) exp(-x/kT) kept two
+    # more multiplets on a 12-spin chain, 2.4e-8 of the peak)
+    E, V = low_states(Hs, kT, p_cut, tol)
     x = E - E[0]
-    keep = np.exp(-x/kT) > pc if kT > 0. else x <= tol
+    keep = np.exp(-x/kT) > p_cut if kT > 0. else x <= tol
     E, V, x = E[keep], V[:, keep], x[keep]
     spins = np.empty(len(E))
     a = 0
@@ -283,7 +333,7 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
         s2, U = np.linalg.eigh(B)
         S = (-1. + np.sqrt(1. + 4.*np.clip(np.real(s2), 0., None)))/2.
         if np.any(np.abs(2*S - np.round(2*S)) > 1e-6):
-            raise ValueError(
+            raise SU2Error(
                 "get_kondo_spectrum(submode=\"KRYLOV\", su2=True): a level "
                 "at %.6g has S^2_tot eigenvalues %s, not of a definite spin"
                 % (E[a], np.array2string(np.real(s2), precision=6)))
@@ -291,10 +341,9 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
         spins[a:b] = np.round(2*S)/2.
         a = b
     w = (2*spins + 1.)*(np.exp(-x/kT) if kT > 0. else 1.)
-    keep = w > p_cut*np.max(w)
-    full = np.zeros((dim, int(np.sum(keep))), dtype=V.dtype)
-    full[idx] = V[:, keep]
-    return E[keep], full, w[keep]/np.sum(w[keep]), spins[keep]
+    full = np.zeros((dim, len(E)), dtype=V.dtype)
+    full[idx] = V
+    return E, full, w/np.sum(w), spins
 
 
 class KrylovKondoSpectrum():
@@ -305,17 +354,23 @@ class KrylovKondoSpectrum():
 
     chain, site, T, kB: as edkondo.KondoSpectrum. nkry: the block Krylov
     space of each initial state has at most 3*nkry states. p_cut: relative
-    Boltzmann weight below which an initial state is dropped. su2: take one
-    member per spin multiplet (see SU2 below); H must then commute with the
-    total spin, which is checked."""
+    Boltzmann weight below which an initial state is dropped. su2: True
+    takes one member per spin multiplet (see su2_initial_states), and H must
+    then commute with the total spin, which is checked (SU2Error); False
+    takes every state; None, the default, takes the reduction when its
+    checks pass and every state otherwise. self.su2 says which was taken."""
     def __init__(self, chain, site, T, kB=8.617333262e-5, nkry=100, p_cut=P_CUT,
-                 su2=False, degeneracy_tol=1e-9):
+                 su2=None, degeneracy_tol=1e-9):
         if T < 0.:
             raise ValueError("T must be >= 0, got %r" % (T,))
         if isinstance(nkry, bool) or not isinstance(nkry, (int, np.integer)) or nkry < 1:
             raise ValueError("nkry must be a positive integer, got %r" % (nkry,))
         if not 0. < p_cut < 1.:
             raise ValueError("p_cut must be between 0 and 1, got %r" % (p_cut,))
+        if su2 is not None:
+            if not isinstance(su2, (bool, np.bool_)):
+                raise ValueError("su2 must be None, True or False, got %r" % (su2,))
+            su2 = bool(su2)
         self.chain, self.site, self.T, self.kB = chain, site, float(T), kB
         self.nkry = int(nkry)
         self.degeneracy_tol = degeneracy_tol
@@ -334,6 +389,9 @@ class KrylovKondoSpectrum():
         if self.real:
             H, Sp, Sm, Sz = (_as_real(M) for M in (H, Sp, Sm, S[2]))
             self._ladder = (Sp, Sm, Sz)
+            # S- = (S+)^T exactly for Hermitian spin matrices, and then the
+            # matrix of S- is the transpose of that of S+
+            self._minus_is_transpose = _same(Sm, Sp.T)
         else:
             H = H.astype(complex)
             self._ladder = None
@@ -341,9 +399,19 @@ class KrylovKondoSpectrum():
         self.H = H
         kT = kB*self.T
         self.tol_degenerate = degeneracy_tol*2.*onenorm(H)
-        if su2:
-            self.E, self.V, self.weights, self.spins = su2_initial_states(
-                chain, H, kT, p_cut, degeneracy_tol)
+        reduced = None
+        if su2 is not False:
+            # su2=None: the reduction when its checks pass, and the full sum
+            # otherwise; only a failed check (SU2Error) falls back, an error
+            # of the eigensolver is raised either way
+            try:
+                reduced = su2_initial_states(chain, H, kT, p_cut, degeneracy_tol)
+            except SU2Error:
+                if su2:
+                    raise
+        self.su2 = reduced is not None # whether the reduction is taken
+        if reduced is not None:
+            self.E, self.V, self.weights, self.spins = reduced
         else:
             self.E, self.V, self.weights = initial_states(H, kT, p_cut, degeneracy_tol)
             self.spins = None
@@ -360,13 +428,17 @@ class KrylovKondoSpectrum():
             starts = np.stack([Sp @ psi, Sm @ psi, Sz @ psi], axis=1)
         else:
             starts = np.stack([M @ psi for M in self._S], axis=1)
-        theta, F, residual = block_krylov(self.H, starts, psi, self.nkry)
-        basis = np.concatenate([psi[:, None], F], axis=1)
+        theta, y, Q, residual = block_krylov(self.H, starts, psi, self.nkry)
         if self.real:
-            Ap, Am, Az = (basis.T @ (M @ basis) for M in self._ladder)
+            # S- is the transpose of S+ in a real basis, so its matrix is
+            # the transpose of that of S+ and is not built
+            Sp, Sm, Sz = self._ladder
+            Ap = _project(Sp, psi, Q, y)
+            Az = _project(Sz, psi, Q, y)
+            Am = Ap.T if self._minus_is_transpose else _project(Sm, psi, Q, y)
             mats = ((Ap + Am)/2., (Ap - Am)/2j, Az.astype(complex))
         else:
-            mats = tuple(basis.conj().T @ (M @ basis) for M in self._S)
+            mats = tuple(_project(M, psi, Q, y) for M in self._S)
         e = np.concatenate([[0.], theta - Ei])
         # a state degenerate with i comes out at +-1e-16, and Theta0 would
         # read the zero-bias point on one side at random: snapped to 0

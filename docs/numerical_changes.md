@@ -1659,6 +1659,34 @@ the curve moves by about 0.1% of the peak. A head with 2Sz = 0, and every
 call in a field, is unchanged. The route is from 2026-11-13, so only
 results of the last day are affected.
 
+## The 2026-11-14 weight cut of the SU(2) reduction of the Krylov route
+
+`get_kondo_spectrum(mode="ED", submode="KRYLOV", su2=True)` keeps a spin
+multiplet when $e^{-(E-E_0)/kT} > $ `p_cut`, the cut of the full sum on
+each of its members, whatever its $2S+1$. Before, it kept a multiplet
+when $(2S+1)e^{-(E-E_0)/kT}$ was above `p_cut` times the largest weight,
+so it also took the multiplets of larger spin just below the cut of the
+full sum. Now `su2=True` and `su2=False` take the same states, and
+`su2=True` results move by about `p_cut`. On the zero-field 12-spin chain
+of `docs/kondo_speedup_plan.md` at 1 K, where an $S=2$ and an $S=1$
+multiplet at 18.5 kT are now dropped, the curve moves by
+$2.4\times 10^{-8}$ of the peak, and it agrees with `su2=False` to
+$2.5\times 10^{-12}$, the size of the Krylov error at `nkry=100`. On 7
+spins at 1.5 K and the default `p_cut`, where no level lies between the
+two cuts, nothing moves above roundoff; at `p_cut=1e-14` the old cut kept
+34 multiplets and the new one 32, and the curve against `su2=False` went
+from $3.5\times 10^{-14}$ to $2.5\times 10^{-15}$ of the peak. At $T=0$
+nothing changes.
+
+On the same day `su2=None` became the default of the route. A call
+without `su2` now takes the reduction when $H$ commutes with the total
+spin, and the full sum otherwise; `su2=False` gives the old default. On
+a chain with that symmetry a default call moves by the difference
+between the Krylov spaces of the two routes: $2.5\times 10^{-12}$ of the
+peak on the zero-field 12-spin chain at 1 K (`nkry=100`), and
+$2.5\times 10^{-15}$ or less on 7 spins at 1.5 K and on a 3-site Hubbard
+chain with no Nf sector. With a field nothing moves.
+
 ## The 2026-11-14 speedups of the TASK Kondo route
 
 Items 6, 8 and 9 of `docs/kondo_speedup_plan.md` move no converged

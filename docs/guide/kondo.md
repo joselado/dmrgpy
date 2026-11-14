@@ -279,9 +279,10 @@ dropped. On this chain the two differ by about $10^{-8}$ of the peak at 1 K.
 - `p_cut`: occupied states whose Boltzmann weight is below `p_cut` times
   that of the ground state are dropped (default $10^{-8}$), and $dI/dV$
   changes by about that much.
-- `su2`: for a Hamiltonian that conserves the total spin, `True` takes one
+- `su2`: when $H$ conserves the total spin, the default (`None`) takes one
   member of each spin multiplet with the weight $2S+1$, which needs fewer
-  occupied states. It raises when $H$ does not conserve the total spin.
+  occupied states, and otherwise every state. `True` raises when $H$ does
+  not conserve the total spin, and `False` always takes every state.
 
 The route is third order. `order="LL"` needs every eigenstate and raises
 with `submode="KRYLOV"`. See `examples/kondo/kondo_krylov_thermal_VS_ED`.

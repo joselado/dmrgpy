@@ -419,9 +419,11 @@ orthogonal to |i>, so [i] + Ritz states is orthonormal, and a
 U=0 only). Ritz energies within the degeneracy tolerance of E_i are
 snapped to it, as on TASK. Exact once each space is exhausted: 1e-15 to
 1e-12 against ED on every model of `tests/test_kondo_krylov.py`.
-`su2=True` takes one member per multiplet with weight 2S+1, the one at
-Sz_tot=0 for an integer S and at Sz_tot=+1/2 for a half-integer S,
-checks [H, S_tot]=0 on a random state and raises otherwise. Do NOT go
+The SU(2) reduction (`su2=None`, the default, or `su2=True`) takes one
+member per multiplet with weight 2S+1, the one at
+Sz_tot=0 for an integer S and at Sz_tot=+1/2 for a half-integer S, and
+checks [H, S_tot]=0 on a random state; `su2=True` raises when it fails,
+`su2=None` takes the full sum. Do NOT go
 back to the sector of the smallest |Sz_tot|: a spinful fermion chain with
 no Nf sector holds both kinds of S, and that sector dropped every
 half-integer multiplet, 0.338 of the peak off ED on a 3-site Hubbard
@@ -429,6 +431,50 @@ chain (2026-11-13 re-read, `tests/test_audit_2026_11_13_reread.py`). mode="ED" a
 keyword, TypeError), and order="LL" with it raises. Full ED refuses
 above 2000 states (`algebra.maxsize`), so above 10 spins 1/2 this is the
 only ED route. README: `docs/new_methods/kondo_krylov_thermal/`.
+
+**The 2026-11-14 work on the Krylov route** (`docs/kondo_speedup_plan.md`
+items 11 and 12 and the `su2` choice; `tests/test_kondo_speedups_krylov.py`
+keeps the old `state_spectrum` and compares on a TRUNCATED space, since an
+exhausted one cannot see a change of the basis). `state_spectrum` builds
+nothing of the size of the Hilbert space twice: Q^H H Q from the products
+H B of the loop, the residual from the recurrence (W, the part of H B
+outside the space for the last block, taken BEFORE the DROP_TOL cut, or a
+deflated direction reports zero), the matrices in Krylov coordinates, and
+S- as the transpose of S+ when that is exact (`_minus_is_transpose`). The
+basis is the same to the last bit; dI/dV moved by 6e-16 of the peak, and
+`state_spectrum` went from 0.67 to 0.60 s per state on 12 spins. Four
+rules. (1) The reorthogonalization against each earlier block stays as it
+is: one block Gram-Schmidt over the whole space was 1.7x faster on 12
+spins but changes the basis at roundoff and moved dI/dV by 3e-13 of the
+peak, above the 1e-13 asked (branch `krylov-block-gram-schmidt`, for the
+author to pick); an unexhausted space is that sensitive (the
+old code with its three start vectors in another order moves by 2.5e-14
+on 10 spins and 6.7e-12 on 12). (2) Compare two versions with eigsh
+seeded (a `v0`): SciPy 1.18's eigsh draws its start vector from fresh
+entropy, and two runs of the same code on 12 spins differ by 9e-12 of the
+peak. (3) The Krylov spectra of a real H already have the real form of
+`_spin_triplet` (since 84090c0, pinned by a test); what costs is the two
+exchange F tables, 90% of the third-order term of one state, with n_f
+about the whole basis here (plan item 2 would halve them on this route; not
+done). (4) `su2=None` is the default since 2026-11-14 (the decider's
+pick): the reduction when the checks pass, the full sum when one fails
+with `SU2Error`, the only error it falls back on, so an error of the
+eigensolver still raises. It rests on the weight cut of the full sum,
+exp(-x) > p_cut on every multiplet whatever its 2S+1 (`ded5439`); do NOT
+go back to the cut on (2S+1) exp(-x) relative to the largest weight: it
+kept two multiplets at 18.5 kT on the zero-field 12-spin chain at 1 K and
+moved dI/dV by 2.4e-8 of the peak, against 3e-12 between nkry=100 and
+200 (the old cut passed on 7 spins at the default p_cut only because no
+level lies between the two cuts there). With it auto and off agree to 2.5e-12 on that chain
+(19 s against 66 s) and to 3e-15 on 7 spins and on the 3-site Hubbard
+chain with no Nf sector. A test that reads the full sum on an SU(2)
+chain passes `su2=False`, and the Krylov tests keep their own copy of
+that Hubbard chain, since importing `test_audit_2026_11_13_reread.py`
+starts juliacall. The residual stop of item 12 is on the branch
+`krylov-residual-stop`, not here: it fired only above the default nkry on
+the chains of the plan and cost 8% of `state_spectrum` there; what would
+reopen it is a measurement at 12 spins or more with nkry 200 to 400,
+where the Krylov space does not exhaust the Hilbert space.
 
 **Leading-log resummation (2026-11-06)**, `kondospectrumtk/leadinglog.py`,
 is a new method documented in `docs/new_methods/kondo_leading_log/README.md`

@@ -144,10 +144,11 @@ class KondoSpectrumMixin():
               S_x|i>, S_y|i>, S_z|i> of the tip site, of at most 3*nkry
               states (nkry, default 100). The sums are those of
               mode="ED", and they are exact once each Krylov space is
-              exhausted. su2=True (default False) takes one member per
-              spin multiplet with the weight 2S+1, for a Hamiltonian
-              that commutes with the total spin (checked, and it raises
-              otherwise). order="LL" needs the full eigenbasis and
+              exhausted. su2=None (the default) takes one member per
+              spin multiplet with the weight 2S+1 when the Hamiltonian
+              commutes with the total spin (checked) and every state
+              otherwise; su2=True raises instead when it does not
+              commute, and su2=False takes every state. order="LL" needs the full eigenbasis and
               raises there. See
               docs/new_methods/kondo_krylov_thermal/README.md.
               "DMRG" instead uses this chain's own itensor_version
@@ -361,13 +362,13 @@ class KondoSpectrumMixin():
                                                   T=T, kB=kB, **kwargs)
     def _get_kondo_spectrum_krylov(self, eV, site, Jrho_s, U, T, T0, omega0,
                                     Gamma0, order, kB, nkry=100, p_cut=None,
-                                    su2=False):
+                                    su2=None):
         from . import krylovkondo
         if not T >= 0.:
             raise ValueError("T must be >= 0, got %r" % (T,))
         p_cut = krylovkondo.P_CUT if p_cut is None else p_cut
         kks = krylovkondo.KrylovKondoSpectrum(self, site, T, kB=kB, nkry=nkry,
-                                              p_cut=p_cut, su2=bool(su2))
+                                              p_cut=p_cut, su2=su2)
         return eV, krylovkondo.krylov_kondo_dIdV(kks, eV, Jrho_s, U=U, T0=T0,
                                                  omega0=omega0, Gamma0=Gamma0,
                                                  order=order)

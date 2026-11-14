@@ -100,9 +100,10 @@ def ngs_scan(sc):
     return np.concatenate(out)
 
 
-def krylov_chain(n=12):
+def krylov_chain(n=12, field=True):
     """Section 6 of the Krylov README: J = 1 meV (1 + 0.3 cos i), a 120
-    degree field of 0.2 meV in the xz plane."""
+    degree field of 0.2 meV in the xz plane; field=False is the same chain
+    at zero field, where H commutes with the total spin (the su2 case)."""
     sc = spinchain.Spin_Chain(["S=1/2"]*n)
     h = 0
     for i in range(n - 1):
@@ -110,7 +111,8 @@ def krylov_chain(n=12):
         h = h + J*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
     a = 2.*np.pi/3.
     for i in range(n):
-        h = h + 0.2e-3*(np.cos(a)*sc.Sz[i] + np.sin(a)*sc.Sx[i])
+        if field:
+            h = h + 0.2e-3*(np.cos(a)*sc.Sz[i] + np.sin(a)*sc.Sx[i])
     sc.set_hamiltonian(h)
     return sc
 
@@ -172,3 +174,8 @@ CASES["ll_n9_T0"] = _case("order=LL on the CPU, 9 spins, T=0, 61 biases; items 1
                           lambda: ll_chain(9), ll_call(0.), LL_WATCH, 2)
 CASES["ll_n8_T2K"] = _case("order=LL on the CPU, 8 spins, T=2 K, 61 biases, mem_gb=12; items 13 14",
                            lambda: ll_chain(8), ll_call(2., mem_gb=12.), LL_WATCH, 1)
+# appended last, so the numbers of the cases above do not change
+CASES["krylov_n12_T1K_B0"] = _case("submode=KRYLOV, 12 spins at zero field, T=1 K, 61 biases; "
+                                   "items 11 12 and the su2 default",
+                                   lambda: krylov_chain(field=False), krylov_call,
+                                   KRYLOV_WATCH, 2)
