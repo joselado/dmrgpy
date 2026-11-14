@@ -50,7 +50,8 @@ on 5 spins with a 120 degree field in the xz plane the separate spaces are
 5e-11.
 
 The fix is one block Krylov space started from the three vectors together.
-Each new block H B is projected twice on every earlier block, and an SVD
+Each new block H B is projected twice on the whole space so far (block
+Gram-Schmidt, one product with the basis per pass), and an SVD
 keeps its directions with a singular value above `DROP_TOL` (1e-9) of its
 largest column norm. The space stops when a block is empty, which means
 the space is exhausted, or when it would pass 3 `nkry` states. Then one
@@ -58,14 +59,33 @@ Rayleigh-Ritz step in the whole space gives the Ritz states. With a field
 in the xz plane H is real, the start vectors S+|i>, S-|i>, Sz|i> are real,
 and everything stays real.
 
-Nothing of the size of the Hilbert space is built twice. The products H B
-of the loop give Q^T H Q, the residual of each Ritz state comes from the
+Nothing of the size of the Hilbert space is built twice. The coefficients
+of the projections give Q^T H Q, the residual of each Ritz state comes from the
 same recurrence (the part of H B outside the space for the last block),
 and the spin matrices are taken in Krylov coordinates, Q^T S Q rotated by
 the Ritz vectors of the small problem, so the Ritz vectors are never formed
 in the Hilbert space. In a real basis the matrix of S- is the transpose of
 that of S+. The matrices then come out with Sx and Sz real and Sy i times
 a real matrix, so the sums of `conductance.py` run in real arithmetic.
+
+The space of a state can also stop before 3 `nkry` states, but only when
+it is asked for (`tol`, None by default). A final state f enters the sums
+only while its step is open, e_f - e_i below max|eV| (plus 40 kT at T>0),
+and the stop asks that every Ritz state in that window be converged: its
+residual ||(H - theta) f|| below `tol` times onenorm(H). The check is a
+diagonalization of the small matrix, which is complete after each block,
+so it costs no product in the Hilbert space; it is made after 10 blocks
+and then each time the space has grown by a factor 1.25, or by 2 while
+fewer than half of the states of the window are converged. When the stop
+fires the result is the one of a fixed space of that size. It fires only
+where the window is narrow against the spectrum the space reaches. On 8
+spins in a field with `nkry=60` and `tol=1e-8` it stopped at 121 of 181
+states at 0.1 K and |eV| < 0.5 meV and at 31 at T=0 and 0.3 mV, and dI/dV
+moved by 4e-12 and 1e-11 of the peak; at 1 K and 4 mV it never stopped.
+On 10 spins at 0.2 K and |eV| < 1 mV it came at 373 of 1024 states (measured before the
+block Gram-Schmidt), above
+the 300 of the default `nkry`, so it is a way to make a large `nkry`
+cheap where it is not needed, not a gain at the default.
 
 ## 3. How the sums are assembled
 
@@ -168,7 +188,8 @@ xz plane, T=1 K, `nkry=100` and the default `p_cut`:
   (`algebra.maxsize` = 2000); with the limit raised it had not finished
   after 43 minutes on one core, and it was stopped, so at this size the
   agreement with ED is not measured here. Since 2026-11-14 a Krylov space
-  takes 0.60 s per initial state (0.67 s before), and 90% of the
+  takes 0.60 s per initial state (0.67 s before), and 0.39 s with the
+  block Gram-Schmidt, and 90% of the
   third-order term of one state is the two tables of the exchange log F,
   one per tunneling direction, each over all the final and intermediate
   states of the space.

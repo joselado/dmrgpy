@@ -1737,3 +1737,17 @@ bit. A new $H$, other solver settings (`maxm`, `nsweeps`, `cutoff`,
 `noise`, `excited_gram_schmidt`), a new solve of the ground state,
 `restart()`, a backend switch and a copy of the chain all solve the
 manifold again. The other submodes still solve it at every call.
+
+## The 2026-11-14 block Gram-Schmidt of the Krylov route
+
+`get_kondo_spectrum(mode="ED", submode="KRYLOV")` **changes numbers at
+roundoff** where a Krylov space is truncated. Each new block is now
+orthogonalized against the whole space at once, and this changes the
+basis at roundoff. On the chains of `docs/kondo_speedup_plan.md` in a
+field, dI/dV moves by $2.9\times 10^{-13}$ of the peak on 10 spins and
+$3.0\times 10^{-13}$ on 12 spins, and the matrices of the truncated
+6-spin space of `tests/test_kondo_speedups_krylov.py` move by
+$3.6\times 10^{-13}$ of their largest element. For scale, two runs of
+the same code on 12 spins differ by $9\times 10^{-12}$, since `eigsh`
+draws its start vector at random. The residual stop of the same day,
+`tol=`, is opt-in, and a call without it does not move.

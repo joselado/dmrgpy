@@ -67,6 +67,19 @@ DROP_TOL = 1e-9
 # Matrices with an imaginary part below this fraction of their largest
 # entry are taken as real.
 REAL_TOL = 1e-13
+# With tol set (opt-in, see KrylovKondoSpectrum), the Krylov space of an
+# initial state stops before 3*nkry states once the Ritz residual of every
+# Ritz state that can be an open final state (an energy at most E_i +
+# max|eV|, plus conductance.THETA_CUT kT at T>0, the window of
+# conductance._final_states) is below tol times onenorm(H). A check is a
+# diagonalization of the Krylov matrix, so it is made after CHECK_EVERY
+# blocks, and then each time the space has grown by CHECK_EVERY blocks and
+# by the factor CHECK_GROWTH, or by a factor 2 while fewer than half of the
+# states of the window are converged (a wide window, where the stop does not
+# come before the space is exhausted): the checks then cost a few
+# diagonalizations of the final size.
+CHECK_EVERY = 10
+CHECK_GROWTH = 1.25
 
 
 class StateSpectrum():
@@ -173,7 +186,7 @@ def initial_states(H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
     return E[keep], V[:, keep], w/np.sum(w)
 
 
-def block_krylov(H, starts, psi, nkry):
+def block_krylov(H, starts, psi, nkry, tol=None, top=None):
     """(theta, y, Q, residual): the Ritz values of H in the block Krylov
     space started from the columns of starts, orthogonal to psi, of
     dimension at most 3*nkry, and the Ritz vectors as Q @ y, with Q the
@@ -192,7 +205,15 @@ def block_krylov(H, starts, psi, nkry):
     H@B outside the space for the last block B, taken before the DROP_TOL
     cut: the norm of s Vh times the rows of y_k on the last block. The
     directions DROP_TOL dropped from earlier blocks are not in it (below
-    DROP_TOL of the scale of H)."""
+    DROP_TOL of the scale of H).
+
+    tol (absolute; None, the default, for no stop): the space also stops
+    when every Ritz state with an energy at most top (None: every Ritz
+    state) has a residual below tol, checked on the schedule of CHECK_EVERY
+    and CHECK_GROWTH. Hk[:n, :n] is complete once the coefficients of the
+    last block are in, so a check is one eigh of the matrix a stop returns,
+    and the result is then the one of a fixed size equal to the size it
+    stopped at."""
     dim, cap = len(psi), 3*nkry
     dtype = np.result_type(H.dtype, starts.dtype, psi.dtype)
     size = min(cap, dim) # the space never holds more than dim columns
@@ -219,18 +240,32 @@ def block_krylov(H, starts, psi, nkry):
 
     B, keep, _, W = orth(starts, 0)
     n = k = 0
+    nblocks, check = 0, CHECK_EVERY # blocks so far, and the count at the next check
+    ritz = None # (theta, y) of the check that stopped the space
     while B.shape[1] > 0 and n + B.shape[1] <= size:
         if n: # coupling of the new block to the previous one
             Hk[n:n+B.shape[1], n-k:n] = W[keep]
         k = B.shape[1]
         Q[:, n:n+k] = B
         n += k
+        nblocks += 1
         B, keep, c, W = orth(H @ B, n)
         Hk[:n, n-k:n] = c
+        if (tol is not None and nblocks >= check
+                and B.shape[1] > 0 and n + B.shape[1] <= size):
+            theta, y = np.linalg.eigh((Hk[:n, :n] + Hk[:n, :n].conj().T)/2.)
+            win = y if top is None else y[:, theta <= top]
+            converged = 1. if win.shape[1] == 0 else float(
+                np.mean(np.linalg.norm(W @ win[n-k:], axis=0) < tol))
+            if converged == 1.:
+                ritz = theta, y
+                break
+            growth = CHECK_GROWTH if converged >= 0.5 else 2.
+            check = max(nblocks + CHECK_EVERY, int(np.ceil(growth*nblocks)))
     if n == 0:
         return (np.zeros(0), np.zeros((0, 0)), Q[:, :0], np.zeros(0))
     Hk = Hk[:n, :n]
-    theta, y = np.linalg.eigh((Hk + Hk.conj().T)/2.)
+    theta, y = ritz if ritz is not None else np.linalg.eigh((Hk + Hk.conj().T)/2.)
     residual = np.linalg.norm(W @ y[n-k:], axis=0)
     return theta, y, Q[:, :n], residual
 
@@ -369,9 +404,15 @@ class KrylovKondoSpectrum():
     takes one member per spin multiplet (see su2_initial_states), and H must
     then commute with the total spin, which is checked (SU2Error); False
     takes every state; None, the default, takes the reduction when its
-    checks pass and every state otherwise. self.su2 says which was taken."""
+    checks pass and every state otherwise. self.su2 says which was taken.
+    tol (opt-in, None by default): the Krylov space of a state stops before
+    3*nkry states once every Ritz state in the window of open final states
+    has a residual below tol*onenorm(H) (see CHECK_EVERY and block_krylov);
+    the window needs max|eV|, which spectra() and state_spectrum() take as
+    emax (None: every Ritz state counts). tol=1e-8 moved dI/dV by 1e-11 of
+    the peak where it fired."""
     def __init__(self, chain, site, T, kB=8.617333262e-5, nkry=100, p_cut=P_CUT,
-                 su2=None, degeneracy_tol=1e-9):
+                 su2=None, degeneracy_tol=1e-9, tol=None):
         if T < 0.:
             raise ValueError("T must be >= 0, got %r" % (T,))
         if isinstance(nkry, bool) or not isinstance(nkry, (int, np.integer)) or nkry < 1:
@@ -382,6 +423,10 @@ class KrylovKondoSpectrum():
             if not isinstance(su2, (bool, np.bool_)):
                 raise ValueError("su2 must be None, True or False, got %r" % (su2,))
             su2 = bool(su2)
+        if tol is not None and (isinstance(tol, (bool, np.bool_))
+                                or not 0. < tol < 1.):
+            raise ValueError("tol must be None or between 0 and 1, got %r" % (tol,))
+        self.tol = tol
         self.chain, self.site, self.T, self.kB = chain, site, float(T), kB
         self.nkry = int(nkry)
         self.degeneracy_tol = degeneracy_tol
@@ -409,7 +454,8 @@ class KrylovKondoSpectrum():
         self._S = S
         self.H = H
         kT = kB*self.T
-        self.tol_degenerate = degeneracy_tol*2.*onenorm(H)
+        self.scale = onenorm(H)
+        self.tol_degenerate = degeneracy_tol*2.*self.scale
         reduced = None
         if su2 is not False:
             # su2=None: the reduction when its checks pass, and the full sum
@@ -429,8 +475,18 @@ class KrylovKondoSpectrum():
         if self.real:
             self.V = np.real(self.V)
 
-    def state_spectrum(self, n):
-        """The StateSpectrum of the initial state n."""
+    def window(self, emax):
+        """The largest e_f - e_i of an open final state at the bias range
+        max|eV| = emax: emax at T=0, plus THETA_CUT kT at T>0, as in
+        conductance._final_states; None for emax None."""
+        if emax is None:
+            return None
+        return float(emax) + (conductance.THETA_CUT*self.kB*self.T if self.T > 0. else 0.)
+
+    def state_spectrum(self, n, emax=None):
+        """The StateSpectrum of the initial state n. emax (max|eV|) sets
+        the window of the residual stop when tol is set; None counts every
+        Ritz state."""
         psi = self.V[:, n]
         psi = psi/np.linalg.norm(psi)
         Ei = float(np.real(psi.conj() @ (self.H @ psi)))
@@ -439,7 +495,10 @@ class KrylovKondoSpectrum():
             starts = np.stack([Sp @ psi, Sm @ psi, Sz @ psi], axis=1)
         else:
             starts = np.stack([M @ psi for M in self._S], axis=1)
-        theta, y, Q, residual = block_krylov(self.H, starts, psi, self.nkry)
+        tol = None if self.tol is None else self.tol*self.scale
+        w = self.window(emax)
+        theta, y, Q, residual = block_krylov(self.H, starts, psi, self.nkry, tol=tol,
+                                             top=None if w is None else Ei + w)
         if self.real:
             # S- is the transpose of S+ in a real basis, so its matrix is
             # the transpose of that of S+ and is not built
@@ -458,9 +517,9 @@ class KrylovKondoSpectrum():
         res0 = float(np.linalg.norm(self.H @ psi - Ei*psi))
         return StateSpectrum(e, mats, self.T, self.kB, np.concatenate([[res0], residual]))
 
-    def spectra(self):
+    def spectra(self, emax=None):
         for n, w in enumerate(self.weights):
-            yield w, self.state_spectrum(n)
+            yield w, self.state_spectrum(n, emax)
 
 
 def krylov_kondo_dIdV(kks, eV, Jrho_s, U=0.0, T0=1.0, omega0=20e-3, Gamma0=5e-6,
@@ -474,7 +533,8 @@ def krylov_kondo_dIdV(kks, eV, Jrho_s, U=0.0, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     if order == 3 and kks.T > 0.:
         Fb = cached_fbuilder(kks.T, omega0=omega0, Gamma0=Gamma0, kB=kks.kB)
     total = np.zeros(len(eV))
-    for w, ks in kks.spectra():
+    emax = float(np.max(np.abs(eV))) if eV.size else 0.
+    for w, ks in kks.spectra(emax):
         d = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
         if order == 3:
             d = d + conductance.third_order_kondo_dIdV(

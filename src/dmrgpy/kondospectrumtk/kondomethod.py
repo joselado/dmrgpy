@@ -144,7 +144,11 @@ class KondoSpectrumMixin():
               S_x|i>, S_y|i>, S_z|i> of the tip site, of at most 3*nkry
               states (nkry, default 100). The sums are those of
               mode="ED", and they are exact once each Krylov space is
-              exhausted. su2=None (the default) takes one member per
+              exhausted. tol (default None) stops a Krylov space
+              earlier, once every Ritz state that can be an open final
+              state (up to max|eV|, plus 40 kT at T>0, above the
+              initial state) has a residual below tol*onenorm(H);
+              tol=1e-8 pays off at large nkry and a narrow window. su2=None (the default) takes one member per
               spin multiplet with the weight 2S+1 when the Hamiltonian
               commutes with the total spin (checked) and every state
               otherwise; su2=True raises instead when it does not
@@ -316,7 +320,7 @@ class KondoSpectrumMixin():
             krylov = {}
             if kwargs.get("submode") == "KRYLOV":
                 submode = kwargs.pop("submode")
-                for k in ("nkry", "p_cut", "su2"):
+                for k in ("nkry", "p_cut", "su2", "tol"):
                     if k in kwargs:
                         krylov[k] = kwargs.pop(k)
             # the memory budget of the leading-log flow, without which a
@@ -334,7 +338,7 @@ class KondoSpectrumMixin():
                     "dynamical-correlator keywords), which the exact "
                     "full-spectrum route does not use -- its T=0 already "
                     "averages a degenerate ground manifold -- or "
-                    "parameters of submode=\"KRYLOV\" (nkry, p_cut, su2), "
+                    "parameters of submode=\"KRYLOV\" (nkry, p_cut, su2, tol), "
                     "which need that submode, or mem_gb, which needs "
                     "order=\"LL\" without a submode, or not "
                     "parameters of this method at all (check the spelling "
@@ -362,13 +366,13 @@ class KondoSpectrumMixin():
                                                   T=T, kB=kB, **kwargs)
     def _get_kondo_spectrum_krylov(self, eV, site, Jrho_s, U, T, T0, omega0,
                                     Gamma0, order, kB, nkry=100, p_cut=None,
-                                    su2=None):
+                                    su2=None, tol=None):
         from . import krylovkondo
         if not T >= 0.:
             raise ValueError("T must be >= 0, got %r" % (T,))
         p_cut = krylovkondo.P_CUT if p_cut is None else p_cut
         kks = krylovkondo.KrylovKondoSpectrum(self, site, T, kB=kB, nkry=nkry,
-                                              p_cut=p_cut, su2=su2)
+                                              p_cut=p_cut, su2=su2, tol=tol)
         return eV, krylovkondo.krylov_kondo_dIdV(kks, eV, Jrho_s, U=U, T0=T0,
                                                  omega0=omega0, Gamma0=Gamma0,
                                                  order=order)

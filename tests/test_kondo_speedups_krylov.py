@@ -1,10 +1,11 @@
 """The speedups of get_kondo_spectrum(mode="ED", submode="KRYLOV") from
-docs/kondo_speedup_plan.md (item 11), pinned by their numbers against the
-old form kept here and by a count of what they save. The spaces here are
-truncated on purpose (small nkry): every test of test_kondo_krylov.py
-exhausts its space, and an exhausted space cannot see a change of the
-Krylov basis. The last test checks that the Krylov spectra of a real H
-take the real route of the sums of conductance.py."""
+docs/kondo_speedup_plan.md (item 11, the block Gram-Schmidt and the opt-in
+residual stop of item 12), pinned by their numbers against the old form
+kept here and by a count of what they save. The spaces here are truncated
+on purpose (small nkry): every test of test_kondo_krylov.py exhausts its
+space, and an exhausted space cannot see a change of the Krylov basis. One
+test checks that the Krylov spectra of a real H take the real route of the
+sums of conductance.py."""
 import numpy as np
 import pytest
 
@@ -119,3 +120,78 @@ def test_the_krylov_spectrum_of_a_real_hamiltonian_is_of_the_real_form():
             assert conductance._spin_triplet(kks.state_spectrum(k))[1] == real
 
 
+
+
+def test_residual_stop_is_the_fixed_size_it_stopped_at(monkeypatch):
+    """Item 12, opt-in: in a narrow window (0.1 K, |eV| below 0.5 meV) the
+    Ritz states that can be open final states converge long before the
+    space is exhausted, the space stops there, and the spectrum is the one
+    of a fixed space of that size."""
+    monkeypatch.setattr(krylovkondo, "CHECK_EVERY", 2)
+    sc = heisenberg(8, "xz")
+    emax = 5e-4
+    stop = krylovkondo.KrylovKondoSpectrum(sc, 1, 0.1, nkry=60, p_cut=1e-6, tol=1e-8)
+    full = krylovkondo.KrylovKondoSpectrum(sc, 1, 0.1, nkry=60, p_cut=1e-6)
+    assert full.tol is None # opt-in
+    for k in range(len(stop.weights)):
+        a = stop.state_spectrum(k, emax)
+        b = full.state_spectrum(k, emax)
+        assert b.dim == 181 # 3*nkry states and the initial one
+        assert a.dim < b.dim # the stop fired
+        assert a.dim % 3 == 1 # blocks of three columns, plus the initial state
+        fixed = krylovkondo.KrylovKondoSpectrum(sc, 1, 0.1, nkry=(a.dim - 1)//3,
+                                                p_cut=1e-6).state_spectrum(k)
+        # the same arithmetic (equal to the last bit here, 1e-14 for BLAS)
+        assert np.max(np.abs(a.e - fixed.e)) <= 1e-14*np.max(np.abs(a.e))
+        for x, y in zip((a.Sx, a.Sy, a.Sz), (fixed.Sx, fixed.Sy, fixed.Sz)):
+            assert np.max(np.abs(x - y)) <= 1e-14*np.max(np.abs(x))
+        # every Ritz state of the window is converged
+        win = a.e[1:] <= stop.window(emax)
+        assert np.all(a.residual[1:][win] < 1e-8*stop.scale)
+
+
+def test_residual_stop_that_never_fires_changes_nothing(monkeypatch):
+    """A tol no Ritz state reaches runs every check and never stops, and
+    the spectrum is the one of the default call without checks."""
+    monkeypatch.setattr(krylovkondo, "CHECK_EVERY", 2)
+    sc = heisenberg(7, "y")
+    never = krylovkondo.KrylovKondoSpectrum(sc, 1, 0.5, nkry=30, p_cut=1e-6, tol=1e-300)
+    plain = krylovkondo.KrylovKondoSpectrum(sc, 1, 0.5, nkry=30, p_cut=1e-6)
+    for k in range(min(3, len(plain.weights))):
+        a, b = never.state_spectrum(k, 1e-3), plain.state_spectrum(k)
+        assert a.dim == b.dim == 91
+        assert np.max(np.abs(a.e - b.e)) <= 1e-14*np.max(np.abs(b.e))
+        for x, y in zip((a.Sx, a.Sy, a.Sz), (b.Sx, b.Sy, b.Sz)):
+            assert np.max(np.abs(x - y)) <= 1e-14*np.max(np.abs(y))
+
+
+def test_residual_stop_moves_dIdV_by_the_tolerance():
+    """The public call with tol=1e-8 against the default (no stop, 181
+    states here), in narrow windows where the stop fires, at 0.1 K and at
+    T=0, and in a wide one, where it does not, since every Ritz state there
+    is a possible final state."""
+    sc = heisenberg(8, "xz")
+    for T, emax in ((0.1, 5e-4), (0., 3e-4), (1.0, 4e-3)):
+        eV = np.linspace(-emax, emax, 21) + 1.3e-5
+        kw = dict(site=1, Jrho_s=-0.08, U=0.3, T=T, omega0=20e-3, Gamma0=5e-5,
+                  mode="ED", submode="KRYLOV", nkry=60, p_cut=1e-6)
+        _, a = sc.get_kondo_spectrum(eV, tol=1e-8, **kw)
+        _, b = sc.get_kondo_spectrum(eV, **kw)
+        # measured 4e-12 (121 of 181 states), 1e-11 (31) and 0 (no stop)
+        assert np.max(np.abs(a - b)) < 1e-8*np.max(np.abs(b))
+
+
+def test_residual_stop_keywords():
+    sc = heisenberg(4)
+    for bad in (0., 1., -1e-8, True):
+        with pytest.raises(ValueError, match="tol must be"):
+            sc.get_kondo_spectrum(EV, site=0, Jrho_s=-0.05, T=0., submode="KRYLOV",
+                                  tol=bad)
+    with pytest.raises(TypeError, match=r"argument\(s\): tol\. "):
+        sc.get_kondo_spectrum(EV, site=0, Jrho_s=-0.05, T=0., tol=1e-8)
+    # opt-in: no stop unless tol is given
+    import inspect
+    from dmrgpy.kondospectrumtk.kondomethod import KondoSpectrumMixin
+    sig = inspect.signature(KondoSpectrumMixin._get_kondo_spectrum_krylov)
+    assert sig.parameters["tol"].default is None
+    assert inspect.signature(krylovkondo.KrylovKondoSpectrum).parameters["tol"].default is None

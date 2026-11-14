@@ -283,6 +283,11 @@ dropped. On this chain the two differ by about $10^{-8}$ of the peak at 1 K.
   member of each spin multiplet with the weight $2S+1$, which needs fewer
   occupied states, and otherwise every state. `True` raises when $H$ does
   not conserve the total spin, and `False` always takes every state.
+- `tol`: with a value such as $10^{-8}$, a Krylov space stops before
+  `3*nkry` states once every state that can be a final state (up to
+  $\max\lvert eV\rvert$ above the initial state, plus $40k_BT$) is
+  converged to `tol` times the scale of $H$. Useful with a large `nkry` and
+  a narrow bias window. The default (`None`) never stops early.
 
 The route is third order. `order="LL"` needs every eigenstate and raises
 with `submode="KRYLOV"`. See `examples/kondo/kondo_krylov_thermal_VS_ED`.

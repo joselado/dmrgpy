@@ -174,11 +174,11 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
   over the whole space takes `state_spectrum` to 0.39 s (1.7x, case 7 1.2x
   to 1.4x), but it changes the basis at roundoff and moved dI/dV by
   2.9e-13 of the peak on 10 spins and 3.0e-13 on 12, above the 1e-13 this
-  item was given. It is not applied; it is the branch
-  `krylov-block-gram-schmidt`, one commit on item 11. On that branch the
-  truncated-space test of item 11 fails, since the matrices move by 2.9e-13
-  of their largest element against the 1e-14 it asserts, so taking the
-  branch means loosening that bound. For scale: the
+  item was given. It was the branch `krylov-block-gram-schmidt`, one
+  commit on item 11, and it is on master since 2c41a22 (the author's
+  pick). The truncated-space test of item 11 then failed, since the
+  matrices moved by 3.6e-13 of their largest element against the 1e-14 it
+  asserted, and its bound is now 1e-12. For scale: the
   old code with its three start vectors in another order moves by 2.5e-14
   on 10 spins and 6.7e-12 on 12, and two runs of the same code on 12 spins
   differ by 9e-12, since SciPy's eigsh draws its start vector from fresh
@@ -211,8 +211,12 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
   keyword is one at 12 spins or more with nkry from 200 to 400, where the
   Krylov space does not exhaust the Hilbert space. At 10 spins the 1024
   states are the whole space, which plain ED covers. The author picked on
-  2026-11-14 to take it as an opt-in keyword instead (see the choices for
-  the author).
+  2026-11-14 to take it as an opt-in keyword instead, and it is on master
+  as `tol=` (None by default), ported onto the block Gram-Schmidt loop,
+  where a check needs no product in the Hilbert space. On 8 spins with
+  `nkry=60` and `tol=1e-8` it stopped at 121 of 181 states at 0.1 K and
+  |eV| < 0.5 meV and at 31 at T=0 and 0.3 mV, and dI/dV moved by 4e-12 and
+  1e-11 of the peak.
 - **`su2=None` by default, taken on the cut of the full sum** (the
   decider's pick, `ded5439` and `100eb84`). With the first cut the gates
   gave: (a) on against off at the default `p_cut` on 7 spins at 1.5 K
@@ -278,10 +282,10 @@ section above. The decider took `su2=None` by default together with the
 weight cut of the full sum (2.8x on the zero-field 12-spin chain,
 `su2=True` results move by about `p_cut`), and the author confirmed it.
 The author picked the other two on 2026-11-14: the residual stop of
-`krylov-residual-stop` goes to master as an opt-in keyword, off by
+`krylov-residual-stop` is on master as an opt-in keyword, off by
 default, so the default call keeps its cost and its numbers; and the
 block Gram-Schmidt of `krylov-block-gram-schmidt` (1.7x on
-`state_spectrum`, dI/dV moves by 3e-13 of the peak) goes to master with
+`state_spectrum`, dI/dV moves by 3e-13 of the peak) is on master with
 the truncated-space bound of the item 11 test loosened to 1e-12, still 9
 times below the 9e-12 that two eigsh starts give on 12 spins.
 

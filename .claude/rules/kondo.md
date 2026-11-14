@@ -436,18 +436,18 @@ only ED route. README: `docs/new_methods/kondo_krylov_thermal/`.
 items 11 and 12 and the `su2` choice; `tests/test_kondo_speedups_krylov.py`
 keeps the old `state_spectrum` and compares on a TRUNCATED space, since an
 exhausted one cannot see a change of the basis). `state_spectrum` builds
-nothing of the size of the Hilbert space twice: Q^H H Q from the products
-H B of the loop, the residual from the recurrence (W, the part of H B
+nothing of the size of the Hilbert space twice: Q^H H Q from the
+coefficients of the projections (block Gram-Schmidt, since 2c41a22), the residual from the recurrence (W, the part of H B
 outside the space for the last block, taken BEFORE the DROP_TOL cut, or a
 deflated direction reports zero), the matrices in Krylov coordinates, and
 S- as the transpose of S+ when that is exact (`_minus_is_transpose`). The
 basis is the same to the last bit; dI/dV moved by 6e-16 of the peak, and
 `state_spectrum` went from 0.67 to 0.60 s per state on 12 spins. Four
-rules. (1) The reorthogonalization against each earlier block stays as it
-is: one block Gram-Schmidt over the whole space was 1.7x faster on 12
-spins but changes the basis at roundoff and moved dI/dV by 3e-13 of the
-peak, above the 1e-13 asked (branch `krylov-block-gram-schmidt`, for the
-author to pick); an unexhausted space is that sensitive (the
+rules. (1) The block Gram-Schmidt over the whole space (merged on
+2026-11-14 by the author's pick, 1.7x on `state_spectrum` on 12 spins)
+changes the basis at roundoff and moved dI/dV by 3e-13 of the peak and
+the matrices of the truncated test by 3.6e-13, so that test asks 1e-12
+for the matrices; do not tighten it back. An unexhausted space is that sensitive (the
 old code with its three start vectors in another order moves by 2.5e-14
 on 10 spins and 6.7e-12 on 12). (2) Compare two versions with eigsh
 seeded (a `v0`): SciPy 1.18's eigsh draws its start vector from fresh
@@ -470,11 +470,15 @@ level lies between the two cuts there). With it auto and off agree to 2.5e-12 on
 chain with no Nf sector. A test that reads the full sum on an SU(2)
 chain passes `su2=False`, and the Krylov tests keep their own copy of
 that Hubbard chain, since importing `test_audit_2026_11_13_reread.py`
-starts juliacall. The residual stop of item 12 is on the branch
-`krylov-residual-stop`, not here: it fired only above the default nkry on
-the chains of the plan and cost 8% of `state_spectrum` there; what would
-reopen it is a measurement at 12 spins or more with nkry 200 to 400,
-where the Krylov space does not exhaust the Hilbert space.
+starts juliacall. (5) The residual stop of item 12 is opt-in, `tol=`
+(None by default, the author's pick of 2026-11-14): it fired only above
+the default nkry on the chains of the plan, and an always-on stop cost 8%
+of `state_spectrum` there. A check reads Hk[:n, :n], which is complete
+once the coefficients of the last block are in, and stops with the eigh
+it made, so a stop is the fixed space of that size; the window is
+conductance._final_states' (max|eV|, plus THETA_CUT kT), which is why
+`spectra()` and `state_spectrum()` take `emax`. Do not make it the
+default without a measurement at 12 spins or more with nkry 200 to 400.
 
 **Leading-log resummation (2026-11-06)**, `kondospectrumtk/leadinglog.py`,
 is a new method documented in `docs/new_methods/kondo_leading_log/README.md`
