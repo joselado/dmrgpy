@@ -1745,7 +1745,9 @@ roundoff** where a Krylov space is truncated. Each new block is now
 orthogonalized against the whole space at once, and this changes the
 basis at roundoff. On the chains of `docs/kondo_speedup_plan.md` in a
 field, dI/dV moves by $2.9\times 10^{-13}$ of the peak on 10 spins and
-$3.0\times 10^{-13}$ on 12 spins, and the matrices of the truncated
+$3.0\times 10^{-13}$ on 12 spins with `eigsh` seeded; on Triton against
+the pushed master, the 12-spin chain moves by $1.5\times 10^{-12}$ in the
+field and $4.6\times 10^{-13}$ at zero field. The matrices of the truncated
 6-spin space of `tests/test_kondo_speedups_krylov.py` move by
 $3.6\times 10^{-13}$ of their largest element. For scale, two runs of
 the same code on 12 spins differ by $9\times 10^{-12}$, since `eigsh`

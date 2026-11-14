@@ -299,8 +299,10 @@ out. It is on master as `transpose_exchange=True`, which only
 `krylov_kondo_dIdV` sets: on one Krylov spectrum of 10 spins (301
 states) the third-order Kondo term went from 0.83 to 0.49 s at 1 K,
 where every state is final, and from 0.19 to 0.17 s at T=0, where 150
-are (one P-core of the workstation, not Triton). dI/dV moved by 2e-16 of
-the peak at 1 K and not at all at T=0. The saving is n_f/(2 dim) of the
+are (one P-core of the workstation). On Triton it gave 1.49x on the
+term of the 12-spin chain in a field (see the measurement of the author's
+picks below), so it stays. dI/dV moved by 2e-16 of the peak at 1 K and
+not at all at T=0. The saving is n_f/(2 dim) of the
 F values, half at 1 K here and 41% at 248 of 301, so it is less than the
 halving the plan wrote for the term. The 63 commits of the night were pushed on 2026-11-14.
 
@@ -394,3 +396,32 @@ rule; it stays because it removes code (the explicit residual and the
 second product of H). At zero field the reduction to one member per
 multiplet does the work, and the change against the full sum is the
 2.5e-12 of gate (b).
+
+## The author's Krylov picks, measured
+
+The block Gram-Schmidt (`2c41a22`), the opt-in residual stop (`a9d8d06`,
+off here) and item 2 on the Krylov route (`267a711`), against the pushed
+master (`90f4ddb`), all four trees in one task on one core of Triton
+(21578925, csl48, two runs each in fresh processes, the minimum; the
+third-order Kondo term and `state_spectrum` from the profiled run):
+
+| case | tree | call | `state_spectrum` | third-order Kondo term |
+|---|---|---|---|---|
+| KRYLOV, 12 spins, 1 K, a field | 90f4ddb | 52.5 s | 26.1 s | 25.3 s |
+| | + block Gram-Schmidt | 44.7 s | 17.9 s | 25.3 s |
+| | + residual stop, off | 44.3 s | 17.5 s | 25.4 s |
+| | + item 2 | 36.4 s | 17.9 s | 17.0 s |
+| KRYLOV, 12 spins, 1 K, zero field | 90f4ddb | 17.3 s | 8.6 s | 7.9 s |
+| | + block Gram-Schmidt | 14.8 s | 5.9 s | 7.9 s |
+| | + residual stop, off | 14.5 s | 5.9 s | 7.9 s |
+| | + item 2 | 12.4 s | 5.9 s | 5.4 s |
+
+The block Gram-Schmidt gives 1.46x on `state_spectrum` with a field and
+1.46x at zero field (1.17x and 1.17x on the call), and item 2 gives 1.49x
+and 1.45x on the third-order Kondo term (1.22x and 1.17x on the call), so
+item 2 passes the 1.1 of the author's rule and stays. Together the call
+goes from 52.5 to 36.4 s (1.44x) and from 17.3 to 12.4 s (1.40x). The stop
+off costs nothing. The curve moves by 1.5e-12 of the peak with a field and
+by 4.6e-13 at zero field against `90f4ddb`, the same to every digit in the
+three new trees, so this is the change of basis of the block Gram-Schmidt
+and item 2 adds nothing visible.

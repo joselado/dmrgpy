@@ -196,7 +196,9 @@ xz plane, T=1 K, `nkry=100` and the default `p_cut`:
   states is the transpose of the one at +eV, so only its columns over the
   states that are not final are evaluated; on 10 spins at 1 K, where every
   state of the space is final, this took the third-order Kondo term of one
-  state from 0.83 to 0.49 s on one core of the workstation.
+  state from 0.83 to 0.49 s on one core of the workstation. On one core
+  of Triton the whole 12-spin call now takes 36.4 s, against 52.5 s
+  before the block Gram-Schmidt and this table on the same node.
 
 Per initial state the cost is the block Krylov space (3 `nkry` sparse
 products and the reorthogonalization, O(dim nkry^2)) and the sums of

@@ -459,7 +459,9 @@ about the whole basis here. Plan item 2 is taken on this route only
 (`transpose_exchange=True`, set by `krylov_kondo_dIdV`; the full ED route
 keeps the plain loop, where n_f is far below dim): the -eV exchange table
 on final x final is the +eV one transposed, n_f/(2 dim) fewer F values,
-nothing moves at T=0 (exact negatives, F0 exactly even). (4) `su2=None` is the default since 2026-11-14 (the decider's
+nothing moves at T=0 (exact negatives, F0 exactly even). On Triton it gave
+1.49x on the term with a field on 12 spins, and the block Gram-Schmidt
+1.46x on `state_spectrum`; the call went from 52.5 to 36.4 s (21578925). (4) `su2=None` is the default since 2026-11-14 (the decider's
 pick, confirmed by the author): the reduction when the checks pass, the full sum when one fails
 with `SU2Error`, the only error it falls back on, so an error of the
 eigensolver still raises. It rests on the weight cut of the full sum,
