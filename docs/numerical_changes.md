@@ -1625,3 +1625,36 @@ integration (`rtol=1e-10`): on 5 spins at zero field by $4.3\times
 10^{-12}$ of the peak at $T=0$ and by $1.8\times 10^{-11}$ at 1 K. With a
 field (no degeneracy) it moves by $3\times 10^{-15}$ at most. The old
 basis was not better: it was whatever the complex eigh returned.
+
+## The 2026-11-14 memory model of the leading-log flow
+
+`leadinglog.memory_model` counted complex numbers also where the flow
+takes the real route (a real Hamiltonian, the common case), which holds
+half the bytes (`docs/kondo_speedup_plan.md`, item 13). It now takes
+`real=` and the CPU route passes the same test the flow uses
+(`_block_is_real`). With `mem_gb` set, a call on the real route is cut in
+about half as many chunks as before, and each chunk solves the couplings
+again, so its dI/dV moves by the step sequence of the integration, below
+$10^{-9}$ of itself (the size the chunking test allows). With
+`mem_gb=None` nothing moves; the call now warns when the model puts the
+one flow above what the process can still take (`usable_memory`, the
+cgroup limit or MemAvailable), and names `mem_gb`.
+
+`nrgmps.head_tail_poles` moves no number either; it warns when the MPO of
+the head has dropped the channels of a Wilson bond inside the hand-over
+block (`nrgmps.lost_wilson_bonds`), which on v3 happens to every hopping
+below about $3\times 10^{-7}$ of the unit of H.
+
+## The 2026-11-14 flip-symmetric hand-over of the NRG route
+
+`nrgmps.head_tail_poles` and `ysr.get_stm_spectrum(submode="NRG",
+head="dmrg")` now hand over, for a head with an odd number of electrons
+(2Sz != 0) at B = 0, the left basis of the state joined with that of its
+flipped partner (`symmetric="auto"`, the default, picked by the decider;
+`symmetric=False` gives the old basis). The curves of such heads move. On
+3 spins with the metal under the middle spin (a marginal flow) the error
+against the exact route below w_join/3 goes from 3.4% to 1.5% of the
+peak, and its mean from -2.9% to -0.4%; with the metal under the end spin
+the curve moves by about 0.1% of the peak. A head with 2Sz = 0, and every
+call in a field, is unchanged. The route is from 2026-11-13, so only
+results of the last day are affected.

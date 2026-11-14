@@ -595,15 +595,72 @@ def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
     return A, info
 
 
-def memory_model(d, m):
+def memory_model(d, m, real=False):
     """Bytes one flow of _joint_flow holds for an impurity of d states and
     m occupied columns, as (fixed, per incoming energy): the DOP853 solver
-    keeps about 24 copies of the state, the couplings are 8 d^2 complex
-    numbers and the tip vertex 4 d m per energy, and one right-hand side of
-    _tip_bracket adds three arrays of 4 m d^2 complex numbers. For 9 spins
-    1/2 at T=0 (d=512, m=4, 1642 energies) it gives 7.0 GB, and 6.67 GB were
-    measured."""
-    return 16*24*8*d*d + 192*m*d*d, 64*28*m*d
+    keeps about 24 copies of the state, the couplings are 8 d^2 numbers and
+    the tip vertex 4 d m per energy, and one right-hand side of
+    _tip_bracket adds three arrays of 4 m d^2 numbers. The numbers are
+    complex, or real when the flow takes the real route (real=True, see
+    _block_is_real), which holds half the bytes. For 9 spins 1/2 at T=0
+    (d=512, m=4, 1642 energies) the complex count gives 7.0 GB, and 6.67 GB
+    were measured. On one flow of 241 biases (Triton, 2026-11-14, the peak
+    above that of the process before the call): 9 spins at T=0, 0.65 GB on
+    the real route (model 0.65) and 1.32 GB on the complex one (model
+    1.30); 8 spins at 1 K with 55 occupied states, 1.78 GB on the real
+    route (model 1.99, 61 biases)."""
+    item = 8 if real else 16
+    return item*24*8*d*d + 12*item*m*d*d, item*4*28*m*d
+
+
+def usable_memory():
+    """Bytes this process can still take, or None if it cannot tell: the
+    smaller of MemAvailable in /proc/meminfo and, under a cgroup with a
+    memory limit (a Slurm job, systemd-run -p MemoryMax), that limit minus
+    what the cgroup uses. Every level of the cgroup path is read, v2
+    (memory.max, memory.current) and v1 (memory.limit_in_bytes,
+    memory.usage_in_bytes), and the tightest one counts."""
+    import os
+    free = []
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    free.append(int(line.split()[1])*1024)
+    except (OSError, ValueError, IndexError):
+        pass
+    def read(path):
+        try:
+            with open(path) as f:
+                s = f.read().strip()
+            return None if s == "max" else int(s)
+        except (OSError, ValueError):
+            return None
+    try:
+        with open("/proc/self/cgroup") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        parts = line.split(":", 2)
+        if len(parts) != 3:
+            continue
+        if parts[0] == "0" and parts[1] == "": # v2
+            root, limit, usage = "/sys/fs/cgroup", "memory.max", "memory.current"
+        elif "memory" in parts[1].split(","): # v1
+            root, limit, usage = "/sys/fs/cgroup/memory", "memory.limit_in_bytes", "memory.usage_in_bytes"
+        else:
+            continue
+        path = parts[2].rstrip("/")
+        while True:
+            lim, use = read(root + path + "/" + limit), read(root + path + "/" + usage)
+            # v1 writes "no limit" as a huge number, near 2^63
+            if lim is not None and use is not None and lim < 2**60:
+                free.append(max(lim - use, 0))
+            if not path:
+                break
+            path = path.rsplit("/", 1)[0]
+    return min(free) if free else None
 
 
 def _ll_piece(ks, eVs, Jrho_s, U, T0, omega0, Gamma0, occ, rtol, atol,
@@ -684,7 +741,8 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     vertex: the flow does nothing, dI/dV is the potential scattering
     2*pi*T0^2*4*U^2 of the second order, and there is no warning.
 
-    mem_gb: None solves every bias in one flow. A number cuts the biases
+    mem_gb: None solves every bias in one flow, and on the CPU warns when
+    memory_model puts that flow above usable_memory(). A number cuts the biases
     in chunks so that one flow stays below about mem_gb (memory_model, or
     leadinglog_device.memory_model on the device), at
     the cost of solving the couplings again in each chunk; it raises when
@@ -729,7 +787,16 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
                               "it" % (mem_gb, cap/1e9), stacklevel=2)
                 budget = cap
     else:
-        fixed, per_w = memory_model(len(e), len(occ))
+        fixed, per_w = memory_model(len(e), len(occ), _block_is_real(_spin_ops(ks)))
+        if budget is None:
+            need, free = fixed + 2*n*per_w, usable_memory()
+            if free is not None and need > free:
+                warnings.warn("leading_log_dIdV: one flow of %d biases at %d occupied "
+                              "states of %d needs about %.3g GB (memory_model), above "
+                              "the %.3g GB this process can still take; pass mem_gb= "
+                              "to cut the biases in chunks" % (n, len(occ), len(e),
+                                                               need/1e9, free/1e9),
+                              RuntimeWarning, stacklevel=2)
     if budget is None:
         pieces = [np.arange(n)]
     else:

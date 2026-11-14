@@ -222,11 +222,13 @@ def test_hopping_into_the_metal_takes_one_square_root_of_lambda_factor(Lambda):
     assert width(v) == pytest.approx(1.0/A, abs=0.015)
 
 
-@pytest.mark.parametrize("version,tol", [("python", 1e-5), (3, 1e-8)])
+@pytest.mark.parametrize("version,tol", [("python", 1e-5), (3, 1e-7)])
 def test_stm_spectrum_on_the_parity_state_against_ed(version, tol):
     """TASK on the promoted parity state against ED, with the tangent space
     padded to the whole space (pad_bonds="full"). Run smoke2: 1.5e-6
-    ("python") and 3.9e-10 (3) on a peak of 0.680. Without padding both
+    ("python") and 3.9e-10 (3) on a peak of 0.680; on Triton v3 gave 4.4e-9
+    to 1.6e-8 from run to run (the random start of the solve, not the
+    sweeps: 40 sweeps gave 1.1e-8), so 1e-7. Without padding both
     backends are 3.3e-5 off, the one-site tangent-space approximation, the
     same on the plain state as on the parity state."""
     fc = _small_chain(itensor_version=version)
@@ -349,12 +351,13 @@ def test_parity_at_small_pairing_against_ed(version):
     """At Delta=0.02 on the 7-site chain the parity splitting is 6e-6 and
     the pairing is the only term that changes the particle number. On
     "python" 20 sweeps left the even sector 2e-5 high and gave the odd
-    parity; 40 sweeps give the even one, as ED does."""
+    parity; 40 sweeps give the even one, as ED does, but on Triton they left
+    the even sector 1.1e-6 high, and 60 sweeps bring it to 1e-8."""
     p = dict(_SMALL, Delta=0.02)
     ns, ni, n = p.pop("ns"), p.pop("ni"), p.pop("n")
     ed = ysr.island_energies(ysr.island_chain(ns, ni, n, **p), mode="ED")
     fc = ysr.island_chain(ns, ni, n, itensor_version=version, **p)
-    fc.maxm, fc.nsweeps = 64, 40
+    fc.maxm, fc.nsweeps = 64, 60
     r = ysr.island_energies(fc)
     assert ed["parity_ground"] == "even"
     assert r["parity_ground"] == "even"

@@ -176,9 +176,28 @@ class Export(object):
     def chi(self, p):
         return self.As[p].shape[2]
 
-    def block_matrix(self, op, p):
+    def flipped(self, u):
+        """The same Export with the state R|GS>, R the product of the local
+        orthogonal matrix u on every site (spin_flip_matrix): the left
+        isometries are u applied to the physical index of each tensor."""
+        out = copy.copy(self)
+        out.As = [np.ascontiguousarray(np.einsum("st,atb->asb", u, A))
+                  for A in self.As]
+        return out
+
+    def overlap(self, other, p):
+        """<a|b> between the left basis of bond p of self (bra) and of
+        other (ket), a chi x chi' matrix."""
+        Lm = np.ones((1, 1))
+        for j in range(p + 1):
+            Lm = np.einsum("ab,asc,bsd->cd", Lm, self.As[j].conj(), other.As[j])
+        return Lm
+
+    def block_matrix(self, op, p, other=None):
         """<a|O|b> in the left basis of bond p (between sites p and p+1),
-        O a MultiOperator with every factor on sites <= p."""
+        O a MultiOperator with every factor on sites <= p. other: an Export
+        whose left basis is the ket (default self)."""
+        ket = self.As if other is None else other.As
         W = self.mpo(op)
         r = np.ones(1)
         for j in range(self.L - 1, p, -1): # right of the block: c * identity
@@ -195,7 +214,7 @@ class Export(object):
             A = self.As[j]
             X = np.tensordot(Lm, A.conj(), axes=(0, 0)) # w, a', s, b
             X = np.tensordot(X, W[j], axes=([0, 2], [0, 1])) # a', b, t, w'
-            Lm = np.tensordot(X, A, axes=([0, 2], [0, 1])) # b, w', b'
+            Lm = np.tensordot(X, ket[j], axes=([0, 2], [0, 1])) # b, w', b'
         M = np.tensordot(Lm, r, axes=(1, 0))
         if np.iscomplexobj(M):
             if np.max(np.abs(M.imag)) > 1e-10*max(1.0, np.max(np.abs(M))):
@@ -377,8 +396,131 @@ def flow_diagram(fc, bonds=None, nlev=40, Lambda=None, pad_bonds=None,
     return out
 
 
+JOIN_TOL = 1e-3 # a flipped direction joins the hand-over basis when at least this far outside it
+
+
+def _joined_basis(fc, ex, p, Nop, Szop):
+    """The hand-over basis of handover_shell(symmetric=True): the graded
+    left basis of bond p of the state, and, label by label (Q, 2Sz), the
+    graded left basis of its flipped partner R|GS> orthogonalized against
+    it. A flipped direction is kept when its part outside the span is at
+    least JOIN_TOL of its norm: the labels of each basis are integers only
+    to the accuracy of the solve, and a nearly dependent direction would
+    amplify that error by the inverse of its weight. The basis of (Q, -2Sz)
+    is the exact image under R of that of (Q, 2Sz), and the one of 2Sz = 0
+    is cut by the eigenvalues of an overlap matrix that commutes with R, so
+    the joined basis is closed under R exactly, whatever was cut: a
+    splitting of the partner spectra acts on a free moment as a field,
+    which the flow makes relevant (with the cut alone, 60% of A off the
+    exact route on 3 spins with the metal under the middle spin, without
+    the flip average). Returns (bm, labels): bm(op) the matrix of a block
+    operator in the joined basis, which is graded by construction."""
+    exr = ex.flipped(spin_flip_matrix(fc, ex))
+    O = ex.overlap(exr, p) # <a|R b>
+    VA, la = graded_basis(ex.block_matrix(Nop, p), ex.block_matrix(Szop, p))
+    # R|a> has the charge of |a> and the opposite 2Sz, so the graded basis
+    # of the flipped partner is VA itself with the labels (Q, -2Sz)
+    lr = [(q, -s) for (q, s) in la]
+    n = VA.shape[0]
+    def cols(labs, lab):
+        return VA[:, [i for i, x in enumerate(labs) if x == lab]]
+    blocks = {}
+    for lab in sorted(set(la) | set(lr)):
+        q, s = lab
+        if s < 0:
+            continue
+        a, b = cols(la, lab), cols(lr, lab)
+        if s > 0:
+            # the state's own vectors, and the flipped ones orthogonalized
+            # against them, kept when at least JOIN_TOL outside the span
+            S = a.T @ O @ b
+            w, U = np.linalg.eigh(np.eye(b.shape[1]) - S.T @ S)
+            keep = w > JOIN_TOL**2
+            Cc = U[:, keep]/np.sqrt(w[keep])
+            top = np.hstack([a, -a @ S @ Cc])
+            bot = np.hstack([np.zeros((n, a.shape[1])), b @ Cc])
+            blocks[lab] = (top, bot)
+            # the partner label is the image under R, exactly: R(A x + R A y)
+            # = (-1)^Q A y + R A x, since R^2 = (-1)^N
+            blocks[(q, -s)] = ((-1.0)**q*bot, top)
+        else:
+            # 2Sz = 0: R maps the label onto itself, and the overlap matrix of
+            # [a, R a] commutes with R, so cutting it by its eigenvalues keeps
+            # the span closed under R
+            S = a.T @ O @ b
+            g, Vg = np.linalg.eigh(np.block([[np.eye(a.shape[1]), S],
+                                             [S.T, np.eye(b.shape[1])]]))
+            keep = g > JOIN_TOL**2*np.max(g)
+            C = Vg[:, keep]/np.sqrt(g[keep])
+            blocks[lab] = (a @ C[:a.shape[1]], b @ C[a.shape[1]:])
+    labels, top, bot = [], [], []
+    for lab in sorted(blocks):
+        t, b = blocks[lab]
+        top.append(t)
+        bot.append(b)
+        labels += [lab]*t.shape[1]
+    Cj = np.vstack([np.hstack(top), np.hstack(bot)])
+    def bm(op):
+        M = np.block([[ex.block_matrix(op, p), ex.block_matrix(op, p, exr)],
+                      [exr.block_matrix(op, p, ex), exr.block_matrix(op, p)]])
+        return Cj.T @ M @ Cj
+    # the joined basis is orthonormal and graded, to the accuracy of the solve
+    G = Cj.T @ np.block([[np.eye(n), O], [O.T, np.eye(n)]]) @ Cj
+    Q = np.array([x[0] for x in labels], dtype=float)
+    S2 = np.array([x[1] for x in labels], dtype=float)
+    dev = max(np.max(np.abs(G - np.eye(len(labels)))),
+              np.max(np.abs(bm(Nop) - np.diag(Q))),
+              np.max(np.abs(2*bm(Szop) - np.diag(S2))))
+    if dev > BLOCK_TOL:
+        raise RuntimeError("handover_shell: the joined basis is orthonormal "
+                           "and graded only to %.2e" % dev)
+    return bm, labels
+
+
+def spin_flip_matrix(fc, export):
+    """The matrix u of R = exp(-i pi S^y_tot) on one site of fc, every site
+    of ysr.spin_chain_on_metal being a native spinful site: R c_up R^dag =
+    c_dn and R c_dn R^dag = -c_up. It is found on the backend's own basis
+    and on-site signs, from the tensors of Cup[0] and Cdn[0] that export
+    gives (site 0, where no Jordan-Wigner string enters): |0> and the
+    doubly occupied state go to themselves and the two singly occupied
+    ones to each other, with the signs that satisfy both relations. Real
+    and orthogonal, and it keeps the parity, so the product of u on every
+    site is R on the chain."""
+    import itertools
+    def local(op):
+        W = [np.asarray(w) for w in export.mpo(op)]
+        if any(w.shape[0] != 1 or w.shape[-1] != 1 for w in W):
+            raise RuntimeError("spin_flip_matrix: the MPO of a one-site "
+                               "operator is not of bond dimension 1")
+        M = W[0][0, :, :, 0]
+        for w in W[1:]:
+            M = M*np.trace(w[0, :, :, 0])/w.shape[1]
+        if np.max(np.abs(np.imag(M))) > 1e-12:
+            raise RuntimeError("spin_flip_matrix: a complex on-site matrix")
+        return np.real(M)
+    Mu, Md = local(fc.Cup[0]), local(fc.Cdn[0])
+    nu = np.round(np.diag(Mu.T @ Mu)).astype(int)
+    nd = np.round(np.diag(Md.T @ Md)).astype(int)
+    def state(a, b):
+        ix = np.where((nu == a) & (nd == b))[0]
+        if len(ix) != 1:
+            raise RuntimeError("spin_flip_matrix: the site is not a spinful "
+                               "fermion site of four states")
+        return ix[0]
+    e00, e10, e01, e11 = state(0, 0), state(1, 0), state(0, 1), state(1, 1)
+    for s1, s2, s3 in itertools.product((1.0, -1.0), repeat=3):
+        u = np.zeros((len(nu), len(nu)))
+        u[e00, e00], u[e01, e10], u[e10, e01], u[e11, e11] = 1.0, s1, s2, s3
+        if np.allclose(u @ Mu @ u.T, Md, atol=1e-12) and \
+                np.allclose(u @ Md @ u.T, -Mu, atol=1e-12):
+            return u
+    raise RuntimeError("spin_flip_matrix: no sign choice gives R c_up R^dag = "
+                       "c_dn and R c_dn R^dag = -c_up")
+
+
 def handover_shell(fc, k0, U=0.0, imp=None, export=None, pad_bonds=None,
-                   Lambda=None):
+                   Lambda=None, symmetric=False):
     """The StartShell of nrgspectral at the Wilson site k0 of the DMRG
     state of fc: the block Hamiltonian, the labels, f_{p s} and the tip
     vertices X^dag_sigma (ysr.tunneling_operators with U and imp, the
@@ -386,7 +528,14 @@ def handover_shell(fc, k0, U=0.0, imp=None, export=None, pad_bonds=None,
     p = ns + k0, graded and diagonalized. anti holds the projected
     anticommutator {X, X^dag} of each vertex, for the sum rule. Q in the
     labels is the charge of the whole block (spin sites included), whose
-    parity is the Jordan-Wigner sign of the next site."""
+    parity is the Jordan-Wigner sign of the next site.
+
+    symmetric=True (B = 0 only) hands over the span of the left bases of
+    the state and of its partner R|GS> under the flip of all spins
+    (R = exp(-i pi S^y_tot), spin_flip_matrix), orthonormalized through
+    their overlap, so that the basis is closed under the flip also for a
+    head with a moment (an odd number of electrons), whose own left basis
+    is not."""
     from .ysr import tunneling_operators
     ns, wil = _layout(fc)
     if not 0 <= k0 < len(wil) - 1:
@@ -398,8 +547,17 @@ def handover_shell(fc, k0, U=0.0, imp=None, export=None, pad_bonds=None,
         Lambda = (abs(t[0]/t[2]) if len(t) > 2 else 4.0)
     ex = export if export is not None else Export(fc, pad_bonds=pad_bonds)
     Nop, Szop = block_charges(fc, p)
-    V, labels = graded_basis(ex.block_matrix(Nop, p), ex.block_matrix(Szop, p))
-    rot = lambda op: V.T @ ex.block_matrix(op, p) @ V
+    if symmetric:
+        if getattr(fc, "B_imp", 0.0) != 0.0:
+            raise ValueError("handover_shell: symmetric=True needs B = 0, "
+                             "where H commutes with the flip of all spins")
+        bm, labels = _joined_basis(fc, ex, p, Nop, Szop)
+        V = np.eye(len(labels))
+    else:
+        bm = lambda op: ex.block_matrix(op, p)
+        V, labels = graded_basis(bm(Nop), bm(Szop))
+    chi = len(labels)
+    rot = lambda op: V.T @ bm(op) @ V
     H = rot(block_hamiltonian(fc, p))
     c = {1: rot(fc.Cup[p]), -1: rot(fc.Cdn[p])}
     where = {} if imp is None else {"imp": imp}
@@ -413,7 +571,7 @@ def handover_shell(fc, k0, U=0.0, imp=None, export=None, pad_bonds=None,
     om = _scale(eps, t, k0, Lambda)
     sh = nrgspectral._shell_from_dense(H, labels, c, ops, shift, om,
                                        anti=anti, block_tol=BLOCK_TOL,
-                                       info=dict(k0=k0, p=p, chi=ex.chi(p),
+                                       info=dict(k0=k0, p=p, chi=chi,
                                                  U=U, B=getattr(fc, "B_imp",
                                                                 0.0)))
     return sh, ex
@@ -452,6 +610,38 @@ def tail_chain(fc, n_tail=None):
     return eps, t
 
 
+def lost_wilson_bonds(fc):
+    """The Wilson bonds k (between the Wilson sites k and k+1) whose
+    channels the MPO of H on fc's backend has dropped: those whose link
+    dimension in the MPO is below that of the first Wilson bond. The last
+    bond is left out, since its link dimension is smaller at any |t| (the
+    end of the MPO). On v3, ITensor's svdMPO cuts a squared singular value
+    below an absolute 1e-13 at unit scale, so a hopping below about 3e-7 of
+    the unit of H leaves the MPO and the deeper Wilson sites are nearly
+    decoupled from the chain (measured on 1 spin at rho JK = 0.15: link
+    dimension 7 down to |t| = 4.8e-7, 6 at 3.0e-7 to 3.5e-7, 3 from 1.5e-7
+    on, at Lambda = 2.5, 4 and 6; README section 9). "python" truncates the
+    return sweep of its builder at a relative 1e-14 and loses channels one
+    bond earlier at Lambda = 4. The MPO is built again from fc.hamiltonian
+    with the session's own builder. Returns a sorted list, empty when every
+    Wilson bond is whole."""
+    from .pyitensor import task
+    ns, wil = _layout(fc)
+    if len(wil) < 3:
+        return []
+    s = fc._session
+    terms = fc.hamiltonian.to_terms()
+    if fc.itensor_version == "python":
+        W = task.mpo_arrays(s._mpo(terms))
+    elif fc.itensor_version == 3:
+        W = s.mpo_site_arrays(s.build_operator(terms))
+    else:
+        raise NotImplementedError("lost_wilson_bonds: itensor_version=\"python\" "
+                                  "or 3, got %r" % (fc.itensor_version,))
+    link = [np.shape(W[ns + k])[-1] for k in range(len(wil) - 2)]
+    return [k for k in range(len(link)) if link[k] < link[0]]
+
+
 def _check_prefix(eps, t, eps_h, t_h):
     if len(eps) < len(eps_h) or \
             np.max(np.abs(eps[:len(eps_h)] - eps_h), initial=0.0) > 1e-12 or \
@@ -479,7 +669,8 @@ class HeadTailSpectrum(object):
 def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
                     nkry=90, w_join=None, stop_tol=1e-4, stop_extra=6,
                     wilson_tail=None, task=True, Nf=None, Sz=None,
-                    window=None, solved=False, pad_bonds=None):
+                    window=None, solved=False, pad_bonds=None, symmetric="auto",
+                    flip=None):
     """Poles of the STM spectrum A(w) of ysr.py on the chain fc (a
     ysr.spin_chain_on_metal, or a spin-1/2 ysr.kondo_chain at Delta = 0),
     with a DMRG head and an NRG tail (docs/nrg_mps_kondo_plan.md, N3
@@ -498,7 +689,16 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     the scale of the hand-over shell) and keeps the tail below it. T > 0
     applies to the tail only: TASK is a T = 0 method, so T has to be far
     below w_join (a RuntimeWarning above w_join/10). pad_bonds goes to
-    handover_shell ("full" completes the hand-over basis, for tests).
+    handover_shell ("full" completes the hand-over basis, for tests). It
+    warns when the hand-over basis holds fewer than MIN_HANDOVER states, and
+    when the MPO of H has dropped a Wilson bond inside the hand-over block
+    (lost_wilson_bonds, README section 9). symmetric goes to handover_shell,
+    a hand-over basis closed under the flip of all spins: "auto" (the
+    default) takes it for a head with a moment (2Sz != 0) at B = 0, the
+    case whose own left basis is not closed (README section 5), True asks
+    for it and raises at B != 0, False is the plain left basis. flip goes
+    to nrgspectral.spectral_poles (None: the average of partner spectra at
+    B = 0, kept on with either basis).
     Returns a HeadTailSpectrum."""
     import warnings
     from .ysr import tunneling_operators
@@ -508,10 +708,19 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
                                   " or 3, got %r" % (fc.itensor_version,))
     if getattr(fc, "Delta_sc", 0.0) != 0.0:
         raise ValueError("head_tail_poles: a normal metal only (Delta = 0)")
+    if symmetric not in (True, False, "auto"):
+        raise ValueError("symmetric must be True, False or \"auto\", got %r"
+                         % (symmetric,))
     if solved:
         c, e0 = fc, float(np.real(fc.gs_energy()))
     else:
         c, e0 = head_state(fc, Nf=Nf, Sz=Sz)
+    if symmetric == "auto":
+        s2 = (getattr(c, "head_sector", None) or {}).get("Sz")
+        if s2 is None:
+            Sz_tot = sum(c.Sz[i] for i in range(c.ns))
+            s2 = int(round(2*float(np.real(c.vev(Sz_tot)))))
+        symmetric = getattr(c, "B_imp", 0.0) == 0.0 and s2 != 0
     eps_h, t_h = wilson_parameters(c)
     nh = len(eps_h)
     if k0 is None:
@@ -526,8 +735,18 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     _check_prefix(eps, t, eps_h, t_h)
     wp = getattr(c, "wilson_params", None) or {}
     Lambda = wp.get("Lambda", abs(t[0]/t[2]) if len(t) > 2 else 4.0)
-    sh, ex = handover_shell(c, k0, U=U, Lambda=Lambda, pad_bonds=pad_bonds)
+    sh, ex = handover_shell(c, k0, U=U, Lambda=Lambda, pad_bonds=pad_bonds,
+                            symmetric=symmetric)
     omega_k0 = sh.omega
+    lost = [k for k in lost_wilson_bonds(c) if k < k0]
+    if lost:
+        warnings.warn("head_tail_poles: the MPO of H on this backend has dropped "
+                      "channels of the Wilson bond %d (|t| = %.3g), inside the "
+                      "block that hands over at the Wilson site %d, so that block "
+                      "is not the one of the tail (lost_wilson_bonds; on v3 a "
+                      "hopping below about 3e-7 of the unit of H is cut); hand "
+                      "over at k0 <= %d" % (lost[0], abs(t_h[lost[0]]), k0, lost[0]),
+                      RuntimeWarning, stacklevel=2)
     if sh.info["chi"] < MIN_HANDOVER:
         warnings.warn("head_tail_poles: the hand-over basis at the Wilson site "
                       "%d holds %d states, below the about %d the tail needs "
@@ -542,7 +761,7 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
                       "%.3g, where the T = 0 TASK spectrum of the head takes "
                       "over" % (T, w_join), RuntimeWarning, stacklevel=2)
     r = nrgspectral.spectral_poles(
-        sh, eps[k0+1:], t[k0:], keep=keep, T=T,
+        sh, eps[k0+1:], t[k0:], keep=keep, T=T, flip=flip,
         stop_tol=stop_tol if T == 0.0 else None, stop_extra=stop_extra,
         stop_omega=T/100.0 if T > 0.0 else None)
     Xs = tunneling_operators(c, U=U, site=len(c.impurity))
@@ -651,7 +870,7 @@ def twin_chain(fc, z):
 def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
                      T=0.0, keep=800, m=4, k0=None, n_tail=None, nkry=90,
                      stop_tol=1e-4, stop_extra=6, tip_fermi=True,
-                     return_poles=False):
+                     return_poles=False, symmetric="auto"):
     """ysr.get_stm_spectrum(fc, es, submode="NRG"): A(w) at the energies es,
     in the units of the TASK route (the chain's own normalization;
     multiply by fc.dos_factor for the continuum), averaged over nz twists
@@ -659,8 +878,9 @@ def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
     the parameters fc stores, with fc's solver settings).
 
     head="dmrg" (the default) is head_tail_poles(fc, m, k0, n_tail, keep,
-    T, U, nkry, stop_tol, stop_extra) for every twist: the DMRG head (fc's
-    own maxm, nsweeps and cutoff), the NRG tail and the TASK poles of the
+    T, U, nkry, stop_tol, stop_extra, symmetric) for every twist: the
+    DMRG head (fc's own maxm, nsweeps and cutoff), the NRG tail and the
+    TASK poles of the
     head above the scale of the hand-over. head="exact" skips DMRG: the
     spins and the first Wilson site are the exact start shell
     (nrgspectral.spin_cluster_shell with fc's Js, J_chain, B_imp and
@@ -703,7 +923,7 @@ def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
         else:
             r = head_tail_poles(c, m=m, k0=k0, n_tail=n_tail, keep=keep, T=T,
                                 U=U, nkry=nkry, stop_tol=stop_tol,
-                                stop_extra=stop_extra)
+                                stop_extra=stop_extra, symmetric=symmetric)
             scales.append(r.omega_N)
         results.append(r)
     floor = nrgspectral.FLOOR*max(scales)

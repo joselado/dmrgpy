@@ -423,7 +423,15 @@ T=0 one on 6 spins; what T really adds is occupied states, linear in their
 number (`p_cut`), and memory (`memory_model`, `mem_gb` chunks the biases).
 It came from a script on top of dmrgpy in a 1T-TaSe2 project (`llT.py`) and
 agrees with it to 1e-15. README section 8,
-`tests/test_kondo_leading_log_thermal.py`.
+`tests/test_kondo_leading_log_thermal.py`. Since 2026-11-14
+`memory_model(d, m, real)` counts real numbers when the flow takes the real
+route (the same `_block_is_real` test), as the device model already did;
+the complex count cut twice as many chunks as needed with `mem_gb` (on 8
+spins at 2 K a budget of 12 GB peaked at 5.8 GB). `mem_gb` stays None by
+default (the decider's pick), and a flow that the model puts above
+`usable_memory()` (the tightest cgroup limit minus its usage, else
+MemAvailable) warns and names `mem_gb`; do not turn the warning into an
+automatic budget without a pick (`tests/test_kondo_speedups_ll.py`).
 
 **The leading-log flow is one solve on the occupied columns (2026-11-11).**
 `leadinglog._joint_flow` integrates G, A_on and the tip vertex at every
@@ -600,8 +608,18 @@ ones moved A by 1e-2 at T = 1e-14); the B = 0 average of (Q, 2Sz) and
 (which erased B = 5e-11). Keep that average on for a DMRG hand-over: a
 doublet head (odd Nf) has a left basis that is not flip symmetric, and
 without the average the tail was 59% off the exact route with the metal
-under the middle of 3 spins, 3.8% with it (a symmetric basis from both
-members of the doublet is open). The tail chain stops before its scale falls
+under the middle of 3 spins, 3.8% with it. Since 2026-11-14 the hand-over
+of such a head joins the left basis of R|GS>, R = exp(-i pi S^y_tot) site
+by site (`symmetric="auto"`, the decider's pick; `_joined_basis`): 1.5% of
+the peak with or without the average. The join must be closed under R
+EXACTLY (the (Q, -2Sz) basis is the R image of (Q, 2Sz), and 2Sz = 0 is
+cut by the eigenvalues of an R-invariant overlap): a version that only
+cut nearly dependent directions was still 60% off without the average,
+probably because a split of the partner levels acts on the free moment as
+a field. Do
+NOT drop the average either (the exact route is the same with or without
+it, to 1e-4).
+The tail chain stops before its scale falls
 below 1e-30 (`max_sites`, 99 sites at Lambda = 4): `wilson_chain` breaks
 near 1e-35. The hand-over needs a graded basis, so `head_state` solves in
 the sector (Nf, 2Sz), with the v3 charge seed, scans 2Sz in a field and
@@ -612,7 +630,24 @@ state is real only to the accuracy of the solve (2.5e-7 at 20 sweeps).
 The hand-over basis needs about 150 states (m = 4, maxm >= 160): 64
 states were 3% low on 3 spins, and with keep 1600 on both sides head and
 tail agree with the exact route to 8e-4 (keep 800 against 1600 gave the
-1.5 to 1.9% of the first comparison: compare at equal keep). Keeping
+1.5 to 1.9% of the first comparison: compare at equal keep). On 7 and 8
+spins (2026-11-14, Triton) 150 is not enough: the bases of m = 4 (160 to
+210 states) were 2 to 20% off, and m = 5 and 6 (290 to 420 states)
+converge to 0.4% and agree with the exact route at 7 spins to 1.6%;
+the exact route needs keep 3200 at 7 spins and does not converge at 8
+even at 6400 (16% off 3200). The depth floor of N2 is the MPO, not the
+state: v3's svdMPO drops a squared singular value below an absolute
+1e-13 at unit scale, so the Wilson hoppings below about 3e-7 of the unit
+of H lose their channels and the sites after them are nearly decoupled;
+the block levels leave NRG at that scale for every maxm, cutoff and
+number of sweeps (shell 21 at Lambda = 4, 32 at 2.5, 17 at 6). Do NOT
+look for the cause in maxm or the sweeps. `nrgmps.lost_wilson_bonds`
+reads the dropped bonds off the MPO and `head_tail_poles` warns for a
+hand-over whose block holds one; "python" loses channels one bond
+earlier, and its 30-site head failed `real_gauge` (the decoupled sites
+keep the complex random start). A per-bond MPO cutoff would remove it;
+it is the open bond-local truncation of the 2026-09-25 audit
+(`tests/test_nrgmps.py`). Keeping
 only the lowest states of the bare spin chain as the impurity is
 uncontrolled (42 times too narrow a resonance on 3 spins); `project=`
 exists for that test only. The exact route needs keep 800 up to 4 spins

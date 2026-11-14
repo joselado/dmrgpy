@@ -242,3 +242,40 @@ from `$WRKDIR/calculations/kondo_speedups`. The `#SBATCH` values are
 checked against the Triton docs when the script is written, and the job
 is submitted only after the author approves it. The local workstation runs
 only the correctness checks, one at a time and below 3 GB.
+
+## The ED route and the memory model, measured after the changes
+
+Items 1, 3, 4, 5 and 6 are on master (`1e80085` to `31967be`, the record
+of each in `.claude/rules/kondo.md`); item 2 was measured and not
+applied, since after item 1 it saves only n_f/(2 dim) of the F entries
+and gave 0 to 4%. The same cases as the baseline, before (`85ea31a`)
+against after in one job on one core of Triton (21572809, three runs each,
+the minimum):
+
+| case | before | after | factor | largest change of the curve |
+|---|---|---|---|---|
+| ED, 10 spins, T=0, 41 biases | 3.20 s | 0.86 s | 3.7 | 5.8e-15 of the peak |
+| ED, 10 spins, 1 K, 41 biases | 6.10 s | 2.37 s | 2.6 | 5.8e-15 |
+| ED, 9 spins, 20 K, 41 biases | 58.4 s | 27.4 s | 2.1 | 2.0e-15 |
+| ED, 10 spins, 10 K, 241 biases (one run each) | 2533 s | 802 s | 3.2 | 5.2e-15 |
+| KRYLOV, 12 spins, 1 K, 61 biases | 51.3 s | 49.8 s | 1.03 | 2.3e-16 |
+
+At T=0 the third-order term went from 1.84 s to 0.22 s and F0 from 1.38 s
+to 0.17 s (item 1 keeps 99 of 1024 final states); at 20 K the coefficient
+build went from 10.4 s to 1.4 s (item 3) and the rest of the third-order
+term is the F tables of item 4. The peak memory went down in every case
+(0.84 to 0.61 GB at 20 K, and 5.9 to 0.70 GB at 10 K with 241 biases, where
+the hub blocks of item 4 take 796 of the 843 s of the call under the
+profiler). The Krylov case does not gain, because its
+spectra never take the real route and its time is in `state_spectrum`
+(items 11 and 12).
+
+Item 13 is applied too: `memory_model(d, m, real)` counts real numbers on
+the real route. One flow of 241 biases (21572828), the peak above that of
+the process before the call: 9 spins at T=0, 0.65 GB on the real route
+against 0.65 GB of the new model (1.30 GB of the old count), and 1.32 GB
+on the complex route against 1.30 GB; 8 spins at T=0, 0.24 and 0.47 GB
+against 0.22 and 0.44 GB; 8 spins at 1 K with 55 occupied states and 61
+biases, 1.78 GB on the real route against 1.99 GB. With `mem_gb=None` the
+call now warns when the model puts the flow above what the process can
+still take (the decider's pick of a warning, not a default budget).

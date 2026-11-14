@@ -1310,9 +1310,12 @@ of spins. With `head="dmrg"` DMRG solves the spins and the Wilson sites of
 on from the bond basis of that state a few sites before its end (the
 tail). The tail gives the spectrum below the
 energy of that site, and TASK on the head gives it above. On three spins
-the two ways agree. For more spins there is no exact reference, so raise
-`fc.maxm` until the spectrum stops changing: at seven spins it still moved
-by 6% from `maxm=128` to 256.
+the two ways agree, and on seven spins the tail agrees with the exact
+route to about 2% of the peak. Beyond that there is no exact reference,
+so raise `m` and
+`fc.maxm` until the spectrum stops changing: on seven to ten spins the
+bond basis at the hand-over needed 300 to 400 states (`m=5` or 6,
+`fc.maxm=512`).
 
 ```python
 fc = ysr.spin_chain_on_metal(3, 12, Js=0.01, JK=0.3*ysr.lambda_factor(4.0),
@@ -1322,7 +1325,7 @@ es = np.logspace(-8, 0, 50)
 (e, a1) = ysr.get_stm_spectrum(fc, es, submode="NRG", head="exact", keep=1600)
 (e, a2) = ysr.get_stm_spectrum(fc, es, submode="NRG", head="dmrg", keep=1600,
                                m=4, nkry=30)
-print(np.max(np.abs(a2/a1 - 1)[es < 1e-3])) # 8e-4 below the hand-over
+print(np.max(np.abs(a2/a1 - 1)[es < 1e-3])) # 3e-4 below the hand-over
 ```
 
 Keeping only the lowest states of the bare spin chain as the impurity is
@@ -1342,9 +1345,15 @@ narrower than all eight states.
   function of a normal tip at the same temperature; `tip_fermi=False`
   gives $A(\omega)$ itself.
 - `m`: with `head="dmrg"`, the tail starts `m` Wilson sites before the
-  end of the head. The bond basis there needs about 150 states, which
-  takes `m=4` and `fc.maxm` of at least 160. The temperature has to be
-  far below the energy of that site, since TASK is a $T=0$ method.
+  end of the head. The bond basis there needs about 150 states on three
+  spins (`m=4`, `fc.maxm` of at least 160) and 300 to 400 on seven to ten.
+  The temperature has to be far below the energy of that site, since TASK
+  is a $T=0$ method.
+- `symmetric`: with `head="dmrg"`, a head with an odd number of electrons
+  is one member of a doublet; `"auto"` (the default) hands over the bond
+  basis of both members, which keeps the tail symmetric under the flip of
+  all spins. `False` uses one member only, a few percent off when the
+  metal does not screen the moment.
 - `nkry`: the Krylov blocks of TASK on the head, which gives the
   spectrum above that energy. The default 90 gives it to about 4% on
   three spins; 30 is three times faster and about 12% off there.

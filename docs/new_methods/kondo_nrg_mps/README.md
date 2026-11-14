@@ -126,6 +126,14 @@ keep that converges, the result can be qualitatively wrong, not just less
 accurate (106% of the peak at 6 spins and keep = 400). keep = 1600 is
 the default of the examples with several spins.
 
+Beyond 6 spins the reference is keep = 6400, on one core of Triton (Xeon
+Gold 6248), 12 to 14 min and about 30 GB per run. At Js = 1e-3 D, as in
+the table, keep = 3200 is 0.16% of the peak off at 6 spins, 1.0% at 7 and
+16% at 8, and keep = 1600 is 1.4%, 17% and 111% off. At Js = 1e-2 D on 7
+spins keep = 3200 is 0.19% off with the metal under spin 3 and 0.31%
+under the end spin. So the exact route holds at 7 spins with keep = 3200,
+and at 8 spins it does not hold even at keep = 6400.
+
 The shortcut of the plan, the lowest states of the bare spin chain as the
 impurity, is uncontrolled, as the plan expected. With 3 spins at
 Js = 1e-3 D and the metal on the end spin at rho JK = 0.1, all 8 states
@@ -217,14 +225,42 @@ average of partner spectra at B = 0 (`flip`) restores most of the
 symmetry, and it is needed: with the metal under the middle spin, an
 effectively ferromagnetic and so marginal flow, the tail is 3.8% off the
 exact route with it (mean -2.3%) and 59% without it; under the end spin
-both are below 0.3% apart. A hand-over basis built from both members of
-the doublet would remove the rest; it is not implemented. A head with an
-even number of electrons (2Sz = 0) is symmetric to 4e-8.
+both are below 0.3% apart. A head with an even number of electrons
+(2Sz = 0) is symmetric to 4e-8.
+
+The hand-over basis of a head with a moment is now built from both
+members of the doublet (`symmetric="auto"`, the default): the left basis
+of the state joined with that of R|GS>, R = exp(-i pi S^y_tot) applied
+site by site, which is the other member exactly (same energy, opposite
+S^z). The join is closed under R exactly: the basis of (Q, -2Sz) is the
+image of that of (Q, 2Sz), and the one of 2Sz = 0 is cut by the
+eigenvalues of an overlap matrix that commutes with R. This matters. A
+first version that dropped the nearly dependent directions (within 1e-3
+of the span) label by label did not keep the closure, and the tail
+without the average was still 60% off; we read this as the split of the
+partner levels acting on the free moment as a field, which the flow
+makes relevant (the size of the split was not measured). Measured on
+the same 3 spins (head of 12 Wilson sites, maxm = 160, keep = 1600 in the
+tail and in the exact route, one mesh, below w_join/3):
+
+| metal under | basis | flip average | max error / peak | max relative | mean relative |
+|---|---|---|---|---|---|
+| middle spin | plain (145 states) | yes | 3.4% | 12.6% | -2.9% |
+| middle spin | plain | no | 3.1% | 60% | -23% |
+| middle spin | joined (284 states) | yes or no | 1.5% | 5.6% | -0.4% |
+| end spin | plain or joined | yes or no | 1.3 to 1.4% | 1.7 to 1.9% | -0.1% |
+
+The exact route gives the same curve with and without the average (to
+1e-4 of the peak), so the average was only ever standing in for the
+basis. The joined basis doubles the hand-over basis and takes the tail
+from about 48 s to 70 to 90 s; the DMRG head and TASK are unchanged.
 
 m = 4 is the default, and the head needs a maxm of at least about 160:
 the bond at the hand-over stops near 150 states at the cutoff 1e-12 even
 with maxm = 256 or 512. The example `spin_chain_nrg_head_tail` (3 spins,
 maxm = 160, nkry = 30, one mesh) agrees with the exact route to 8e-4
+with one member of the doublet in the hand-over basis and to 2.9e-4 with
+both (the default since 2026-11-14), both
 below 1e-3, in 6 minutes on one core.
 
 ## 6. The joined spectrum
@@ -260,21 +296,40 @@ routes put their weight on different lines, and the joined curve is 3%
 low on average there. The joined poles carry the sum rule of the head
 state to +0.3% and -0.2% at nkry = 90 (+0.5% and -1.2% at 30).
 
-Beyond the exact route (step 9 of the plan's ladder) there is no
-reference, only the convergence in maxm, measured on one mesh with
-keep = 1600 in the tail and the head of 12 Wilson sites:
+Step 9 of the plan's ladder takes the route past 3 spins. It was run on 7
+and 8 spins (Js = 1e-2 D, rho JK = 0.15, one mesh, b = 0.8, the tail
+alone, keep = 1600), with the hand-over at the Wilson site 7 (scale
+1e-2) and m = 4, 5 and 6 head sites after it, maxm 256 to 768, so the
+hand-over basis grows from about 160 to 420 states. The size of that
+basis is set by m more than by maxm. Between the two largest bases A(w)
+changes by 0.00% of its peak on 7 spins with the metal under the end
+spin, 0.37% under spin 3, and by 0.07% and 0.12% on 8 spins under spin 7
+and spin 4. The bases of m = 4 (160 to 210 states) are 2 to 20% off the
+largest one, so the about 150 states of section 5 are not enough on
+these chains.
 
-- 7 spins, the metal under the end spin (an odd chain, a moment that the
-  metal screens): the Kondo resonance is there, A of about 3.6 to 4.2
-  below 1e-5. maxm = 128 and 256 (126 and 168 states at the hand-over)
-  differ by up to 6.1% below 1e-3, so this case needs a larger maxm than
-  3 spins did; it was not taken further.
-- 8 spins, the metal under the end spin (an even chain, a singlet with
-  nothing to screen): the spectrum vanishes below 1e-4, as it should. At
-  1e-3, near the gap of the chain, maxm = 128 and 256 differ by 15%.
+On 7 spins the exact route holds (section 3), and head and tail agree
+with it at keep = 6400. With the metal under the end spin (a moment that
+the metal screens, a Kondo peak of 4.2) the difference is 1.6% of the peak
+below 1e-5, 0.4% from 1e-5 to 1e-4 and at most 0.3% up to 3e-3. Under
+spin 3 (a triplet whose exchange with the metal acts as ferromagnetic, no
+Kondo peak) it is 0.07% below 1e-3 and 1.3% from 1e-3 to 3e-3. The 1.6%
+does not move with the hand-over basis (1.67% at 168 states, 1.56% at
+422), so it is probably the keep of the tail, 1600 against 6400, which
+was not measured. From 3e-3 up, near and above w_join, the tail alone is
+11% and 62% off, and there TASK on the head takes over. On 8 spins the
+exact route does not hold, so there only the convergence of the head
+route is measured; the chain is a singlet and A vanishes below 1e-4, as
+it should.
 
-So the route is validated against the exact one up to 3 spins, and
-beyond that only its convergence is measured.
+The same ladder on 10 spins, with the metal under the end spin and under
+its neighbour, converges more slowly with the neighbour: between the two
+largest hand-over bases (402 and 414 states, 327 and 333) A changes by
+0.47% and 1.35% of its peak, and the next ones (340, 292) are 0.78% and
+2.3% off. Both chains are singlets, and A vanishes at low energy (below
+1e-10 of its peak at 1e-9 and about 1e-5 at 1e-5), so these are runs
+without a Kondo resonance, and nothing beyond 7 spins checks the
+resonance itself. Each run of the head took 1.5 to 4.5 min on one core.
 
 ## 7. Checks
 
@@ -332,16 +387,33 @@ chain). A coarse Krylov space is not enough above w_join: nkry = 30 was
   w_join/10). Above it, the exact route of section 3 is the only one.
 - A superconducting substrate: the (Q, 2S^z) labels need a conserved
   charge.
-- A flip-symmetric hand-over for a head with a moment (section 5): the
-  average of partner spectra stands in for it, a few percent off on a
-  marginal flow.
-- A converged case beyond 6 spins: at 7 and 8 spins maxm = 256 was not
-  enough (section 6).
-- The depth floor of the plan's N2, the deepest hand-over at which the
-  block spectrum of DMRG still agrees with NRG in relative terms, was not
-  measured; every hand-over here was at the Wilson site 7 or 8, where the
-  scale is about 1e-2. `head_tail_poles` warns when the hand-over basis
-  holds fewer than `MIN_HANDOVER` = 100 states.
+- A reference beyond 7 spins: at 8 spins the exact route is not converged
+  at keep = 6400, and the head route is checked by its convergence only
+  (section 6).
+- A hand-over below the floor of the MPO. ITensor's svdMPO (v3) cuts a
+  squared singular value below an absolute 1e-13 at unit scale, so a
+  Wilson hopping below about 3e-7 of the unit of H leaves the MPO of the
+  head, and the sites after it are nearly decoupled from the chain (on 30
+  Wilson sites at Lambda = 4 the MPO link dimension is 7 down to
+  |t| = 6e-7, 6 at 3.0e-7 and 3 from 1.5e-7 on). So the depth floor of
+  the plan's N2 is a scale, not a number of sites. Measured on one spin
+  (maxm 128 to 512, cutoff 1e-12 and 1e-14, 30 or 90 sweeps) and three
+  spins (maxm 256 and 512), the lowest levels of the block agree with
+  NRG to below 8e-4 omega_k down to the deepest shell whose hopping is
+  at least 3.5e-7 (the Wilson site 21 at Lambda = 4, 32 at 2.5 and 17 at
+  6), and they are off by 0.36 to 1.8 omega_k from the first shell whose
+  hopping is 3.0e-7 or less, whatever maxm, cutoff and sweeps. On
+  "python" the builder truncates its return sweep at a relative 1e-14 and
+  drops channels one bond earlier at Lambda = 4, and the solve of a head
+  of 30 Wilson sites failed the real gauge (residual 1.07e-4 against
+  1e-4). `nrgmps.lost_wilson_bonds` reads the dropped bonds off the MPO,
+  and `head_tail_poles` warns for a hand-over whose block holds one (at
+  Lambda = 6 this warns one shell before the measured floor). The
+  hand-overs of this record are at the Wilson site 7, scale 1e-2, far
+  above it. A per-bond cutoff of the MPO would remove the floor; it is
+  the bond-local truncation that the 2026-09-25 audit left open.
+- `head_tail_poles` also warns when the hand-over basis holds fewer than
+  `MIN_HANDOVER` = 100 states.
 
 ## 10. Papers
 

@@ -75,7 +75,8 @@ class KondoSpectrumMixin():
               so that one flow stays below about mem_gb GB; with None
               every bias is one flow on the CPU, which at T>0 holds a
               table per occupied state per bias (leadinglog.memory_model
-              gives the size).
+              gives the size, and the call warns when it is above the
+              memory the process can still take).
           mode: "ED" (default) always uses full ED diagonalization of this
               chain's Hamiltonian (every eigenstate is needed as a
               possible virtual intermediate state), via
