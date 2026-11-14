@@ -517,6 +517,52 @@ the block form. So "auto" takes the block form when the column form needs
 (`BLOCK_COLUMNS`). The two forms agree to
 1.2e-15 at every size measured on the H200.
 
+**The S^z blocks (2026-11-14), opt-in.** For a Hamiltonian that
+conserves S^z the vertices are block sparse. The index (s,a) of the 2d x
+2d block form, s the electron spin, carries s + M_a, and every vertex of
+the flow conserves it, since the bare one does and the kernel only
+multiplies entries. The electron transpose of a vertex conserves M_a - s
+instead. So `sz_blocks=True` runs the four products on blocks
+(`_SzBlocks`, through flat indices of the 2d x 2d matrices; `_swap` is
+its own inverse, so one index map reads swap(Y) and writes swap(Z)). The
+tip sums are block sparse too (`_tip_bracket_blocks`). For a column b the
+final states a lie within one S^z of b, one or two of the four (i,n)
+contribute, and the intermediate states c lie in two or three adjacent
+sectors. In the order of (component, M) those c are one range, and the
+hole sum keeps compact tables of these ranges, or computes the kernel on
+the fly above `HOLE_TABLE_BYTES`. The loops over a range are written on
+slices with local offsets, because numba vectorizes those and not the same
+loops over c0..c1 (1.6x slower). The labels M are read off the tip spin
+(`_sz_labels`, entries above `SZ_TOL` = 1e-10 of the largest).
+
+The labels fail when a degenerate level mixes S^z sectors. That is every
+multiplet at B=0, and in a field a level crossing. On 9 spins with J = 1
+meV and 0.3 meV along z a magnon level lies exactly 5B below the
+ferromagnetic multiplet, since cos(2 pi/3) = -1/2, and four pairs of
+levels with S^z 5 apart are degenerate to 1e-18 eV. There the flow runs
+in the eigenbasis of S^z_tot (`_sz_rotation`): U diagonalizes diag(e)/W +
+4 S^z_tot, W the spread of e, so it needs no energy tolerance. It is
+accepted when U^T diag(e) U is diagonal to `SZ_TOL` of W (4e-15 eV at 9
+and 10 spins, which is the leak of S^z_tot in the eigenbasis, 1e-12 to
+5e-11, turned into energy) and when it maps the occupied states onto
+as many rotated ones. The tip vertex is rotated back at the end. A
+transverse field fails the test (2.2e-4 eV off the diagonal), and the
+call warns and runs the dense flow, bit for bit. D_stop and the sample
+coupling are maxima over entries, so they are read in the rotated basis:
+on a stopped flow at B=0 D_stop moved by 6e-10 relative.
+
+Measured on one core at T=0 on the chain above with the field along z
+only, Jrho_s=-0.05 and U=0.25. 8 spins, 61 biases: 54.0 s to 19.4 s, with
+the products 26.1 s to 3.3 s and the hole sum 16.4 s to 7.6 s. 9 spins,
+241 biases (Triton, Xeon Gold 6248): 419.8 s to 162.0 s in the field
+(2.59x) and 516.5 s to 236.1 s at B=0 (2.19x), at the same peak memory
+(1.31 and 1.54 GB). dI/dV moved by 6.5e-16, 4.8e-13 and 3.6e-12 of the
+peak; on 4 to 6 spins at B=0 by 2.6e-12 to 4.1e-11, the rtol of the flow,
+as for any change of basis inside the degenerate levels. At 1 K on 8
+spins the gain is 3%: only the products are blocked at T>0, and there
+the thermal tip sum over the occupied states is what costs. It stays off
+by default. It is CPU only; on the device it warns.
+
 What is not done. The tip vertex is integrated as part of the state, so
 its 13 stages are kept like those of the couplings. It does not enter
 any right-hand side, so a quadrature that accumulates its stages would

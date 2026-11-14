@@ -263,6 +263,22 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
 15. **Sz block structure.** For a Hamiltonian that conserves Sz the four
     2d x 2d products and the hole sum are block sparse: 2 to 3x at 9 spins
     and T=0. `leadinglog.py:163`.
+    Done on 2026-11-14 as the opt-in `sz_blocks=True` (CPU, real route),
+    measured on the chain of `ll_chain` with the field along z only
+    (0.3 meV, no x part, which would break S^z), 61 biases on 8 spins on
+    the workstation and 241 biases on 9 spins on Triton (Xeon Gold 6248),
+    one core, T=0. 8 spins: 54.0 s to 19.4 s (2.78x); the products went
+    from 26.1 s to 3.3 s, the hole sum from 16.4 s to 7.6 s. 9 spins in
+    the field: 419.8 s to 162.0 s (2.59x); at B=0: 516.5 s to 236.1 s
+    (2.19x). The peak memory is the same (1.31 and 1.54 GB). dI/dV moved by
+    6.5e-16, 4.8e-13 and 3.6e-12 of the peak. On 8 spins at 1 K the gain is
+    3% (537.7 s to 521.1 s), since only the products are blocked there and
+    the thermal tip sum over the occupied states is what costs. At 9 spins
+    the eigenbasis is not one of definite S^z: a magnon level lies exactly
+    5B below the ferromagnetic multiplet, so four pairs of levels with S^z
+    5 apart are degenerate, and the first Triton run timed the dense flow
+    (no labels). The flow then runs in the eigenbasis of S^z_tot, which also
+    covers B=0. The thermal tip sum was not blocked.
 16. **On the GPU** the jitted right-hand side is compiled again for
     every flow (`leadinglog_device.py:346`), the tip sums re-read the whole
     operand for every bias (`:505`, 2 to 3x on the per-bias part at

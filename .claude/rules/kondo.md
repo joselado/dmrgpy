@@ -553,6 +553,29 @@ core) is what is left; numba threads gave 0.38 s to 0.04 s and were not
 added, since they do not follow the BLAS thread settings. The author
 chose to leave it on one core (2026-11-11); do not thread it unasked.
 
+**The S^z blocks of the leading-log flow (2026-11-14)** are opt-in,
+`sz_blocks=True` on `leading_log_dIdV` and `get_kondo_spectrum(order="LL")`,
+CPU and real route only (item 15 of `docs/kondo_speedup_plan.md`, README
+section 7). Every vertex conserves s + M_a in block form and its electron
+transpose M_a - s, so `_SzBlocks.bracket` and `_tip_bracket_blocks` run
+on blocks; the dense functions (`_bracket`, `_tip_bracket`, the hole
+sums) are untouched, and `sz_blocks=False` is the old flow bit for bit.
+Labels come from the tip spin (`_sz_labels`, `SZ_TOL` = 1e-10). When a
+degenerate level mixes S^z sectors (B=0, or a crossing in a field: 9
+spins at J = 1 meV, 0.3 meV along z have four) the flow runs in the
+eigenbasis of S^z_tot read from the chain (`_sz_rotation`,
+`KondoSpectrum.eigenbasis_operator`), accepted only when U^T diag(e) U is
+diagonal to `SZ_TOL` of the spread of e, and the tip vertex is rotated
+back; a transverse field warns and runs dense. Do NOT replace the
+rotation by an energy tolerance on the levels, and do NOT detect from the
+tip spin alone: that missed the plan's own 9-spin chain and timed the
+fallback. The loops of `_hole_sum_blocks_table` run on slices with local
+offsets, which numba vectorizes (the loops over c0..c1 were 1.6x
+slower). Measured: 2.78x on 8 spins, 2.59x and 2.19x on 9 spins (field
+along z, B=0), 3% at 1 K, where the thermal tip sum is not blocked; dI/dV
+moves by below 4e-11 of the peak. `info["sz_blocks"]` says whether the
+blocks ran (`tests/test_kondo_leading_log_sz_blocks.py`).
+
 **The leading-log flow on a device (2026-11-12)**, `leadinglog_device.py`,
 is the same flow with the state on a GPU, taken by `_joint_flow` when
 `pyitensor.backend.set_backend("jax")` is on (`leadinglog._on_device`,
