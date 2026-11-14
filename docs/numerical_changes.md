@@ -1650,7 +1650,8 @@ below about $3\times 10^{-7}$ of the unit of H.
 `nrgmps.head_tail_poles` and `ysr.get_stm_spectrum(submode="NRG",
 head="dmrg")` now hand over, for a head with an odd number of electrons
 (2Sz != 0) at B = 0, the left basis of the state joined with that of its
-flipped partner (`symmetric="auto"`, the default, picked by the decider;
+flipped partner (`symmetric="auto"`, the default, picked by the decider and
+confirmed by the author;
 `symmetric=False` gives the old basis). The curves of such heads move. On
 3 spins with the metal under the middle spin (a marginal flow) the error
 against the exact route below w_join/3 goes from 3.4% to 1.5% of the

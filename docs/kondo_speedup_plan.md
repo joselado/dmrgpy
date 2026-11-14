@@ -210,7 +210,9 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
   decider's pick). The measurement that would reopen it as an opt-in
   keyword is one at 12 spins or more with nkry from 200 to 400, where the
   Krylov space does not exhaust the Hilbert space. At 10 spins the 1024
-  states are the whole space, which plain ED covers.
+  states are the whole space, which plain ED covers. The author picked on
+  2026-11-14 to take it as an opt-in keyword instead (see the choices for
+  the author).
 - **`su2=None` by default, taken on the cut of the full sum** (the
   decider's pick, `ded5439` and `100eb84`). With the first cut the gates
   gave: (a) on against off at the default `p_cut` on 7 spins at 1.5 K
@@ -258,7 +260,7 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
 
 Three items change a default or a number, so they are not taken without a
 pick. On 2026-11-14 a stand-in decider (a Fable agent, the author being
-away) picked all three, and each waits for the author's confirmation:
+away) picked all three, and the author confirmed all three the same day:
 `su2=True` by default when H commutes with the total spin (a
 (2S+1)-fold saving at T>0, 3.2x in states measured on 7 spins at 1.5 K;
 taken as `su2=None`, see the Krylov section);
@@ -272,13 +274,24 @@ count, about half on the real route), so today a T>0 call above 8 spins
 needs `mem_gb` by hand.
 
 The Krylov work of 2026-11-14 left three more picks, each measured in the
-section above. Two are decided: `su2=None` by default together with the
-weight cut of the full sum is taken (2.8x on the zero-field 12-spin chain,
-`su2=True` results move by about `p_cut`), and the residual stop stays
-on the branch `krylov-residual-stop` until a measurement at 12 spins or
-more with nkry 200 to 400. One is open: the block Gram-Schmidt of the
-branch `krylov-block-gram-schmidt` (1.7x on `state_spectrum`, dI/dV moves
-by 3e-13 of the peak).
+section above. The decider took `su2=None` by default together with the
+weight cut of the full sum (2.8x on the zero-field 12-spin chain,
+`su2=True` results move by about `p_cut`), and the author confirmed it.
+The author picked the other two on 2026-11-14: the residual stop of
+`krylov-residual-stop` goes to master as an opt-in keyword, off by
+default, so the default call keeps its cost and its numbers; and the
+block Gram-Schmidt of `krylov-block-gram-schmidt` (1.7x on
+`state_spectrum`, dI/dV moves by 3e-13 of the peak) goes to master with
+the truncated-space bound of the item 11 test loosened to 1e-12, still 9
+times below the 9e-12 that two eigsh starts give on 12 spins.
+
+Three more picks of the author, the same day. The rule to revert a change
+below 1.1x is read on the function the item targets, not on the whole
+call, so items 8, 9 and 11 stay (8 and 9 give 1.3 together on the real
+"python" build at nkry=300, and 11 removes code). Item 2 is applied on
+the Krylov route only, where n_f is close to dim, and kept only if it
+passes 1.1x on the third-order term on Triton; on the ED route it stays
+out. The 63 commits of the night were pushed on 2026-11-14.
 
 ## How to measure
 
@@ -328,7 +341,8 @@ on the complex route against 1.30 GB; 8 spins at T=0, 0.24 and 0.47 GB
 against 0.22 and 0.44 GB; 8 spins at 1 K with 55 occupied states and 61
 biases, 1.78 GB on the real route against 1.99 GB. With `mem_gb=None` the
 call now warns when the model puts the flow above what the process can
-still take (the decider's pick of a warning, not a default budget).
+still take (the decider's pick of a warning, not a default budget,
+confirmed by the author).
 
 ## The TASK route, measured after the changes
 

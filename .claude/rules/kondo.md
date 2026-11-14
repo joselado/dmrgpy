@@ -457,7 +457,7 @@ peak. (3) The Krylov spectra of a real H already have the real form of
 exchange F tables, 90% of the third-order term of one state, with n_f
 about the whole basis here (plan item 2 would halve them on this route; not
 done). (4) `su2=None` is the default since 2026-11-14 (the decider's
-pick): the reduction when the checks pass, the full sum when one fails
+pick, confirmed by the author): the reduction when the checks pass, the full sum when one fails
 with `SU2Error`, the only error it falls back on, so an error of the
 eigensolver still raises. It rests on the weight cut of the full sum,
 exp(-x) > p_cut on every multiplet whatever its 2S+1 (`ded5439`); do NOT
@@ -517,7 +517,7 @@ agrees with it to 1e-15. README section 8,
 route (the same `_block_is_real` test), as the device model already did;
 the complex count cut twice as many chunks as needed with `mem_gb` (on 8
 spins at 2 K a budget of 12 GB peaked at 5.8 GB). `mem_gb` stays None by
-default (the decider's pick), and a flow that the model puts above
+default (the decider's pick, confirmed by the author), and a flow that the model puts above
 `usable_memory()` (the tightest cgroup limit minus its usage, else
 MemAvailable) warns and names `mem_gb`; do not turn the warning into an
 automatic budget without a pick (`tests/test_kondo_speedups_ll.py`).
@@ -699,7 +699,8 @@ doublet head (odd Nf) has a left basis that is not flip symmetric, and
 without the average the tail was 59% off the exact route with the metal
 under the middle of 3 spins, 3.8% with it. Since 2026-11-14 the hand-over
 of such a head joins the left basis of R|GS>, R = exp(-i pi S^y_tot) site
-by site (`symmetric="auto"`, the decider's pick; `_joined_basis`): 1.5% of
+by site (`symmetric="auto"`, the decider's pick, confirmed by the author;
+`_joined_basis`): 1.5% of
 the peak with or without the average. The join must be closed under R
 EXACTLY (the (Q, -2Sz) basis is the R image of (Q, 2Sz), and 2Sz = 0 is
 cut by the eigenvalues of an R-invariant overlap): a version that only
