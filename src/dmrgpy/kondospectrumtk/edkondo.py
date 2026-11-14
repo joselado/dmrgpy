@@ -116,8 +116,13 @@ class KondoSpectrum():
         self.Sy = self._eigenbasis_spin_operator("Sy")
         self.Sz = self._eigenbasis_spin_operator("Sz")
     def _eigenbasis_spin_operator(self, name):
+        # MultiOperator, this site
+        return self.eigenbasis_operator(getattr(self.chain, name)[self.site])
+    def eigenbasis_operator(self, op):
+        """<a|op|b> in the eigenbasis, for a MultiOperator op of the chain
+        (the spin matrices of the site, or S^z_tot for the S^z blocks of
+        leadinglog), in the same arithmetic as the spin matrices."""
         edobj = self.chain.get_ED_obj()
-        op = getattr(self.chain, name)[self.site] # MultiOperator, this site
         # get_operator restricts to the chain's conserved sector, if any,
         # and refuses an operator that leaves it: Nf=n on a Hubbard chain is
         # exact at T=0, since S_i conserves the electron number, while an

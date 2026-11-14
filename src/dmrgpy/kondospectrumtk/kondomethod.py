@@ -123,7 +123,11 @@ class KondoSpectrumMixin():
               every bias is one flow on the CPU, which at T>0 holds a
               table per occupied state per bias (leadinglog.memory_model
               gives the size, and the call warns when it is above the
-              memory the process can still take).
+              memory the process can still take). sz_blocks (order="LL"
+              only, default False) runs the flow on the blocks of total
+              S^z when H conserves S^z and no degenerate level mixes S^z
+              sectors (a field along z), on the CPU; otherwise it warns
+              and runs the dense flow.
           mode: "ED" (default) always uses full ED diagonalization of this
               chain's Hamiltonian (every eigenstate is needed as a
               possible virtual intermediate state), via
@@ -327,6 +331,9 @@ class KondoSpectrumMixin():
             # T>0 call on the CPU runs every bias in one flow
             mem_gb = kwargs.pop("mem_gb", None) if (
                 order == "LL" and submode is None) else None
+            # the opt-in S^z blocks of the leading-log flow
+            sz_blocks = kwargs.pop("sz_blocks", False) if (
+                order == "LL" and submode is None) else False
             if kwargs:
                 raise TypeError(
                     "get_kondo_spectrum(mode=\"ED\"%s) got unexpected keyword "
@@ -339,7 +346,7 @@ class KondoSpectrumMixin():
                     "full-spectrum route does not use -- its T=0 already "
                     "averages a degenerate ground manifold -- or "
                     "parameters of submode=\"KRYLOV\" (nkry, p_cut, su2, tol), "
-                    "which need that submode, or mem_gb, which needs "
+                    "which need that submode, or mem_gb and sz_blocks, which need "
                     "order=\"LL\" without a submode, or not "
                     "parameters of this method at all (check the spelling "
                     "of Jrho_s, U, T, T0, omega0, Gamma0, order, kB)")
@@ -357,7 +364,7 @@ class KondoSpectrumMixin():
                                                        kB, **krylov)
             return self._get_kondo_spectrum_ed(eV, site, Jrho_s, U, T, T0,
                                                 omega0, Gamma0, order, kB,
-                                                mem_gb=mem_gb)
+                                                mem_gb=mem_gb, sz_blocks=sz_blocks)
         elif mode == "DMRG":
             if not T >= 0.:
                 raise ValueError("T must be >= 0, got %r" % (T,))
@@ -377,7 +384,7 @@ class KondoSpectrumMixin():
                                                  omega0=omega0, Gamma0=Gamma0,
                                                  order=order)
     def _get_kondo_spectrum_ed(self, eV, site, Jrho_s, U, T, T0, omega0,
-                                Gamma0, order, kB, mem_gb=None):
+                                Gamma0, order, kB, mem_gb=None, sz_blocks=False):
         from .edkondo import KondoSpectrum
         from . import conductance
         from .stepfunctions import cached_fbuilder
@@ -386,7 +393,7 @@ class KondoSpectrumMixin():
             from .leadinglog import leading_log_dIdV
             return eV, leading_log_dIdV(ks, eV, Jrho_s, U=U, T0=T0,
                                         omega0=omega0, Gamma0=Gamma0,
-                                        mem_gb=mem_gb)
+                                        mem_gb=mem_gb, sz_blocks=sz_blocks)
         dIdV = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
         if order == 3:
             # shared between both calls below, and kept across calls at

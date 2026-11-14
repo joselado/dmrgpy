@@ -38,6 +38,15 @@ For a real Hamiltonian the block form of every vertex is a real matrix,
 and the flow is run in real arithmetic (_block_is_real); a complex
 eigenbasis, as with a field along y, takes the complex route.
 
+For a Hamiltonian that conserves S^z, sz_blocks=True (opt-in, real route,
+CPU) runs the flow on the blocks of total S^z: an index (s,a) of a vertex
+carries s + M_a, which every vertex conserves, so the four products and
+the two sums of the tip vertex run on blocks (_SzBlocks,
+_tip_bracket_blocks). The labels M are read off the tip spin
+(_sz_labels); when a degenerate level mixes S^z sectors (every multiplet
+at B=0, a level crossing in a field) the flow runs in the eigenbasis of
+S^z_tot from the chain and the tip vertex is rotated back (_sz_rotation).
+
 An impurity with no spin gives the potential scattering of the tip alone,
 2*pi*T0^2*4*U^2 for dI/dV, without a warning: there is no exchange vertex
 to flow, and the result is the second order.
@@ -103,6 +112,12 @@ HOLE_TABLE_BYTES = 256e6
 # precision (see _block_is_real)
 REAL_TOL = 1e-12
 
+# an entry of the tip spin above this fraction of its largest one counts
+# for the S^z labels of the states (_sz_labels); what lies below it off the
+# blocks is the leak of the eigenbasis, 8e-13 on the 8-spin chain of
+# docs/kondo_speedup_plan.md, and the blocked flow drops it
+SZ_TOL = 1e-10
+
 
 def _kernel(x, D, omega0, Gamma0):
     """K(x,D) = 1/(D+r_x) - 1/(D+omega0+|x|), r_x = sqrt(x^2+Gamma0^2):
@@ -161,6 +176,226 @@ def _bracket(Xb, Yb):
     matrices in the reversed order (the hole channel), where the impurity
     matrices keep the order Y X."""
     return np.matmul(Xb, Yb) - _swap(np.matmul(_swap(Yb), _swap(Xb)))
+
+
+def _sz_labels(S, tol=SZ_TOL):
+    """Labels M of the impurity states such that the tip spin changes M
+    the way S^z, S^+ and S^- do: <a|S^z|b> is nonzero only for M_a = M_b,
+    <a|S^+|b> only for M_a = M_b + 1 (and S^- the other way), an entry
+    counting as nonzero above tol of the largest entry of S. Returns
+    (M, comp), integer arrays, comp the connected component of each state
+    under these entries (no product of the flow joins two components, and
+    M starts at 0 in each), or None when no such labeling exists: the
+    Hamiltonian does not conserve S^z (a transverse field), or a
+    degenerate level of the eigenbasis mixes S^z sectors (a multiplet at
+    B=0). For a Hamiltonian that conserves S^z, M is S^z_tot up to a
+    constant per component."""
+    S = np.asarray(S)
+    d = S.shape[-1]
+    big = tol*max(np.max(np.abs(S)), 1e-300)
+    Sp = S[0] + 1j*S[1]
+    moves = [(np.abs(S[2]) > big, 0), (np.abs(Sp) > big, 1),
+             (np.abs(Sp.conj().T) > big, -1)]
+    M = np.zeros(d, dtype=int)
+    comp = np.full(d, -1)
+    for start in range(d): # a spanning tree of each component
+        if comp[start] >= 0:
+            continue
+        comp[start] = start
+        stack = [start]
+        while stack:
+            b = stack.pop()
+            for mask, shift in moves:
+                for a in np.nonzero(mask[:, b] & (comp < 0))[0]:
+                    comp[a], M[a] = start, M[b] + shift
+                    stack.append(a)
+    for mask, shift in moves: # every entry, not only the tree
+        if np.any(mask & (M[:, None] != M[None, :] + shift)):
+            return None
+    return M, comp
+
+
+def _sz_rotation(ks, cols, tol=SZ_TOL):
+    """The eigenbasis of ks turned into one of definite S^z_tot, for a
+    spectrum whose degenerate levels mix S^z sectors: at B=0 every
+    multiplet, and in a field a level crossing (9 spins 1/2 with J = 1 meV
+    and 0.3 meV along z hold four, a magnon at 5B below the ferromagnetic
+    multiplet). U is the eigenbasis of diag(e)/W + 4 S^z_tot, W the spread
+    of e, so it needs no energy tolerance: sectors 1 apart are 4 apart in
+    it, more than the energies. It is accepted only when U^T diag(e) U is
+    diagonal to tol of W, which is the measured test that H conserves
+    S^z_tot (a transverse field fails it), and when U maps the columns
+    cols (the occupied states) onto as many rotated ones. Returns
+    (U, e, S, cols, Wc): the rotated energies, tip spin and columns, and
+    Wc = U[cols, new cols], so that a tip vertex A in the rotated basis is
+    U A Wc^T in the original one. None when ks has no chain to read
+    S^z_tot from (ks.eigenbasis_operator, edkondo.KondoSpectrum) or when a
+    test fails."""
+    reader = getattr(ks, "eigenbasis_operator", None)
+    chain = getattr(ks, "chain", None)
+    if reader is None or chain is None or not hasattr(chain, "Sz"):
+        return None
+    Mm = np.asarray(reader(sum(chain.Sz)))
+    if np.iscomplexobj(Mm):
+        if np.max(np.abs(Mm.imag)) > tol*max(np.max(np.abs(Mm)), 1e-300):
+            return None
+        Mm = Mm.real
+    Mm = 0.5*(Mm + Mm.T)
+    e = np.asarray(ks.e, dtype=float)
+    W = max(np.ptp(e), 1e-300)
+    U = np.linalg.eigh(np.diag(e/W) + 4.0*Mm)[1]
+    Eu = U.T @ (e[:, None]*U)
+    eu = np.diag(Eu).copy()
+    if np.max(np.abs(Eu - np.diag(eu))) > tol*W:
+        return None
+    cols = np.asarray(cols, dtype=int)
+    weight = np.sum(U[cols]**2, axis=0) # of each rotated state on the columns
+    new = np.nonzero(weight > 0.5)[0]
+    if len(new) != len(cols) or np.max(np.minimum(weight, 1. - weight)) > tol:
+        return None
+    S = _spin_ops(ks)
+    Sr = np.stack([U.T @ x @ U for x in S])
+    return U, np.ascontiguousarray(eu), Sr, new, U[np.ix_(cols, new)]
+
+
+class _SzBlocks():
+    """The block structure of the flow for an impurity that conserves S^z
+    (labels from _sz_labels). In block form the index (s,a), s the
+    electron spin, carries s + M_a, which every vertex of the flow
+    conserves, so the vertices are block diagonal in it; _swap of a vertex
+    conserves M_a - s instead. The products of _bracket are then products
+    of blocks, read and written through flat indices of the 2d x 2d
+    matrices: the blocks of s + M_a for X Y, and for the hole channel the
+    blocks of M_a - s mapped by _swap, which is its own inverse, so one map
+    reads swap(Y) and writes swap(Z). What the dense flow holds off the
+    blocks is the leak of the eigenbasis, below SZ_TOL of the largest
+    entry; the bracket here is zero there."""
+
+    def __init__(self, M, comp):
+        d = len(M)
+        n2 = 2*d
+        two_s = np.concatenate([np.ones(d, dtype=int), -np.ones(d, dtype=int)])
+        L, C = np.concatenate([M, M]), np.concatenate([comp, comp])
+        self.d, self.M, self.comp = d, np.asarray(M), np.asarray(comp)
+        self.direct, self.exchange = [], []
+        for key, store in ((2*L + two_s, self.direct), (2*L - two_s, self.exchange)):
+            _, inv = np.unique(np.stack([C, key]), axis=1, return_inverse=True)
+            inv = np.ravel(inv)
+            for g in range(inv.max() + 1):
+                I = np.nonzero(inv == g)[0]
+                if store is self.direct:
+                    flat = I[:, None]*n2 + I[None, :]
+                else: # (r,c) -> (s_c a_r, s_r b_c), the map of _swap
+                    s_, a = I//d, I % d
+                    flat = (s_[None, :]*d + a[:, None])*n2 + (s_[:, None]*d + a[None, :])
+                store.append((np.ascontiguousarray(flat.ravel()), len(I)))
+
+    def work(self):
+        """The arithmetic of the blocked products over the dense ones."""
+        return max(sum(n**3 for _, n in g) for g in (self.direct, self.exchange))/(2.*self.d)**3
+
+    def hole_sum(self, cols, w, e, omega0, Gamma0):
+        """The exchange sum of _tip_bracket on the S^z blocks at T=0, for
+        the columns cols, a _BlockHoleSum. Q[a,(i,n,j),c] = sum_k A[k,a,n,c]
+        G[i,c,k,b_j] needs s_k + M_a = s_n + M_c and s_i + M_c = s_k + M_b,
+        all in one component, so a final state a has M_a within 1 of M_b,
+        one or two of the four (i,n) and c in two or three adjacent
+        sectors. In the order of (comp, M) those c are one range, so the
+        sum runs on contiguous rows, and the tables of _hole_tables are
+        kept on those ranges only (compact), when they fit in
+        HOLE_TABLE_BYTES; otherwise the kernel is computed on the fly."""
+        d, m = self.d, len(cols)
+        perm = np.lexsort((self.M, self.comp)) # sorted position -> state
+        M2, comp = 2*self.M[perm], self.comp[perm]
+        sp = (1, -1)
+        nz = np.zeros((d, 2, 2, m, d), dtype=bool) # [a,i,n,j,c], sorted a and c
+        for j, b in enumerate(cols):
+            one = (comp[:, None] == self.comp[b]) & (comp[None, :] == self.comp[b])
+            for i in range(2):
+                for n_ in range(2):
+                    ok = np.zeros((d, d), dtype=bool)
+                    for k in range(2):
+                        ok |= ((sp[k] + M2[:, None] == sp[n_] + M2[None, :])
+                               & (sp[i] + M2[None, :] == sp[k] + 2*self.M[b]))
+                    nz[:, i, n_, j, :] = ok & one
+        nz = nz.reshape(d, 4*m, d)
+        rows = np.nonzero(nz.any(axis=(1, 2)))[0]
+        cs = [np.nonzero(nz[a].any(axis=0))[0] for a in rows]
+        lo = np.array([c[0] for c in cs], dtype=np.int64)
+        hi = np.array([c[-1] + 1 for c in cs], dtype=np.int64)
+        ll = [np.nonzero(nz[a].any(axis=1))[0] for a in rows]
+        l_ptr = np.zeros(len(rows) + 1, dtype=np.int64)
+        l_ptr[1:] = np.cumsum([len(x) for x in ll])
+        l_idx = np.ascontiguousarray(np.concatenate(ll) if ll else np.zeros(0), dtype=np.int64)
+        w = np.ascontiguousarray(w, dtype=float)
+        es = np.ascontiguousarray(np.asarray(e, dtype=float)[perm])
+        off = np.zeros(len(rows) + 1, dtype=np.int64)
+        off[1:] = np.cumsum(len(w)*(hi - lo))
+        tables = None
+        if 16*off[-1] <= HOLE_TABLE_BYTES:
+            R, Wt = np.empty(off[-1]), np.empty(off[-1])
+            for r, a in enumerate(rows): # the expressions of _hole_tables
+                ax = np.abs((w[:, None] - es[a]) + es[None, lo[r]:hi[r]])
+                R[off[r]:off[r + 1]] = np.sqrt(ax*ax + Gamma0*Gamma0).ravel()
+                Wt[off[r]:off[r + 1]] = (omega0 + ax).ravel()
+            tables = (R, Wt, off)
+        # the direct sum: P[j,(i,a,n),c] = sum_k G[i,a,k,c] A[k,c,n,b_j] needs
+        # s_k + M_c = s_n + M_b and s_i + M_a = s_k + M_c
+        direct = []
+        M2o = 2*self.M
+        for b in cols:
+            ok = np.zeros((2, d, 2, d), dtype=bool) # [i,a,n,c]
+            for i in range(2):
+                for n_ in range(2):
+                    for k in range(2):
+                        ok[i, :, n_, :] |= ((sp[k] + M2o[None, :] == sp[n_] + M2o[b])
+                                            & (sp[i] + M2o[:, None] == sp[k] + M2o[None, :]))
+            ok &= ((self.comp[:, None] == self.comp[b])
+                   & (self.comp[None, :] == self.comp[b]))[None, :, None, :]
+            ok = ok.reshape(4*d, d)
+            rr = np.nonzero(ok.any(axis=1))[0]
+            cc = np.nonzero(ok.any(axis=0))[0]
+            i_, a_, n_ = np.unravel_index(rr, (2, d, 2))
+            direct.append((rr, cc, i_[:, None], a_[:, None], n_[:, None], cc[None, :]))
+        return _BlockHoleSum(np.ascontiguousarray(perm, dtype=np.int64),
+                             np.ascontiguousarray(rows, dtype=np.int64), lo, hi,
+                             l_ptr, l_idx, tables, w, es, omega0, Gamma0, direct)
+
+    def bracket(self, Xb, Yb):
+        """_bracket on the blocks: X Y - swap(swap(Y) swap(X))."""
+        x, y = Xb.ravel(), Yb.ravel()
+        out = np.zeros(x.size, dtype=np.result_type(x, y))
+        for I, n in self.direct:
+            out[I] = (x[I].reshape(n, n) @ y[I].reshape(n, n)).ravel()
+        for J, n in self.exchange:
+            out[J] -= (y[J].reshape(n, n) @ x[J].reshape(n, n)).ravel()
+        return out.reshape(Xb.shape)
+
+
+class _BlockHoleSum():
+    """The exchange sum of _tip_bracket on the S^z blocks
+    (_SzBlocks.hole_sum): the states in the order perm, the final states
+    rows, for each the intermediate states lo..hi and the columns
+    l_idx[l_ptr[r]:l_ptr[r+1]], and the compact tables (R, Wt, off) of
+    those ranges, or None to compute the kernel on the fly. Called as
+    (Q, D, out) with out zeroed."""
+
+    def __init__(self, perm, rows, lo, hi, l_ptr, l_idx, tables, w, es, omega0,
+                 Gamma0, direct):
+        self.direct = direct # per column: the rows (i,a,n) and the c of P
+        self.perm, self.rows, self.lo, self.hi = perm, rows, lo, hi
+        self.l_ptr, self.l_idx, self.tables = l_ptr, l_idx, tables
+        self.w, self.es, self.omega0, self.Gamma0 = w, es, omega0, Gamma0
+
+    def __call__(self, Q, D, out):
+        p = self.perm
+        Qp = np.ascontiguousarray(Q[p][:, :, p])
+        pattern = (p, self.rows, self.lo, self.hi, self.l_ptr, self.l_idx)
+        if self.tables is not None:
+            _hole_sum_blocks_table(Qp, *self.tables, D, out, *pattern)
+        else:
+            _hole_sum_blocks(Qp, self.w, self.es, self.omega0, self.Gamma0, D, out,
+                             *pattern)
 
 
 def _rate(G, A, Kmat):
@@ -234,6 +469,68 @@ def _hole_sum_table(Q, R, Wt, D, out):
                 out[k, a, l] = acc
 
 
+@njit(cache=True, fastmath=True)
+def _hole_sum_blocks_table(Q, R, Wt, off, D, out, perm, rows, lo, hi, l_ptr, l_idx):
+    """_hole_sum_table on the S^z blocks (_BlockHoleSum), with Q in the
+    sorted order of the states: the final states rows[r] only, for each
+    the intermediate states lo[r]..hi[r] and the columns
+    l_idx[l_ptr[r]:l_ptr[r+1]], and the compact tables, row r at off[r]
+    as (k, c). out[k, perm[a], l] is in the original order; every other
+    entry of out is left as it comes, so it comes in zeroed. The loops run
+    on slices with local offsets, which numba vectorizes (the same loops
+    over c0..c1 were 1.6x slower on 8 spins)."""
+    nk = out.shape[0]
+    for r in range(len(rows)):
+        a = rows[r]
+        c0 = lo[r]
+        nc = hi[r] - c0
+        pa = perm[a]
+        row = np.empty(nc)
+        for k in range(nk):
+            Rk = R[off[r] + k*nc:off[r] + (k + 1)*nc]
+            Wk = Wt[off[r] + k*nc:off[r] + (k + 1)*nc]
+            for t in range(nc):
+                rr = Rk[t]
+                wt = Wk[t]
+                row[t] = (wt - rr)/((D + rr)*(D + wt))
+            for u in range(l_ptr[r], l_ptr[r + 1]):
+                l = l_idx[u]
+                q = Q[a, l, c0:c0 + nc]
+                acc = 0.
+                for t in range(nc):
+                    acc += q[t]*row[t]
+                out[k, pa, l] = acc
+
+
+@njit(cache=True, fastmath=True)
+def _hole_sum_blocks(Q, w, es, omega0, Gamma0, D, out, perm, rows, lo, hi, l_ptr,
+                     l_idx):
+    """_hole_sum_blocks_table with the kernel computed on the fly, as
+    _hole_sum does, es the energies in the sorted order."""
+    nk = len(w)
+    G2 = Gamma0*Gamma0
+    for r in range(len(rows)):
+        a = rows[r]
+        c0 = lo[r]
+        nc = hi[r] - c0
+        pa = perm[a]
+        row = np.empty(nc)
+        ec = es[c0:c0 + nc]
+        for k in range(nk):
+            u0 = w[k] - es[a]
+            for t in range(nc):
+                ax = abs(u0 + ec[t])
+                rr = np.sqrt(ax*ax + G2)
+                row[t] = (omega0 + ax - rr)/((D + rr)*(D + omega0 + ax))
+            for u in range(l_ptr[r], l_ptr[r + 1]):
+                l = l_idx[u]
+                q = Q[a, l, c0:c0 + nc]
+                acc = 0.
+                for t in range(nc):
+                    acc += q[t]*row[t]
+                out[k, pa, l] = acc
+
+
 def _hole_tables(w, e, omega0, Gamma0):
     """The tables of _hole_sum_table, or None when they would take more
     than HOLE_TABLE_BYTES (two arrays of d*n*d doubles)."""
@@ -300,6 +597,33 @@ def _tip_bracket(Gb, Ab, cols, w, e, D, Dlow, omega0, Gamma0, tables=None,
     hole_of(Qr, hole)
     hole = (hole[:, :, :4*m] + 1j*hole[:, :, 4*m:]).reshape(n, d, 2, 2, m)
     return part - hole.transpose(0, 2, 1, 3, 4)
+
+
+def _tip_bracket_blocks(Gb, Ab, cols, w, e, D, omega0, Gamma0, sums):
+    """_tip_bracket on the S^z blocks, for the real route at T=0 with
+    Dlow < 0: the same sums, with the direct one on the rows (i,a,n) and
+    the intermediate states c that the blocks allow (sums.direct), and the
+    exchange one by sums, a _BlockHoleSum. The products are written out
+    over k instead of einsum (4.7 ms for the two on 8 spins)."""
+    d, m, n = len(e), len(cols), len(w)
+    G4 = Gb.reshape(2, d, 2, d)
+    A4 = Ab.reshape(2, d, 2, d)
+    Ac = A4[:, :, :, cols] # [k,c,n,j]
+    x = w[None, None, :] - (e[None, :, None] - e[cols][:, None, None]) # [j,c,k]
+    Kp = _kernel(x, D, omega0, Gamma0)
+    part = np.zeros((m, 4*d, n))
+    for j in range(m):
+        rr, cc, i_, a_, n_, c_ = sums.direct[j]
+        P = G4[i_, a_, 0, c_]*Ac[0, c_, n_, j] + G4[i_, a_, 1, c_]*Ac[1, c_, n_, j]
+        part[j, rr] = P @ Kp[j, cc]
+    part = part.reshape(m, 2, d, 2, n).transpose(4, 1, 2, 3, 0)
+    # exchange: Q[a,(i,n,j),c] = sum_k A[k,a,n,c] G[i,c,k,b_j]
+    Gc = G4[:, :, :, cols].transpose(0, 3, 1, 2) # [i,j,c,k]
+    Q = (A4[0][:, None, :, None, :]*Gc[None, :, None, :, :, 0]
+         + A4[1][:, None, :, None, :]*Gc[None, :, None, :, :, 1]).reshape(d, 4*m, d)
+    hole = np.zeros((n, d, 4*m))
+    sums(Q, D, hole)
+    return part - hole.reshape(n, d, 2, 2, m).transpose(0, 2, 1, 3, 4)
 
 
 def _spin_ops(ks):
@@ -446,7 +770,7 @@ def _integrate(rhs, y0, Dmax, Dmin, sample_coupling, ref, rtol, atol):
 
 
 def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
-                pole_threshold, kernel=None, onshell_kernel=None):
+                pole_threshold, kernel=None, onshell_kernel=None, sz_blocks=False):
     """One flow from Dmax to Dmin of the sample vertex G, of the on-shell
     tip vertex A_on and of the tip vertex at each incoming energy
     omegas[k], the last one for the columns cols only, all at U=0.
@@ -468,13 +792,22 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
 
     kernel, a thermalkernel.ThermalKernel, is the cutoff kernel of the tip
     vertex at a finite temperature, and onshell_kernel that of the flow of
-    G and A_on; None is the T=0 kernel K(x,D) (see leading_log_dIdV)."""
+    G and A_on; None is the T=0 kernel K(x,D) (see leading_log_dIdV).
+
+    sz_blocks=True runs the products of the flow of G and A_on on the
+    S^z blocks of the spectrum (_SzBlocks), on the real route and on the
+    CPU only; when the spectrum has no such blocks (_sz_labels) it warns
+    and the flow is the dense one."""
     if not Gamma0 > 0.:
         raise ValueError("Gamma0 must be positive, it cuts the logs")
     for k in (kernel, onshell_kernel):
         if k is not None and (k.omega0 != omega0 or k.Gamma0 != Gamma0):
             raise ValueError("the thermal kernel was built for another omega0 or Gamma0")
     if _on_device():
+        if sz_blocks:
+            warnings.warn("leading-log flow: sz_blocks=True is for the CPU; the "
+                          "flow on the device is the dense one", RuntimeWarning,
+                          stacklevel=3)
         # the same flow with the state on the device (leadinglog_device.py)
         from .leadinglog_device import joint_flow
         return joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
@@ -489,8 +822,40 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
     Dmax, Dmin = _energy_range(ks, omega0, w, Gamma0)
     smax = np.max(np.abs(S))/2.
     ref = pole_threshold*smax
-    tables = _hole_tables(w, e, omega0, Gamma0) if kernel is None else None
     real = _block_is_real(S)
+    bracket, pattern, rot = _bracket, None, None
+    if sz_blocks:
+        labels = _sz_labels(S) if real else None
+        if labels is None and real:
+            # a degenerate level that mixes S^z sectors (B=0, or a crossing):
+            # the flow runs in the eigenbasis of S^z_tot, and the tip
+            # vertex is rotated back at the end
+            rot = _sz_rotation(ks, cols)
+            labels = None if rot is None else _sz_labels(rot[2])
+            if labels is None:
+                rot = None
+            else:
+                U, e, S, cols, Wc = rot
+                dE = e[:, None] - e[None, :]
+                smax = np.max(np.abs(S))/2.
+                ref = pole_threshold*smax
+        if labels is None:
+            warnings.warn("leading-log flow: sz_blocks=True, but %s; the flow is "
+                          "the dense one" % ("the vertex is complex (the blocks "
+                                             "are on the real route only)" if not real
+                                             else "H does not conserve S^z_tot in "
+                                             "this eigenbasis (a transverse field, "
+                                             "or a spectrum with no chain to read "
+                                             "S^z_tot from)"),
+                          RuntimeWarning, stacklevel=3)
+        else:
+            blocks = _SzBlocks(*labels)
+            bracket = blocks.bracket
+            if kernel is None:
+                pattern = blocks.hole_sum(cols, w, e, omega0, Gamma0)
+    # the blocks keep their own tables (_SzBlocks.hole_sum)
+    tables = _hole_tables(w, e, omega0, Gamma0) if kernel is None and pattern is None \
+        else None
 
     def kon(D): # the kernel of the on-shell flow at the energy differences
         if onshell_kernel is None:
@@ -514,10 +879,14 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
             Gb, Ab = X[0], X[1]
             GKb = Gb*np.tile(kon(D), (2, 2))
             out = np.empty(len(y))
-            out[:nb] = _bracket(Gb, GKb).ravel()
-            out[nb:2*nb] = _bracket(GKb, Ab).ravel()
-            out[2*nb:] = _tip_bracket(Gb, Ab, cols, w, e, D, -1., omega0, Gamma0,
-                                      tables, kernel).ravel()
+            out[:nb] = bracket(Gb, GKb).ravel()
+            out[nb:2*nb] = bracket(GKb, Ab).ravel()
+            if pattern is None:
+                out[2*nb:] = _tip_bracket(Gb, Ab, cols, w, e, D, -1., omega0, Gamma0,
+                                          tables, kernel).ravel()
+            else:
+                out[2*nb:] = _tip_bracket_blocks(Gb, Ab, cols, w, e, D, omega0, Gamma0,
+                                                 pattern).ravel()
             out *= -D
             return out
 
@@ -565,13 +934,17 @@ def _joint_flow(ks, omegas, cols, Jrho_s, omega0, Gamma0, rtol, atol,
             X = couplings(y)
             Tb = Tb + _tip_bracket(_block(X[0]), _block(X[1]), cols, w, e, D_stop,
                                    Dmin, omega0, Gamma0, kernel=kernel)
-    return _cut_columns(Tb), {"D_stop": D_stop,
-                              "max_coupling": float(max_coupling/(smax if smax > 0. else 1.))}
+    A = _cut_columns(Tb)
+    if rot is not None:
+        A = np.matmul(np.matmul(U, A), Wc.T) # back to the eigenbasis of ks
+    return A, {"D_stop": D_stop,
+               "max_coupling": float(max_coupling/(smax if smax > 0. else 1.)),
+               "sz_blocks": bracket is not _bracket, "sz_rotated": rot is not None}
 
 
 def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
                atol=1e-14, pole_threshold=1.0, cols=None, kernel=None,
-               onshell_kernel=None):
+               onshell_kernel=None, sz_blocks=False):
     """The tip vertex A(omega) at D -> 0 for each incoming energy
     omegas[k], with bare potential scattering Us[k]; shape (n,4,d,d), or
     (n,4,d,m) for the columns (initial states) cols only, which is what
@@ -581,7 +954,7 @@ def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
     The potential scattering of the tip does not flow: its direct and
     exchange terms cancel exactly at every cutoff. So the flow is solved
     once at U=0, and Us[k] is added to the mu=0 vertex at the end.
-    kernel and onshell_kernel: see _joint_flow (None is T=0)."""
+    kernel, onshell_kernel and sz_blocks: see _joint_flow (None is T=0)."""
     omegas = np.asarray(omegas, dtype=float)
     Us = np.broadcast_to(np.asarray(Us, dtype=float), omegas.shape)
     d = len(ks.e)
@@ -589,7 +962,7 @@ def tip_vertex(ks, omegas, Us, Jrho_s, omega0=20e-3, Gamma0=5e-6, rtol=1e-10,
     # a symmetric bias grid asks for each energy twice
     w, inverse = np.unique(omegas, return_inverse=True)
     A, info = _joint_flow(ks, w, cols, Jrho_s, omega0, Gamma0, rtol, atol,
-                          pole_threshold, kernel, onshell_kernel)
+                          pole_threshold, kernel, onshell_kernel, sz_blocks)
     A = A[inverse]
     A[:, 0, cols, np.arange(len(cols))] += Us[:, None]
     return A, info
@@ -664,7 +1037,7 @@ def usable_memory():
 
 
 def _ll_piece(ks, eVs, Jrho_s, U, T0, omega0, Gamma0, occ, rtol, atol,
-              pole_threshold, kernel, onshell_kernel, open_cut):
+              pole_threshold, kernel, onshell_kernel, open_cut, sz_blocks=False):
     """dI/dV and the running tip coupling at the biases eVs, from one
     flow; the body of leading_log_dIdV."""
     p = ks.p[occ]
@@ -676,7 +1049,8 @@ def _ll_piece(ks, eVs, Jrho_s, U, T0, omega0, Gamma0, occ, rtol, atol,
     # A[k,lam,f,i], i over the occupied states only
     A, info = tip_vertex(ks, omegas, Us, Jrho_s, omega0=omega0, Gamma0=Gamma0,
                          rtol=rtol, atol=atol, pole_threshold=pole_threshold,
-                         cols=occ, kernel=kernel, onshell_kernel=onshell_kernel)
+                         cols=occ, kernel=kernel, onshell_kernel=onshell_kernel,
+                         sz_blocks=sz_blocks)
     # W[k,f,i] = 4 sum_lam |A^lam_fi(omega_k)|^2
     W = 4.*np.sum(np.abs(A)**2, axis=1)
     eps_if = e[:, None] - e[occ][None, :] # [f,i] = e_f - e_i
@@ -706,7 +1080,8 @@ def _ll_piece(ks, eVs, Jrho_s, U, T0, omega0, Gamma0, occ, rtol, atol,
 def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
                      Gamma0=5e-6, p_cut=P_CUT, rtol=1e-10, atol=1e-14,
                      pole_threshold=1.0, stop_margin=10.0, return_info=False,
-                     onshell="thermal", open_cut=1e-2, mem_gb=None):
+                     onshell="thermal", open_cut=1e-2, mem_gb=None,
+                     sz_blocks=False):
     """dI/dV with the leading logs summed to all orders, in the units of
     conductance.py (2*pi*e^2*T0^2/hbar). At first order in Jrho_s it is
     second_order_dIdV + third_order_kondo_dIdV + third_order_potential_dIdV
@@ -752,6 +1127,13 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
     with mem_gb=None, and a larger mem_gb warns and is lowered to it. At T>0 the occupied states are the ones within
     ln(1/p_cut) kT of the ground state, and the tip part costs d^2 per
     energy and per occupied state.
+
+    sz_blocks=True (opt-in, CPU and real route only) runs the flow of G
+    and A_on on the blocks of total S^z when the tip spin shows them in
+    this eigenbasis (_sz_labels: a Hamiltonian that conserves S^z, with
+    every degenerate level inside one S^z sector); otherwise it warns and
+    the flow is the dense one. The blocked flow drops what the eigenbasis
+    leaks off the blocks, below SZ_TOL of the largest entry.
 
     return_info=True also returns a dict with D_stop, max_coupling (the
     largest running sample coupling, Jrho_s itself at the start), coupling
@@ -815,15 +1197,19 @@ def leading_log_dIdV(ks, eVs, Jrho_s, U=0.0, T0=1.0, omega0=20e-3,
         pieces = [np.arange(i, min(n, i + nb)) for i in range(0, n, nb)] or [np.arange(0)]
     dIdV, coupling = np.empty(n), np.empty(n)
     D_stop, max_coupling = None, 0.
+    sz_blocked, sz_rotated = bool(pieces), False
     for idx in pieces:
         dIdV[idx], coupling[idx], piece = _ll_piece(
             ks, eVs[idx], Jrho_s, U, T0, omega0, Gamma0, occ, rtol, atol,
-            pole_threshold, kernel, onshell_kernel, open_cut)
+            pole_threshold, kernel, onshell_kernel, open_cut, sz_blocks)
         max_coupling = max(max_coupling, piece["max_coupling"])
+        sz_blocked = sz_blocked and piece.get("sz_blocks", False)
+        sz_rotated = sz_rotated or piece.get("sz_rotated", False)
         if piece["D_stop"] is not None:
             D_stop = piece["D_stop"] if D_stop is None else max(D_stop, piece["D_stop"])
     info = {"D_stop": D_stop, "max_coupling": max_coupling, "coupling": coupling,
-            "n_occ": len(occ), "n_chunks": len(pieces)}
+            "n_occ": len(occ), "n_chunks": len(pieces), "sz_blocks": sz_blocked,
+            "sz_rotated": sz_rotated}
     bad = coupling >= pole_threshold
     if np.any(coupling >= WARN_COUPLING):
         warnings.warn("leading_log_dIdV: the running coupling reaches %.2g at "
