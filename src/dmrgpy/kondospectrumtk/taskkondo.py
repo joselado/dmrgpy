@@ -43,7 +43,9 @@ import numpy as np
 # right to the square of that over the gap to its neighbours.
 CONVERGED_RESIDUAL = 1e-8
 # get_kondo_spectrum warns when a pole that is not converged makes a step
-# larger than this fraction of the largest second-order dI/dV.
+# larger than this fraction of the total spectral weight of the spin, the
+# value the spin part of the second-order dI/dV reaches once every pole is
+# below |eV| (convergence(), "step").
 UNCONVERGED_STEP = 1e-3
 # The largest Boltzmann factor exp(-e1/kT) of the lowest pole above the
 # ground state at which the sample still counts as being in its ground
@@ -247,9 +249,14 @@ class TaskKondoSpectrum():
         width of the thermal step, which does not resolve closer ones);
         "weight", the fraction of the spectral weight
         sum_k |<a|S_k|GS>|^2 in that window they carry; and "step", the
-        largest of their weights over the total weight, which is the size
-        of the largest step of the second-order dI/dV whose position is
-        not converged, relative to its largest value. At T>0 a step is
+        largest of their weights over the total weight of every row, the
+        poles above emax included. That is the size of the largest step of
+        the second-order dI/dV whose position is not converged, relative
+        to the value the spin part of that curve reaches once every pole
+        is below |eV| (its plateau at U=0), and not relative to the
+        largest value on the biases asked for: on a window that holds a
+        small part of the weight it is smaller than that ratio, and with
+        U larger, since the 4U^2 of the elastic term is not in it. At T>0 a step is
         smooth, and a pole that moves by d changes the curve by about
         d/(THERMAL_WIDTH kT) of its weight, so there each weight in "step"
         is scaled by min(1, d/(THERMAL_WIDTH kT)), with d = min(r, r^2/g)
@@ -310,7 +317,8 @@ class TaskKondoSpectrum():
 
     def warn_unconverged(self, emax, stacklevel=5):
         """Warn when a pole below emax whose position is not converged
-        makes a step of dI/dV above UNCONVERGED_STEP of the largest value."""
+        makes a step of dI/dV above UNCONVERGED_STEP of the total spectral
+        weight of the spin (convergence(), "step")."""
         c = self.convergence(emax)
         if c["step"] <= UNCONVERGED_STEP:
             return c
@@ -320,8 +328,9 @@ class TaskKondoSpectrum():
             "max|eV| = %.3g are not converged at nkry=%d, and they carry "
             "%.2g of the spectral weight there. %s, so at the biases next "
             "to these poles the curve changes with nkry, and from one solve "
-            "of the ground state to the next, by up to %.2g of its largest "
-            "value. A larger nkry makes this smaller; on a long chain at "
+            "of the ground state to the next, by up to %.2g of the value "
+            "its spin part reaches once every pole is below |eV|. A larger "
+            "nkry makes this smaller; on a long chain at "
             "T=0 it does not remove it, and a temperature of the electrodes "
             "above the spacing of the poles does."
             % (c["unconverged"], c["poles"], emax, self.nkry, c["weight"],

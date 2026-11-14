@@ -5772,7 +5772,9 @@ Krylov error itself and not a second error. `convergence(emax)` counts the
 poles below `emax` with a residual above `CONVERGED_RESIDUAL` (1e-8 of the
 width of the spectrum), their share of the weight and their largest step,
 and `get_kondo_spectrum` warns when that step is above `UNCONVERGED_STEP`
-(1e-3 of the largest second-order value). On that chain the share was 0.86,
+(1e-3 of the total spectral weight of the spin, which is the plateau of the
+second-order curve at U=0 once every pole is below |eV|, and not its
+largest value on the biases asked for). On that chain the share was 0.86,
 0.61, 0.31 and 0.09 at `nkry` = 50, 100, 200 and 400, so a long chain
 always warns at $T=0$, and a larger `nkry` only makes the difference
 smaller. Smoothing each step by its residual was tried and dropped: it cut
