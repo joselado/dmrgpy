@@ -136,7 +136,10 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
   to 1.4x), but it changes the basis at roundoff and moved dI/dV by
   2.9e-13 of the peak on 10 spins and 3.0e-13 on 12, above the 1e-13 this
   item was given. It is not applied; it is the branch
-  `krylov-block-gram-schmidt`, one commit on item 11. For scale: the
+  `krylov-block-gram-schmidt`, one commit on item 11. On that branch the
+  truncated-space test of item 11 fails, since the matrices move by 2.9e-13
+  of their largest element against the 1e-14 it asserts, so taking the
+  branch means loosening that bound. For scale: the
   old code with its three start vectors in another order moves by 2.5e-14
   on 10 spins and 6.7e-12 on 12, and two runs of the same code on 12 spins
   differ by 9e-12, since SciPy's eigsh draws its start vector from fresh
