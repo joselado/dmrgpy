@@ -2,9 +2,11 @@
 
 This plan collects the speedups that the Opus re-read of 2026-11-13 found
 in the Kondo commits of 2026-11-10 to 13 (workflow `wf_5422a87c-92a`, five
-readers, read only). Every gain below is the reader's estimate from the
-code and from timings already in the records. None of them is measured
-yet. Each item says where the time goes, what to change, what the gain
+readers, read only). Every gain in the items below is the reader's
+estimate from the code and from timings already in the records. What was
+measured after each change is in `.claude/rules/kondo.md` for the ED
+route, and under "Measured on 2026-11-14" for the TASK route (items 6 to
+10). Each item says where the time goes, what to change, what the gain
 should be, and whether a number moves. The three bugs and the test gaps
 of the same re-read are already fixed (`27198eb`, `e8ac10a`).
 
@@ -105,6 +107,43 @@ These live in `pyitensor/task.py`, `taskdmrg.py` and `kondomethod.py`.
     spectra: 10 to 20x on each repeat call. Repeated calls would then
     return the same manifold, where today they differ by solver noise (up
     to 3e-3 of the peak on a long chain at T=0). `kondomethod.py:510`.
+
+### Measured on 2026-11-14
+
+Items 6 to 10 are done, in this order: 6, 8, 9, 7, 10, and two riders
+(the residual of the block Krylov space on the device, the spectrum cache
+in real storage). The times are local, one core (CPU 2 of a workstation
+whose other cores ran other jobs), one BLAS thread, the minimum of two or
+three repeats in one process with the TASK caches cleared before each,
+on a ground state seeded so that every tree solves the same one. They
+are not the Xeon numbers of the baseline table. The case numbers are
+those of `run_case.py --list`.
+
+| item | what it does | measured | curves |
+|---|---|---|---|
+| 6 | order=2 builds row and column 0 only | case 4: 2.57 s to 1.90 s | bit for bit |
+| 8 | i S_y applied as a real operator, the Ritz transform real | v3, nkry=300, 0.3 K: build 7.56 s to 6.21 s (P S P 2.77 s to 1.50 s), call 15.9 s to 14.6 s; nkry=100: build 1.53 s to 1.44 s; "python" after item 7, nkry=300: projected spectrum 8.43 s to 7.35 s | 2e-16 of the peak |
+| 9 | H overlaps off the projection pass, one gauge less | block_krylov 1.86 s to 1.69 s at nkry=100 and 9.48 s to 8.49 s at nkry=300 (complex basis), 5.07 s to 4.40 s at nkry=300 (real basis); case 4: 1.86 s to 1.66 s; case 5: 22.4 s to 21.4 s | converged poles 4e-15 of max abs Hq; curves 1.2e-15 (0.3 K), 7e-9 (T=0, loose poles) |
+| 7 | the "python" state in a real gauge, H as a real MPO | build 12.97 s to 6.42 s at nkry=300 and 2.36 s to 1.39 s at nkry=100, store 32.1 to 16.0 MB; case 4: 1.75 s to 1.13 s; case 5: 21.3 s to 14.2 s; case 6: no change | moves: 3e-14 at nkry=300, 2e-7 to 1.5e-6 at nkry=100 and T=0 |
+| 10 | the n_gs manifold kept on the chain (TASK only) | case 6: 17.8 s to 4.9 s, 4 solves and 8 builds to 1 and 2 | the first call bit for bit; later calls now take the first call's manifold (a new solve moved the curve by 4e-9 to 2.6e-8) |
+| GPU rule | the residual of the block Krylov space formed on the backend | not timed; a test on JAX's CPU device reaches the branch and refuses a tangent vector on its way to the host | the same product on NumPy |
+| cache | real and imaginary matrices kept in real storage | half the memory of an entry of a real basis (35 MB at nkry=400) | the same values handed out |
+
+Not done: a bound of the spectrum cache in bytes (it stays a count of 8,
+since a bound in bytes is more than a one-line change); the real gauge for
+`get_poles` and `dynamical_correlator` with `submode="TASK"`, which go
+through `taskdmrg.session_poles` and would move their numbers too; and
+the timings on Triton.
+
+Item 8 gives 1.06 to 1.22 on the build alone and less on a call, and
+item 9 1.10 to 1.15 on the block Krylov space and 1.12 on case 4; both
+are kept, since the rule to revert a change below 1.1 was read on the
+function the item aims at, and together they are 1.3 on the real
+"python" build at nkry=300. The plan's
+estimates held for 6 and 7 (1.35 against 1.5 for 6, which the share of
+the P S P loop bounds, and 2.0 to 2.2 on the build for 7) and for 9; for
+8 the third-order sums did not get faster, although they now run in real
+arithmetic, since the F tables dominate them at these sizes.
 
 ## The Krylov thermal route
 

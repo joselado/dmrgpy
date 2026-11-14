@@ -247,6 +247,102 @@ def real_if_exact(arrays):
     return [xp.asarray(np.asarray(a, dtype=complex)) for a in arrays]
 
 
+def real_up_to_phase(Ws, tol=1e-13):
+    """(phase, real arrays) when the MPO arrays Ws are a global phase times
+    a real MPO site by site, every site tensor a phase times a real tensor
+    to tol of its largest entry; (1.0, Ws) unchanged otherwise.
+
+    compress_mpo writes S_y = i times a real operator as complex site
+    tensors with a phase on each (from its SVDs), so on a real basis every
+    application of it promoted the real rows and ran in complex arithmetic.
+    The product of the site phases is snapped to 1, -1, i or -i when it is
+    one of them to rounding, so that i S_y comes out exactly real. The
+    tensors are small (bond dimension 1 for a one-site operator) and are
+    split on the host."""
+    xp = backend.xp()
+    host = [backend.to_host(W) for W in Ws]
+    if all(not np.iscomplexobj(W) for W in host):
+        return 1.0, list(Ws)
+    phase, out = 1.0 + 0j, []
+    for W in host:
+        k = int(np.argmax(np.abs(W)))
+        top = complex(W.flat[k])
+        if top == 0.0:
+            return 1.0, list(Ws)
+        p = top / abs(top)
+        R = W / p
+        if float(np.max(np.abs(R.imag))) > tol * abs(top):
+            return 1.0, list(Ws)
+        phase *= p
+        out.append(np.ascontiguousarray(R.real))
+    for exact in (1.0, -1.0, 1j, -1j):
+        if abs(phase - exact) < 1e-12:
+            phase = exact
+            break
+    return phase, [xp.asarray(R) for R in out]
+
+
+def real_mpo(Ws, tol=1e-12):
+    """The MPO arrays of the same operator as Ws in a real gauge when that
+    operator is real, None otherwise.
+
+    The "python" AutoMPO writes S_y S_y with imaginary site tensors, and its
+    compression mixes the channels, so the MPO of a real H is complex entry
+    by entry. Bond by bond from the left, the left block M (written in the
+    real basis of the bonds before) is replaced by a real orthonormal basis
+    Q of the span of [Re M, Im M], and Q^T M is moved into the next tensor,
+    which keeps the operator to tol. The span of a real operator's minimal
+    left blocks is closed under conjugation, so Q has the bond dimension of
+    M; a larger span (a complex operator, or a bond that is not minimal)
+    returns None, and so does an imaginary part left on the last tensor,
+    which the real bases above make the imaginary part of the operator.
+    Done on the host: the tensors are those of an MPO."""
+    xp = backend.xp()
+    host = [np.asarray(backend.to_host(W)) for W in Ws]
+    if all(not np.iscomplexobj(W) or not np.any(W.imag) for W in host):
+        return [xp.asarray(np.ascontiguousarray(np.real(W))) for W in host]
+    G = np.ones((1, 1))
+    out = []
+    for l, W in enumerate(host):
+        X = np.tensordot(G, W, axes=(1, 0))
+        a, d1, d2, b = X.shape
+        if l == len(host) - 1:
+            if float(np.max(np.abs(X.imag))) > tol * float(np.max(np.abs(X))):
+                return None
+            out.append(np.ascontiguousarray(X.real))
+            break
+        M = X.reshape(a * d1 * d2, b)
+        U, S, _ = np.linalg.svd(np.concatenate([M.real, M.imag], axis=1),
+                                full_matrices=False)
+        r = max(1, int(np.sum(S > tol * S[0]))) if S[0] > 0 else 1
+        if r > b:
+            return None
+        Q = U[:, :r]
+        G = Q.T @ M
+        out.append(np.ascontiguousarray(Q.reshape(a, d1, d2, r)))
+    return [xp.asarray(W) for W in out]
+
+
+def _exact_phase_form(M, phase, tol=1e-12):
+    """M as phase times a real matrix with exact zeros, when phase is 1,
+    -1, i or -i and M / phase is real to tol of its largest entry; M
+    otherwise. On a real basis the matrix of i times a real operator is
+    imaginary up to the rounding of its column, and conductance.py reads
+    that form off exact zeros (_spin_triplet) to take its real route."""
+    if phase not in (1.0, -1.0, 1j, -1j):
+        return M
+    R = M * np.conj(phase)  # exact for these four
+    if float(np.max(np.abs(R.imag), initial=0.)) > tol * max(
+            float(np.max(np.abs(R), initial=0.)), 1e-300):
+        return M
+    out = np.zeros(M.shape, dtype=complex)
+    if phase in (1.0, -1.0):
+        out.real = phase.real * R.real
+    else:
+        out.imag = phase.imag * R.real
+    return out
+
+
 # The largest tangent space pad_bonds may ask for. Measured on d22 (v3,
 # 21-site BCS Wilson chain, nkry = 100): pad_bonds=256 gives 2621439 and a
 # peak of about 1.9 GB in 2114 s; "full" there would be 4^21.
@@ -1167,7 +1263,11 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
     the only ones whose image leaves it. A Ritz vector with coefficients u
     then has the residual norm ||(P(H-E0)P - w)|u>|| =
     sqrt(u[j0:]^dagger R u[j0:]), zero for an eigenstate; R is empty when
-    the Krylov space was exhausted before nkry blocks."""
+    the Krylov space was exhausted before nkry blocks.
+
+    On a device the basis, the images and the remainders stay there; what
+    comes to the host is the overlaps of Hq, a vector of the length of
+    the basis per image, and R, block by block, never a tangent vector."""
     xp = backend.xp()
     N = ts.flat_size()
     starts = real_starts(ts, starts)
@@ -1178,16 +1278,30 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
     nmax = min(N, len(starts))
     store = xp.zeros((nmax, N), dtype=dtype)
     count = 0
+    Hu = None  # Hu[i, j] = <q_i|P(H-E0)P|q_j> for i <= j, set below
 
-    def add(block):
+    def add(block, cols=None):
+        """Orthogonalize the candidates of `block` against the basis and
+        keep the ones that are left. The starts are tangent vectors and
+        are gauged first. The Krylov candidates (cols, their columns of
+        Hu) are flat images P(H-E0)P|q_j>, already gauged by apply_many,
+        and the first projection pass gives their overlaps with the n0
+        vectors of the basis before this block, which are Hu[:n0, j]."""
         nonlocal count, store
-        for w in block:
+        n0 = count
+        for k, w in enumerate(block):
             if count == nmax:
+                if cols is not None:  # the overlaps the rest still owes Hu
+                    Hu[:n0, cols[k:]] = _overlap_columns(
+                        store, xp.stack(block[k:]), n0)
                 break
-            w = ts.flat(ts.gauge(w))
+            if cols is None:
+                w = ts.flat(ts.gauge(w))
             scale = float(xp.linalg.norm(w))
             for rep in range(2):
-                w = backend.project_rows(store, w, count)[1]
+                c, w = backend.project_rows(store, w, count)
+                if rep == 0 and cols is not None:
+                    Hu[:n0, cols[k]] = backend.to_host(c)[:n0]
                 w = ts.flat(ts.gauge(ts.unflat(w)))
             nw = float(xp.linalg.norm(w))
             if scale > 0.0 and nw > breakdown * scale:
@@ -1213,30 +1327,36 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
         n = count
         if n == done:
             break
+        last = step == nkry
         Hb = []
         nb = ts.batch_size()
         for j0 in range(done, n, nb):  # the whole block at once
             j1 = min(n, j0 + nb)
             hs = ts.flat_many(ts.apply_h_many(ts.unflat_many(store[j0:j1])))
-            Hu[:n, j0:j1] = _overlap_columns(store, hs, n)
-            Hb.extend(ts.unflat(hs[j - j0]) for j in range(j0, j1))
+            if last and not residual:  # no projection pass to read them from
+                Hu[:n, j0:j1] = _overlap_columns(store, hs, n)
+            Hb.extend(hs[j - j0] for j in range(j0, j1))
             del hs
-        if step == nkry:
+        if last:
             if residual:
                 # two passes, as in add(): the remainder of a vector that
-                # is already in the space is then rounding noise
+                # is already in the space is then rounding noise; the
+                # first one gives the overlaps of Hu, as in add(). The
+                # remainders stay on the backend, and only their Gram
+                # matrix, block by block, comes to the host
                 out = []
-                for h in Hb:
-                    h = ts.flat(h)
+                for j, h in zip(range(done, n), Hb):
                     for rep in range(2):
-                        h = backend.project_rows(store, h, n)[1]
-                    out.append(backend.to_host(h))
-                out = np.array(out)
-                left = (done, out.conj() @ out.T)
+                        c, h = backend.project_rows(store, h, n)
+                        if rep == 0:
+                            Hu[:n, j] = backend.to_host(c)[:n]
+                    out.append(h)
+                out = xp.stack(out)
+                left = (done, np.asarray(backend.to_host(out.conj() @ out.T)))
             done = n
             break
+        add(Hb, cols=np.arange(done, n))
         done = n
-        add(Hb)
         del Hb
     upper = np.triu(Hu[:count, :count])
     Hq = upper + np.triu(upper, 1).conj().T
@@ -1250,7 +1370,7 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
     return store, count, Hq
 
 
-def projected_spectrum(ts, ops, nkry, residual=False):
+def projected_spectrum(ts, ops, nkry, residual=False, column=False):
     """Energies and operator matrices in the basis {|GS>} + the Ritz states
     of P(H-E0)P on the block Krylov space started from P O|GS> and
     P O^dagger|GS> for every operator in `ops`.
@@ -1260,6 +1380,13 @@ def projected_spectrum(ts, ops, nkry, residual=False):
     energies relative to E0, and for each operator the matrix
     mats[k][a,b] = <a|O_k|b> in that basis, in which the O_k|GS> column is
     exact and the tangent-tangent block is the projection P O_k P.
+
+    With column=True only row and column 0 are built, <a|O_k|GS> and
+    <GS|O_k|a>, and the tangent-tangent block is left at zero: what a sum
+    over transitions out of the ground state reads (the second-order dI/dV),
+    without the n applications of every O_k and the n x n overlaps the
+    block costs. Everything else is the same code, so the column is the
+    one of the full build, bit for bit.
 
     With residual=True a third entry gives, for every state of the basis,
     the residual norm ||(P(H-E0)P - e)|a>|| of block_krylov: zero for the
@@ -1279,21 +1406,36 @@ def projected_spectrum(ts, ops, nkry, residual=False):
     def overlaps(v):  # <q_i|v> for the n basis vectors, on the host
         return backend.to_host(backend.row_overlaps(store, v, n))[:n]
 
+    xp = backend.xp()
+    # A real basis (a real state and H, real_starts) has a real U as well,
+    # and there an operator that is a phase times a real one (S_y = i times
+    # a real operator) is applied as the real one, with the phase put back
+    # on the matrix: real arithmetic in every application, in the overlaps
+    # and in the Ritz transform, and S_y comes out imaginary with exact
+    # zeros (_exact_phase_form), the form conductance.py reads to run its
+    # own sums in real arithmetic. A complex basis keeps complex arithmetic.
+    real_basis = not np.issubdtype(np.dtype(store.dtype), np.complexfloating)
     mats = []
     for (W, Wd), bk, bdk in zip(ops, b, bd):
-        op = ts.operator(compress_mpo(W))
+        Wc = compress_mpo(W)
+        phase, Wc = real_up_to_phase(Wc) if real_basis else (1.0, Wc)
+        op = ts.operator(Wc)
         M = np.zeros((n + 1, n + 1), dtype=complex)
-        M[0, 0] = ts.expectation(op)
+        M[0, 0] = phase * ts.expectation(op)
         M[1:, 0] = Uh @ overlaps(ts.flat(bk))
         M[0, 1:] = (Uh @ overlaps(ts.flat(bdk))).conj()
-        G = np.zeros((n, n), dtype=complex)  # <q_i|O|q_j>
-        nb = ts.batch_size(op)
-        for j0 in range(0, n, nb):  # the basis in stacks, not vector by vector
-            j1 = min(n, j0 + nb)
-            ys = ts.flat_many(ts.apply_many(op, ts.unflat_many(store[j0:j1])))
-            G[:, j0:j1] = _overlap_columns(store, ys, n)
-            del ys
-        M[1:, 1:] = Uh @ G @ U
+        if not column:
+            real = real_basis and not any(xp.iscomplexobj(x) for x in Wc)
+            G = np.zeros((n, n), dtype=float if real else complex)  # <q_i|O|q_j>
+            nb = ts.batch_size(op)
+            for j0 in range(0, n, nb):  # the basis in stacks, not vector by vector
+                j1 = min(n, j0 + nb)
+                ys = ts.flat_many(ts.apply_many(op, ts.unflat_many(store[j0:j1])))
+                G[:, j0:j1] = _overlap_columns(store, ys, n)
+                del ys
+            M[1:, 1:] = phase * (Uh @ G @ U)
+        if real_basis:
+            M = _exact_phase_form(M, phase)
         mats.append(M)
     if residual:
         return e, mats, res
@@ -1336,16 +1478,19 @@ def correlator_poles(Ms, Ws, Wb, Wadag=None, nkry=100, variance=False,
 
 
 def spectrum_from_arrays(Ms, Ws, ops, nkry, pad_bonds=None,
-                         expand_bonds=None, expand_rounds=1, residual=False):
+                         expand_bonds=None, expand_rounds=1, residual=False,
+                         column=False):
     """projected_spectrum from site arrays: ops is a list of (MPO of O,
     MPO of O^dagger). Returns (e, mats, dim), and with residual=True the
     residual norm of every state as a fourth entry. pad_bonds and
     expand_bonds as in correlator_poles; the expansion is fed by every O
-    and O^dagger."""
+    and O^dagger. column=True builds row and column 0 only
+    (projected_spectrum)."""
     ts = TangentSpace(Ms, Ws, pad_bonds=pad_bonds, expand_bonds=expand_bonds,
                       expand_ops=[W for pair in ops for W in pair],
                       expand_rounds=expand_rounds)
-    e, mats, res = projected_spectrum(ts, ops, nkry, residual=True)
+    e, mats, res = projected_spectrum(ts, ops, nkry, residual=True,
+                                      column=column)
     if residual:
         return e, mats, ts.dimension(), res
     return e, mats, ts.dimension()

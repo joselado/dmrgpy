@@ -94,6 +94,9 @@ class Many_Body_Chain():
       self._dcex_excited_cache = None # cache for dcex.py's excited-state
           # search (submode="EX" dynamical correlator), invalidated in
           # restart()
+      self._n_gs_manifold = None # the n_gs manifold of get_kondo_spectrum
+          # (submode="TASK", kondomethod._task_manifold), dropped with the
+          # state like the cache above
       self.use_ampo_hamiltonian = False # use ampo Hamiltonian
       # additional arguments
       self.kpmmaxm = 50 # bond dimension in KPM
@@ -359,7 +362,8 @@ class Many_Body_Chain():
               out.__dict__[k] = v # shared on purpose: a Julia Index is
               # immutable, and a clone on the same indices is what lets
               # its states contract with the original's (sectordc.py)
-          elif (k in ("_dcex_excited_cache","_sector_states_cache")
+          elif (k in ("_dcex_excited_cache","_sector_states_cache",
+                      "_n_gs_manifold")
                   and (self._session is not None
                        or self.itensor_version=="julia_live")):
               out.__dict__[k] = None # MPS of the old session, see below;
@@ -409,6 +413,7 @@ class Many_Body_Chain():
       self._gs_supplied = False
       self._dcex_excited_cache = None
       self._sector_states_cache = None
+      self._n_gs_manifold = None
   def set_conserved_sector(self,**qns):
       """Confine every calculation on this chain to one quantum-number sector.
 
@@ -870,6 +875,7 @@ class Many_Body_Chain():
           self._gs_supplied = False
           self._dcex_excited_cache = None
           self._sector_states_cache = None
+          self._n_gs_manifold = None
       self.hamiltonian = MO
       self.use_ampo_hamiltonian = True # use ampo Hamiltonian
   def get_heff(self,**kwargs):
@@ -909,6 +915,7 @@ class Many_Body_Chain():
       self._sector_states_cache = None # same, for sectordc.py's cached
           # per-sector solves (which hold a whole clone chain alive, so
           # dropping them here also releases that session)
+      self._n_gs_manifold = None # kondomethod._task_manifold's members
       self._session_ham_cache = None # invalidate groundstate.py's
           # Hamiltonian-send cache so the next gs_energy() re-sends the
           # Hamiltonian (clearing the session's energy/band-edge caches)

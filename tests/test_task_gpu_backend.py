@@ -74,3 +74,46 @@ def test_task_krylov_basis_stays_on_the_backend(numpy_backend_restored):
     assert isinstance(store, jax.Array)
     assert isinstance(ts.LH[2], jax.Array)
     assert isinstance(Hq, np.ndarray) and Hq.shape == (n, n)
+
+
+def _tangent_space(arrays):
+    """The tangent space of the exported state and the three spin starts
+    of site 0, on the backend that is set."""
+    Ms, Ws, Wops = arrays
+    ts = task.TangentSpace(Ms, Ws)
+    return ts, [ts.project_operator(W) for W in Wops]
+
+
+def test_the_residual_is_formed_on_the_backend(numpy_backend_restored,
+                                               monkeypatch):
+    """A Krylov space that is not exhausted (nkry=2: 9 of the 23 states)
+    leaves a residual, whose Gram matrix is formed on the backend; only
+    it, block by block, and vectors of the length of the basis come back,
+    never a tangent vector."""
+    sc = impurity_chain(nb=3)
+    sc.gs_energy()
+    s = sc._session
+    from dmrgpy.pyitensor.chain import _mps_arrays_lpr
+    arrays = (_mps_arrays_lpr(s.wf0), task.mpo_arrays(s.H),
+              [task.mpo_arrays(s._mpo(getattr(sc, o)[0].to_terms()))
+               for o in ("Sx", "Sy", "Sz")])
+    ts, starts = _tangent_space(arrays)
+    ref = task.block_krylov(ts, starts, 2, residual=True)
+    bk.set_backend("jax")
+    ts, starts = _tangent_space(arrays)
+    N = ts.flat_size()
+    shapes = []
+    to_host = bk.to_host
+
+    def spy(a):
+        shapes.append(np.shape(a))
+        return to_host(a)
+
+    monkeypatch.setattr(bk, "to_host", spy)
+    store, n, Hq, (j0, R) = task.block_krylov(ts, starts, 2, residual=True)
+    monkeypatch.setattr(bk, "to_host", to_host)
+    assert n == ref[1] < ts.dimension()
+    assert R.shape == ref[3][1].shape and R.size and np.max(np.abs(R)) > 0
+    assert not any(N in s for s in shapes)
+    assert np.max(np.abs(R - ref[3][1])) < 1e-10 * np.max(np.abs(ref[3][1]))
+    assert np.max(np.abs(Hq - ref[2])) < 1e-10 * np.max(np.abs(ref[2]))
