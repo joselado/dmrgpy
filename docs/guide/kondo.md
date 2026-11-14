@@ -1361,8 +1361,12 @@ narrower than all eight states.
   all spins. `False` uses one member only, a few percent off when the
   metal does not screen the moment.
 - `nkry`: the Krylov blocks of TASK on the head, which gives the
-  spectrum above that energy. The default 90 gives it to about 4% on
-  three spins; 30 is three times faster and about 12% off there.
+  spectrum above that energy. The default 90 gives it to about 1% on
+  three spins; 30 is about three times faster and about 11% off there.
+- `join`: how the tail and TASK meet. `"fade"` (the default) mixes the
+  two over a factor $\Lambda$ on each side of the energy of the hand-over;
+  `"cut"` switches at that energy, which leaves an error of a few percent
+  there.
 - `b`, `omega0`: the log-Gaussian broadening, as in `zaverage`.
 
 The examples are `examples/kondo/kondo_resonance_nrg` and

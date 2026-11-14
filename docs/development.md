@@ -7252,7 +7252,9 @@ block with the MPO the backend exports (the arrays TASK uses), and
 `handover_shell` grades the basis by N and S^z and writes the block
 Hamiltonian, f and the tip vertices in it. `head_tail_poles` joins the
 tail below the scale of the hand-over with `head_task_poles` (one block
-Krylov space of TASK from the four starts) above it.
+Krylov space of TASK from the four starts) above it, by default with a
+cosine fade in log|w| over a factor Lambda on each side of the hand-over
+scale (`join_share`, `join="fade"`; `join="cut"` is the step).
 
 `ysr.get_stm_spectrum(fc, es, submode="NRG")` dispatches to
 `nrgmps.get_stm_spectrum` before any of the TASK code, and refuses `imp`,

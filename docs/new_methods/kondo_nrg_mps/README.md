@@ -324,6 +324,37 @@ on each sign of w on the first mesh, and 0.0356 and 0.0363 on the second,
 2% apart; at nkry = 30 TASK has 0.0153 and 0.0328, 29% and 8% below the
 tail. So both routes are valid in that window once TASK is converged.
 
+Since both routes are valid in that window, the default join uses both
+there (`join="fade"`, the author's pick of 2026-11-14): a tail pole at w
+keeps the share f(|w|) of its weight and a TASK pole 1 - f, with f a
+cosine in log|w| that goes from 1 at w_join/Lambda to 0 at Lambda
+w_join (`join_share`). `join="cut"` is the step at w_join of the table
+above. The same scan was run on one spin at rho J = 0.2 (Wilson's T_K =
+3.5e-3, so the flank of the resonance is inside the window; 164 and 174
+states at the hand-over, 240 blocks). The largest relative error against
+the exact route in the window w_join/4 to 4 w_join, two meshes, b = 0.6:
+
+| case | nkry | cut | fade |
+|---|---|---|---|
+| 3 spins | 60 | 13% | 3.7% |
+| 3 spins | 90 | 4.5% | 1.2% |
+| 3 spins | 150 | 4.1% | 1.1% |
+| 1 spin | 60 | 3.4% | 1.2% |
+| 1 spin | 90 | 0.5% | 0.2% |
+| 1 spin | 150 | 0.2% | 0.1% |
+
+Below w_join/4 and above 4 w_join the poles are the same for both joins,
+and the curve there moves only through the width of the broadening, by
+0.3% of A at most at nkry 90 and 150 (1.4% on one mesh at nkry 60, where
+the TASK lines in the window are still loose). Each mesh alone
+at b = 0.8 gives 0.9 to 2.5% with the fade against 2.8 to 20% with the
+cut at nkry 60 to 150 on 3 spins. The joined weight is within 0.4% of the
+sum rule with the fade (+0.02% to +0.4%). Fades over a factor 2 and 8
+instead of Lambda = 4 gave 1.1 to 1.7% on 3 spins, so the width is not
+tuned. On one spin TASK alone is converged at nkry = 90 as well (0.01%
+against nkry = 240 above 2 w_join), and the window weights of the two
+routes agree to 0.3% at nkry = 240.
+
 Step 9 of the plan's ladder takes the route past 3 spins. It was run on 7
 and 8 spins (Js = 1e-2 D, rho JK = 0.15, one mesh, b = 0.8, the tail
 alone, keep = 1600), with the hand-over at the Wilson site 7 (scale

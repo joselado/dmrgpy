@@ -1757,3 +1757,20 @@ route reads the exchange table of -eV off the one at +eV (plan item 2):
 nothing moves at $T=0$, and at $T>0$ dI/dV moves by the odd part of the
 tabulated F, $2\times 10^{-16}$ of the peak on the test chains. The full
 ED route does not take it.
+
+
+## The 2026-11-14 fade join of the NRG route
+
+`nrgmps.head_tail_poles` and `ysr.get_stm_spectrum(submode="NRG",
+head="dmrg")` now join the NRG tail and TASK on the head with a fade
+(`join="fade"`, the default, the author's pick): each pole gets a share
+that goes from the tail at w_join/Lambda to TASK at Lambda w_join as a
+cosine in log|w|. `join="cut"` gives the old step at w_join. Only the
+poles in that window move; below w_join/Lambda and above Lambda w_join
+every pole is the same as before, and the broadened curve there moves by
+0.3% of A at most at nkry = 90 (through the width of the kernel). Against the exact route, averaged over two meshes,
+the largest error in the window at nkry = 90 goes from 4.5% to 1.2% on
+3 spins (metal under the end spin) and from 0.5% to 0.2% on one spin at
+rho J = 0.2; the joined weight stays within 0.4% of the sum rule.
+`task=False` and `head="exact"` do not move. The route is from
+2026-11-13, so only results of the last two days are affected.

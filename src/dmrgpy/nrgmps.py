@@ -695,7 +695,7 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
                     nkry=90, w_join=None, stop_tol=1e-4, stop_extra=6,
                     wilson_tail=None, task=True, Nf=None, Sz=None,
                     window=None, solved=False, pad_bonds=None, symmetric="auto",
-                    flip=None, join="cut"):
+                    flip=None, join="fade"):
     """Poles of the STM spectrum A(w) of ysr.py on the chain fc (a
     ysr.spin_chain_on_metal, or a spin-1/2 ysr.kondo_chain at Delta = 0),
     with a DMRG head and an NRG tail (docs/nrg_mps_kondo_plan.md, N3
@@ -712,10 +712,11 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     T/100. task=True adds the TASK poles of the head state
     (head_task_poles, nkry blocks of four) above w_join (default omega_k0,
     the scale of the hand-over shell) and keeps the tail below it. join
-    says how (join_share): "cut" (the default) is a step at w_join,
-    "fade" a cosine in log|w| from w_join/window to w_join*window
+    says how (join_share): "fade" (the default, the author's pick of
+    2026-11-14) is a cosine in log|w| from w_join/window to w_join*window
     (window: default Lambda), which keeps each route where it is valid
-    and both in between. With task=False the tail is kept below w_join
+    and both in between, and "cut" a step at w_join, whose error around
+    w_join does not fall with nkry (README section 6). With task=False the tail is kept below w_join
     whatever join is. T > 0 applies to the tail only: TASK is a T = 0
     method, so T has to be far below the lowest energy where TASK enters
     (a RuntimeWarning above a tenth of w_join, or of w_join/window with
@@ -907,7 +908,7 @@ def twin_chain(fc, z):
 def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
                      T=0.0, keep=800, m=4, k0=None, n_tail=None, nkry=90,
                      stop_tol=1e-4, stop_extra=6, tip_fermi=True,
-                     return_poles=False, symmetric="auto", join="cut"):
+                     return_poles=False, symmetric="auto", join="fade"):
     """ysr.get_stm_spectrum(fc, es, submode="NRG"): A(w) at the energies es,
     in the units of the TASK route (the chain's own normalization;
     multiply by fc.dos_factor for the continuum), averaged over nz twists

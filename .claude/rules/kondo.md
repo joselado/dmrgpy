@@ -759,9 +759,19 @@ in units of the peak of A, since an even chain is a singlet whose A
 vanishes at low w (relative point by point it gave 100% and 5e4%).
 TASK on the head is one block Krylov space from the four starts (`head_task_poles`), only the column <alpha|O|GS>: separate
 `stm_poles` recursions took over 30 minutes on a 15-site head at maxm 256.
-Its error above the cut is the Krylov resolution (12% at nkry = 30, 3.8%
-at 90, the default, on 3 spins against the exact route), and the joined
-curve is 3% low around the cut, where nothing conserves the weight.
+Above both cuts TASK is converged at nkry = 90 (0.7% off the exact route
+on 3 spins, 0.1% on one spin; 11% at nkry = 30). The old "3.8% at 90"
+read its range from the w_join of one mesh and held the other mesh's
+cut. What is left is the join: a step at w_join (`join="cut"`) is 4% off
+around it on 3 spins at nkry 90 and 150, and the error does not fall with
+nkry, since which TASK lines fall on each side moves. The default is
+`join="fade"` (the author's pick, 2026-11-14), a cosine in log|w| from
+w_join/Lambda to Lambda w_join (`join_share`): 1.2% there, no pole
+outside the window moves (the curve by 0.3% at most through the
+broadening at nkry 90), sum rule within 0.4%. Do NOT go back to the step to
+"keep each route pure", and do NOT apply the fade with task=False, whose
+tail is still cut at w_join. The window weights (`overlap`) are the
+check without a reference: 2% apart at nkry 150, 8 to 29% at nkry 30.
 `tests/test_nrgspectral.py`, `tests/test_nrgmps.py`.
 
 On v3 a sector solve keeps the impurity charges of its start, since no term

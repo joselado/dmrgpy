@@ -173,10 +173,11 @@ def test_head_tail_join_carries_the_sum_rule():
     """With a complete hand-over basis the tail misses nothing (roundoff).
     With the basis of the DMRG state it misses the part of X^dag|GS>
     outside it, at high energy (1.4% here, half of the weight on a head of
-    10 sites with 59 states), and the tail poles below w_join with the TASK
-    poles of the head above it add up to the sum rule of the head state to
-    2% (one spin, a head of 7 Wilson sites, measured 1.1% at nkry = 80):
-    nothing conserves the weight across the cut."""
+    10 sites with 59 states), and the tail poles joined with the TASK
+    poles of the head (by default the fade of join_share around w_join)
+    add up to the sum rule of the head state to 2% (one spin, a head of 7
+    Wilson sites, measured 1.1% at nkry = 80 with the cut): nothing
+    conserves the weight across the join."""
     J = 0.4*ysr.lambda_factor(4.0)
     fc = ysr.spin_chain_on_metal(1, 7, JK=J, Lambda=4.0,
                                  itensor_version="python")
@@ -186,6 +187,7 @@ def test_head_tail_join_carries_the_sum_rule():
     assert r.k0 == 2 and r.chi == 4**4
     assert abs(r.missing_weight) < 1e-12
     r = nrgmps.head_tail_poles(fc, m=4, keep=200, nkry=80)
+    assert r.join == "fade"
     assert r.tail.total == pytest.approx(r.tail.sum_rule - r.missing_weight,
                                          abs=1e-12)
     assert r.missing_weight > 1e-3*r.sum_rule
