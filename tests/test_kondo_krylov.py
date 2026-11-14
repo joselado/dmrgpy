@@ -117,6 +117,32 @@ def test_su2_reduction_matches_ed_and_refuses_a_field():
         krylovkondo.KrylovKondoSpectrum(heisenberg(5, "xz"), 1, 1.0, su2=True)
 
 
+def test_su2_cuts_each_multiplet_as_the_full_sum_cuts_its_members():
+    """A multiplet is kept when exp(-(E-E0)/kT) > p_cut, the cut of the
+    full sum on each of its members, whatever its 2S+1. With p_cut just
+    above the Boltzmann factor of a level of S >= 3/2, both drop that level
+    and keep the same states. The cut on (2S+1) exp(-(E-E0)/kT) kept it; on
+    the zero-field 12-spin chain at 1 K two such multiplets moved dI/dV by
+    2.4e-8 of the peak."""
+    sc, T = heisenberg(7), 1.5
+    kT = 8.617333262e-5*T
+    ref = krylovkondo.KrylovKondoSpectrum(sc, 1, T, p_cut=1e-12, su2=True)
+    x = (ref.E - ref.E[0])/kT
+    # a level of S >= 3/2 with no other level between its Boltzmann factor
+    # and 1.5 times it
+    js = [j for j in range(len(x)) if ref.spins[j] >= 1.5 and x[j] > 1.
+          and not np.any((x < x[j] - 1e-6) & (x > x[j] - np.log(1.5) - 0.05))]
+    assert js
+    j = js[0]
+    p_cut = 1.5*np.exp(-x[j])
+    on = krylovkondo.KrylovKondoSpectrum(sc, 1, T, p_cut=p_cut, su2=True)
+    off = krylovkondo.KrylovKondoSpectrum(sc, 1, T, p_cut=p_cut, su2=False)
+    assert np.all(on.E < ref.E[j] - 1e-6*kT)
+    members = np.repeat(on.E, np.round(2*on.spins + 1).astype(int))
+    assert len(members) == len(off.E)
+    assert np.max(np.abs(np.sort(members) - np.sort(off.E))) < 1e-10*np.max(np.abs(off.E))
+
+
 def test_three_separate_spaces_double_count_with_a_field(monkeypatch):
     """The trap the block space avoids: three Lanczos spaces from S+|i>,
     S-|i> and Sz|i>, each orthonormal on its own, overlap once Sz is not

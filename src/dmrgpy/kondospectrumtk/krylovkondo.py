@@ -270,7 +270,9 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
     chain with no Nf sector), with the weight (2S+1) exp(-(E-E0)/kT), normalized. With an
     unpolarized tip each term of dI/dV is the expectation value of a
     rotation-invariant operator, the same for every member of a multiplet,
-    so this is the sum over all of them. Raises ValueError unless H
+    so this is the sum over all of them. A multiplet is kept when its
+    members pass the cut of initial_states, exp(-(E-E0)/kT) > p_cut, so the
+    states are those of the full sum. Raises ValueError unless H
     commutes with the total spin (checked on a random state) and S^z_tot is
     diagonal in the ED basis. Inside a degenerate level the states are
     rotated to a definite S with S^2_tot, and the call raises when 2S is
@@ -304,12 +306,13 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
     Hs = H[idx][:, idx]
     S2 = (Stot[0] @ Stot[0] + Stot[1] @ Stot[1] + Stot[2] @ Stot[2]).tocsr()[idx][:, idx]
     tol = degeneracy_tol*2.*nH
-    # the (2S+1) of a multiplet is at most 2 max|m| + 1, so the cut on
-    # exp(-x/kT) is lowered by that much to keep every state above p_cut
-    pc = p_cut/(2.*np.max(np.abs(m)) + 1.)
-    E, V = low_states(Hs, kT, pc, tol)
+    # the cut of the full sum (initial_states) on each state, exp(-x/kT) >
+    # p_cut, whatever the 2S+1 of its multiplet: so a multiplet is kept
+    # exactly when its members are (a cut on (2S+1) exp(-x/kT) kept two
+    # more multiplets on a 12-spin chain, 2.4e-8 of the peak)
+    E, V = low_states(Hs, kT, p_cut, tol)
     x = E - E[0]
-    keep = np.exp(-x/kT) > pc if kT > 0. else x <= tol
+    keep = np.exp(-x/kT) > p_cut if kT > 0. else x <= tol
     E, V, x = E[keep], V[:, keep], x[keep]
     spins = np.empty(len(E))
     a = 0
@@ -332,10 +335,9 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
         spins[a:b] = np.round(2*S)/2.
         a = b
     w = (2*spins + 1.)*(np.exp(-x/kT) if kT > 0. else 1.)
-    keep = w > p_cut*np.max(w)
-    full = np.zeros((dim, int(np.sum(keep))), dtype=V.dtype)
-    full[idx] = V[:, keep]
-    return E[keep], full, w[keep]/np.sum(w[keep]), spins[keep]
+    full = np.zeros((dim, len(E)), dtype=V.dtype)
+    full[idx] = V
+    return E, full, w/np.sum(w), spins
 
 
 class KrylovKondoSpectrum():
