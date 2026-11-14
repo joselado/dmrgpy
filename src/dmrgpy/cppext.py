@@ -71,6 +71,16 @@ def get_backend(version=DEFAULT_ITENSOR_VERSION):
 
 
 def _load(version):
+    # numpy first: the compiled extension links the libstdc++ of the
+    # compiler it was built with, and the first libstdc++ a process loads
+    # is the one every later library gets. Under environment modules (on
+    # Triton, scicomp-python-env with gcc) that compiler's libstdc++ is
+    # older than the one of the Python environment, and loading the
+    # extension first made every later scipy.optimize import fail
+    # (CXXABI_1.3.15 not found), so `import dmrgpy` as the first import of
+    # a script failed there. numpy brings the environment's own libstdc++,
+    # which the extension also accepts.
+    import numpy # noqa: F401
     try:
         if version==2:
             from .mpscpp2 import _dmrgcpp

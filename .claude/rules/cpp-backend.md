@@ -49,7 +49,14 @@ pybind` has rebuilt the `.so` and the test ran against the rebuilt one.
 
 - **`cppext.py`** lazily imports whichever compiled extension a chain needs
   and caches whether it loaded (`get_backend(version)`/`available(version)`,
-  `version` is `2` or `3`).
+  `version` is `2` or `3`). It imports numpy before the extension, and
+  this is load-bearing (2026-11-14): the extension links the libstdc++ of
+  its compiler, the first libstdc++ a process loads is the one it keeps,
+  and on Triton (scicomp-python-env with gcc) the compiler's is older than
+  the environment's, so loading the extension first made every later
+  `scipy.optimize` import fail with `CXXABI_1.3.15 not found`, and with it
+  `import dmrgpy` as the first import of any script
+  (`tests/test_warnings_reach_scripts.py` caught it there).
 - **`mpscppN/chain_session.h`**'s `Chain` class is the stateful, in-process
   session: one `Chain` instance per `Many_Body_Chain` (held as
   `self._session`, created in `sites.py::initialize` whenever
