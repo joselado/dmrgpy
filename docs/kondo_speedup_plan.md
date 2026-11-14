@@ -223,7 +223,8 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
   above `p_cut`, and two multiplets (S=2 and S=1 at 18.5 kT, exp(-x) of
   9.4e-9 and 8.4e-9) were kept by the first and dropped by the second;
   eigsh found every member of every level. Gate (a) passed only because
-  no level of the 7-spin chain sits between the two cuts. The reduction
+  no level of the 7-spin chain sits between the two cuts at the default
+  `p_cut` (at `p_cut=1e-14` two multiplets do). The reduction
   now keeps a multiplet when exp(-x) is above `p_cut`, whatever its 2S+1,
   which moves `su2=True` results by about `p_cut` (2.4e-8 of the peak on
   the 12-spin chain, in the ledger). On that cut (a) gives 2.1e-15,

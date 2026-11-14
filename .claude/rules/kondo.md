@@ -464,8 +464,8 @@ exp(-x) > p_cut on every multiplet whatever its 2S+1 (`ded5439`); do NOT
 go back to the cut on (2S+1) exp(-x) relative to the largest weight: it
 kept two multiplets at 18.5 kT on the zero-field 12-spin chain at 1 K and
 moved dI/dV by 2.4e-8 of the peak, against 3e-12 between nkry=100 and
-200 (the old cut passed on 7 spins only because no level lies between
-the two cuts there). With it auto and off agree to 2.5e-12 on that chain
+200 (the old cut passed on 7 spins at the default p_cut only because no
+level lies between the two cuts there). With it auto and off agree to 2.5e-12 on that chain
 (19 s against 66 s) and to 3e-15 on 7 spins and on the 3-site Hubbard
 chain with no Nf sector. A test that reads the full sum on an SU(2)
 chain passes `su2=False`, and the Krylov tests keep their own copy of

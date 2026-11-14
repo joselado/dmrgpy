@@ -1672,8 +1672,11 @@ of `docs/kondo_speedup_plan.md` at 1 K, where an $S=2$ and an $S=1$
 multiplet at 18.5 kT are now dropped, the curve moves by
 $2.4\times 10^{-8}$ of the peak, and it agrees with `su2=False` to
 $2.5\times 10^{-12}$, the size of the Krylov error at `nkry=100`. On 7
-spins at 1.5 K, where no level lies between the two cuts, nothing moves
-above roundoff. At $T=0$ nothing changes.
+spins at 1.5 K and the default `p_cut`, where no level lies between the
+two cuts, nothing moves above roundoff; at `p_cut=1e-14` the old cut kept
+34 multiplets and the new one 32, and the curve against `su2=False` went
+from $3.5\times 10^{-14}$ to $2.5\times 10^{-15}$ of the peak. At $T=0$
+nothing changes.
 
 On the same day `su2=None` became the default of the route. A call
 without `su2` now takes the reduction when $H$ commutes with the total
