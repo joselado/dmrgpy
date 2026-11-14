@@ -478,6 +478,17 @@ by the model, and only fits with the larger fraction.
 chunks, a larger `mem_gb` warns and is lowered, and when not even 8
 biases fit the error names the fraction to raise.
 
+On the CPU the model is `leadinglog.memory_model(d, m, real)`, in real
+numbers on the real route since 2026-11-14 (it counted complex ones
+before, so `mem_gb` cut twice as many chunks as needed). One flow of 241
+biases on one core of Triton, the peak above that of the process before
+the call: 9 spins at T=0, 0.65 GB on the real route against 0.65 GB of
+the model, and 1.32 GB on the complex route (a field along y) against
+1.30 GB; 8 spins at 1 K with 55 occupied states and 61 biases, 1.78 GB
+against 1.99 GB. With `mem_gb=None` the call warns when the model puts
+the flow above what the process can still take (the tightest cgroup
+limit minus its usage, else MemAvailable).
+
 The tip part has two forms (`TIP_FORM`). "columns" is `_tip_bracket`
 line for line: the electron index is summed before the kernel is applied,
 so each chunk of occupied columns has operands of 4 d^2 numbers per
