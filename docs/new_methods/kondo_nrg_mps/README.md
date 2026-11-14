@@ -253,7 +253,11 @@ tail and in the exact route, one mesh, below w_join/3):
 The exact route gives the same curve with and without the average (to
 1e-4 of the peak), so the average was only ever standing in for the
 basis. The joined basis doubles the hand-over basis and takes the tail
-from about 48 s to 70 to 90 s; the DMRG head and TASK are unchanged.
+from about 48 s to 70 to 90 s; the DMRG head and TASK are unchanged. The
+overlap of the left basis with that of R|GS> is contracted site by site
+in pairs, at chi^3 d: as a single three-operand einsum it was chi^4 d,
+166 s of a 250 s call at 258 states, and on Triton a call at 408 states
+took 192 s against more than an hour before.
 
 m = 4 is the default, and the head needs a maxm of at least about 160:
 the bond at the hand-over stops near 150 states at the cutoff 1e-12 even
@@ -328,8 +332,24 @@ largest hand-over bases (402 and 414 states, 327 and 333) A changes by
 0.47% and 1.35% of its peak, and the next ones (340, 292) are 0.78% and
 2.3% off. Both chains are singlets, and A vanishes at low energy (below
 1e-10 of its peak at 1e-9 and about 1e-5 at 1e-5), so these are runs
-without a Kondo resonance, and nothing beyond 7 spins checks the
-resonance itself. Each run of the head took 1.5 to 4.5 min on one core.
+without a Kondo resonance. Each run of the head took 1.5 to 4.5 min on
+one core.
+
+On 9 spins the chain has a moment, and the metal screens it: with the
+metal under the end spin and under the middle spin, A stays between 0.88
+and 1.0 of its peak of 4.20 from 1e-9 to 1e-5 (the oscillation is that of
+one mesh), falls to half at 1e-4 and to 0.15 at 1e-3, the Kondo
+resonance. The two sites share it below 1e-5 and differ above (0.15 and
+0.11 of the peak at 3e-3).
+The heads of m = 4 and 6 have a moment too, so their hand-over is the
+joined basis of section 5 (330 to 870 states), and the head of m = 5 is a
+singlet (360 to 420 states). Every basis is within 0.17% of the peak of
+the largest one (m = 6, maxm = 768), and the two largest agree to 0.03%
+(end spin) and 0.01% (middle spin); the singlet head of m = 5 and the
+joined head of m = 6 agree to 0.02%. There is no exact reference at 9
+spins, so the resonance is checked against the exact route only up to 7
+spins, and beyond it by convergence in the hand-over basis. Each run of
+the head took 3 to 6 min on one core.
 
 ## 7. Checks
 

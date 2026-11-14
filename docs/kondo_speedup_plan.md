@@ -257,11 +257,15 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
 ## Choices for the author
 
 Three items change a default or a number, so they are not taken without a
-pick: `su2=True` by default when H commutes with the total spin (a
+pick. On 2026-11-14 a stand-in decider (a Fable agent, the author being
+away) picked all three, and each waits for the author's confirmation:
+`su2=True` by default when H commutes with the total spin (a
 (2S+1)-fold saving at T>0, 3.2x in states measured on 7 spins at 1.5 K;
-taken on 2026-11-14 as `su2=None`, see the Krylov section);
+taken as `su2=None`, see the Krylov section);
 the reuse of the n_gs manifold (item 10), which fixes the solver noise
-between calls; and a default `mem_gb` for order="LL" on the CPU. On 9
+between calls (taken, keyed on the content of the solved state); and a
+default `mem_gb` for order="LL" on the CPU (not taken: a warning instead,
+see the measured section). On 9
 spins with a transverse field one flow of 241 biases needs, by the
 memory model, 2.8 GB at 0.3 K, 34 GB at 1 K and 182 GB at 2 K (complex
 count, about half on the real route), so today a T>0 call above 8 spins

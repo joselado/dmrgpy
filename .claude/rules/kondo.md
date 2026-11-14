@@ -707,7 +707,11 @@ cut nearly dependent directions was still 60% off without the average,
 probably because a split of the partner levels acts on the free moment as
 a field. Do
 NOT drop the average either (the exact route is the same with or without
-it, to 1e-4).
+it, to 1e-4). `Export.overlap` contracts in pairs (chi^3 d); do NOT fold
+it back into one three-operand `np.einsum`, which NumPy runs as a loop
+over all five indices (chi^4 d: 166 s of a 250 s call at 258 states, more
+than an hour at 408). On 9 spins (a Kondo resonance) the joined bases of
+700 to 870 states converge to 0.03% of the peak.
 The tail chain stops before its scale falls
 below 1e-30 (`max_sites`, 99 sites at Lambda = 4): `wilson_chain` breaks
 near 1e-35. The hand-over needs a graded basis, so `head_state` solves in

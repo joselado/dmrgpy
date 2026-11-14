@@ -20,8 +20,11 @@ sites after the hand-over, maxm 512 and 768) the two largest bases agree
 to 0.4% of the peak or better, and at 7 spins head and tail agree with
 the exact route to 1.6% of the peak below w_join/3. At 10 spins (330 to
 414 states) the two largest bases agree to 0.47% and 1.35%; the 8 and
-10-spin chains measured are singlets with no Kondo resonance, so the
-resonance is checked against a reference only up to 7 spins. The depth floor of N2
+10-spin chains measured are singlets with no Kondo resonance. At 9
+spins, a chain with a moment and a Kondo resonance, the two largest
+bases (700 to 870 states, the joined basis) agree to 0.03% of the peak,
+so beyond 7 spins the resonance is checked by convergence, with no
+reference. The depth floor of N2
 is a scale and not a number of sites: the MPO of the head loses the
 Wilson hoppings below about 3e-7 of the unit of H (svdMPO's absolute
 cutoff on v3), and the block levels leave NRG at that scale for every
