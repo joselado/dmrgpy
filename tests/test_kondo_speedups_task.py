@@ -141,7 +141,9 @@ def _old_projected_spectrum(ts, ops, nkry):
     Ritz transform Uh @ G @ U in complex arithmetic."""
     b = [ts.project_operator(W) for W, _ in ops]
     bd = [ts.project_operator(Wd) for _, Wd in ops]
-    store, n, Hq = task.block_krylov(ts, b + bd, nkry)
+    # with the residual, as projected_spectrum calls it, so that Hq is the
+    # same to the last bit and only the matrices are compared
+    store, n, Hq, _ = task.block_krylov(ts, b + bd, nkry, residual=True)
     ws, U = np.linalg.eigh(Hq)
     Uh = U.conj().T
 
@@ -271,3 +273,155 @@ def test_a_real_export_gives_the_real_form_and_the_same_curve():
                 + cd.third_order_potential_dIdV(k, eV, -0.1, 0.3, **kw))
 
     assert _rel(curve(ko), curve(ks)) < 1e-14
+
+
+# ---------------------------------------------------------------- item 9
+
+
+def _old_block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
+    """task.block_krylov as it was before item 9: the H overlaps of every
+    block from one product with the basis, and every Krylov candidate
+    gauged once more before its two projection passes."""
+    xp, backend = np, task.backend
+    N = ts.flat_size()
+    starts = task.real_starts(ts, starts)
+    dtype = np.result_type(*[x.dtype for w in starts for x in w],
+                           ts.As[0].dtype, *[W.dtype for W in ts.Ws])
+    nmax = min(N, len(starts))
+    store = xp.zeros((nmax, N), dtype=dtype)
+    count = 0
+
+    def add(block):
+        nonlocal count, store
+        for w in block:
+            if count == nmax:
+                break
+            w = ts.flat(ts.gauge(w))
+            scale = float(xp.linalg.norm(w))
+            for rep in range(2):
+                w = backend.project_rows(store, w, count)[1]
+                w = ts.flat(ts.gauge(ts.unflat(w)))
+            nw = float(xp.linalg.norm(w))
+            if scale > 0.0 and nw > breakdown * scale:
+                store = backend.setrow(store, count, w / nw)
+                count += 1
+
+    add(starts)
+    first = store
+    nmax = min(N, count * (nkry + 1))
+    store = xp.zeros((nmax, N), dtype=dtype)
+    for k in range(count):
+        store = backend.setrow(store, k, first[k])
+    done = 0
+    Hu = np.zeros((nmax, nmax), dtype=complex)
+    left = None
+    for step in range(nkry + 1):
+        n = count
+        if n == done:
+            break
+        Hb = []
+        nb = ts.batch_size()
+        for j0 in range(done, n, nb):
+            j1 = min(n, j0 + nb)
+            hs = ts.flat_many(ts.apply_h_many(ts.unflat_many(store[j0:j1])))
+            Hu[:n, j0:j1] = task._overlap_columns(store, hs, n)
+            Hb.extend(ts.unflat(hs[j - j0]) for j in range(j0, j1))
+        if step == nkry:
+            if residual:
+                out = []
+                for h in Hb:
+                    h = ts.flat(h)
+                    for rep in range(2):
+                        h = backend.project_rows(store, h, n)[1]
+                    out.append(backend.to_host(h))
+                out = np.array(out)
+                left = (done, out.conj() @ out.T)
+            done = n
+            break
+        done = n
+        add(Hb)
+    upper = np.triu(Hu[:count, :count])
+    Hq = upper + np.triu(upper, 1).conj().T
+    Hq = 0.5 * (Hq + Hq.conj().T)
+    if not np.iscomplexobj(np.zeros(0, dtype=dtype)):
+        Hq = Hq.real
+    if residual:
+        if left is None:
+            left = (count, np.zeros((0, 0)))
+        return store, count, Hq, left
+    return store, count, Hq
+
+
+def _starts(seed, real, k=3):
+    from test_task_batched_spectrum import _tensors
+    rand, Ms, Ws = _tensors(seed, real=real)
+    ts = task.TangentSpace(Ms, Ws)
+    return ts, [ts.gauge(ts.unflat(rand(ts.flat_size()))) for _ in range(k)]
+
+
+@pytest.mark.parametrize("real", [True, False])
+@pytest.mark.parametrize("nkry", [1, 4, 40])
+@pytest.mark.parametrize("residual", [True, False])
+def test_the_krylov_space_is_the_old_one(real, nkry, residual):
+    """On a space of dimension 566, from three starts; the exhausted
+    space is checked against ED in test_kondo_task_convergence.py."""
+    ts, starts = _starts(21, real)
+    old = _old_block_krylov(ts, starts, nkry, residual=residual)
+    new = task.block_krylov(ts, starts, nkry, residual=residual)
+    assert new[1] == old[1]  # the same number of vectors
+    n, scale = new[1], np.max(np.abs(old[2]))
+    assert np.max(np.abs(new[2] - old[2])) < 1e-13 * scale
+    assert np.allclose(np.linalg.eigvalsh(new[2]), np.linalg.eigvalsh(old[2]),
+                       rtol=0, atol=1e-13 * scale)
+    if residual:
+        assert new[3][0] == old[3][0]
+        R0, R1 = old[3][1], new[3][1]
+        assert R0.shape == R1.shape
+        if R0.size:
+            assert np.max(np.abs(R1 - R0)) < 1e-12 * np.max(np.abs(R0))
+
+
+def test_the_converged_ritz_values_are_the_old_ones():
+    """Once Ritz pairs converge, the next Krylov vectors are set by what
+    rounding leaves of the residual, so the entries of Hq differ from the
+    old code by much more than rounding (8.7e-3 of max|Hq| on the 20-site
+    chain of the plan at nkry=100, and 2.7e-2 between the old code and
+    itself with its starts scaled by 1+1e-15). What must not move is the
+    converged spectrum."""
+    sc = _chain()
+    s = sc._session
+    from dmrgpy.pyitensor.chain import _mps_arrays_lpr
+    ts = task.TangentSpace(_mps_arrays_lpr(s.wf0), task.mpo_arrays(s.H))
+    starts = [ts.project_operator(task.mpo_arrays(s._mpo(getattr(sc, o)[3].to_terms())))
+              for o in ("Sx", "Sy", "Sz")]
+    _, n0, H0, (j0, R0) = _old_block_krylov(ts, starts, 30, residual=True)
+    _, n1, H1, _ = task.block_krylov(ts, starts, 30, residual=True)
+    assert n1 == n0
+    w0, U0 = np.linalg.eigh(H0)
+    w1 = np.linalg.eigvalsh(H1)
+    r0 = np.sqrt(np.abs(np.einsum("jf,jk,kf->f", U0[j0:].conj(), R0, U0[j0:])))
+    conv = r0 < 1e-8 * np.max(np.abs(w0))
+    assert conv.sum() > 5
+    near = np.array([np.min(np.abs(w1 - x)) for x in w0[conv]])
+    assert np.max(near) < 1e-13 * np.max(np.abs(H0))
+
+
+def test_a_krylov_candidate_is_gauged_twice_and_not_overlapped_again(monkeypatch):
+    ts, starts = _starts(22, True)
+    counts = {"gauge": 0, "overlap": 0}
+    gauge, overlap = task.TangentSpace.gauge, task._overlap_columns
+
+    def g(self, X):
+        counts["gauge"] += 1
+        return gauge(self, X)
+
+    def o(*a):
+        counts["overlap"] += 1
+        return overlap(*a)
+
+    monkeypatch.setattr(task.TangentSpace, "gauge", g)
+    monkeypatch.setattr(task, "_overlap_columns", o)
+    store, n, Hq, _ = task.block_krylov(ts, starts, 4, residual=True)
+    assert n == 5 * len(starts)  # every candidate of these tensors is kept
+    assert counts["overlap"] == 0
+    assert counts["gauge"] == 3 * len(starts) + 2 * (n - len(starts))

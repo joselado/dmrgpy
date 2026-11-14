@@ -1233,16 +1233,30 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
     nmax = min(N, len(starts))
     store = xp.zeros((nmax, N), dtype=dtype)
     count = 0
+    Hu = None  # Hu[i, j] = <q_i|P(H-E0)P|q_j> for i <= j, set below
 
-    def add(block):
+    def add(block, cols=None):
+        """Orthogonalize the candidates of `block` against the basis and
+        keep the ones that are left. The starts are tangent vectors and
+        are gauged first. The Krylov candidates (cols, their columns of
+        Hu) are flat images P(H-E0)P|q_j>, already gauged by apply_many,
+        and the first projection pass gives their overlaps with the n0
+        vectors of the basis before this block, which are Hu[:n0, j]."""
         nonlocal count, store
-        for w in block:
+        n0 = count
+        for k, w in enumerate(block):
             if count == nmax:
+                if cols is not None:  # the overlaps the rest still owes Hu
+                    Hu[:n0, cols[k:]] = _overlap_columns(
+                        store, xp.stack(block[k:]), n0)
                 break
-            w = ts.flat(ts.gauge(w))
+            if cols is None:
+                w = ts.flat(ts.gauge(w))
             scale = float(xp.linalg.norm(w))
             for rep in range(2):
-                w = backend.project_rows(store, w, count)[1]
+                c, w = backend.project_rows(store, w, count)
+                if rep == 0 and cols is not None:
+                    Hu[:n0, cols[k]] = backend.to_host(c)[:n0]
                 w = ts.flat(ts.gauge(ts.unflat(w)))
             nw = float(xp.linalg.norm(w))
             if scale > 0.0 and nw > breakdown * scale:
@@ -1268,30 +1282,34 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
         n = count
         if n == done:
             break
+        last = step == nkry
         Hb = []
         nb = ts.batch_size()
         for j0 in range(done, n, nb):  # the whole block at once
             j1 = min(n, j0 + nb)
             hs = ts.flat_many(ts.apply_h_many(ts.unflat_many(store[j0:j1])))
-            Hu[:n, j0:j1] = _overlap_columns(store, hs, n)
-            Hb.extend(ts.unflat(hs[j - j0]) for j in range(j0, j1))
+            if last and not residual:  # no projection pass to read them from
+                Hu[:n, j0:j1] = _overlap_columns(store, hs, n)
+            Hb.extend(hs[j - j0] for j in range(j0, j1))
             del hs
-        if step == nkry:
+        if last:
             if residual:
                 # two passes, as in add(): the remainder of a vector that
-                # is already in the space is then rounding noise
+                # is already in the space is then rounding noise; the
+                # first one gives the overlaps of Hu, as in add()
                 out = []
-                for h in Hb:
-                    h = ts.flat(h)
+                for j, h in zip(range(done, n), Hb):
                     for rep in range(2):
-                        h = backend.project_rows(store, h, n)[1]
+                        c, h = backend.project_rows(store, h, n)
+                        if rep == 0:
+                            Hu[:n, j] = backend.to_host(c)[:n]
                     out.append(backend.to_host(h))
                 out = np.array(out)
                 left = (done, out.conj() @ out.T)
             done = n
             break
+        add(Hb, cols=np.arange(done, n))
         done = n
-        add(Hb)
         del Hb
     upper = np.triu(Hu[:count, :count])
     Hq = upper + np.triu(upper, 1).conj().T
