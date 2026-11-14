@@ -232,3 +232,24 @@ against 0.22 and 0.44 GB; 8 spins at 1 K with 55 occupied states and 61
 biases, 1.78 GB on the real route against 1.99 GB. With `mem_gb=None` the
 call now warns when the model puts the flow above what the process can
 still take (the decider's pick of a warning, not a default budget).
+
+## The TASK route, measured after the changes
+
+Items 6 to 10 are on master (merged in `792279c`). The same cases as the
+baseline, before (`85ea31a`) against after in one job on one core of
+Triton (21576083, three or two runs each in fresh processes, the
+minimum):
+
+| case | before | after | factor | largest change of the curve |
+|---|---|---|---|---|
+| TASK, order 2, nkry=100, 121 biases | 2.33 s | 1.26 s | 1.85 | 4.9e-6 of the peak |
+| TASK, order 3, nkry=300, 0.3 K, 241 biases | 20.8 s | 12.1 s | 1.72 | 2.7e-14 |
+| TASK, n_gs=2, a scan of 4 values of U | 17.8 s | 4.8 s | 3.7 | 1.1e-5 |
+
+Each run solves its own state, so at T=0 and for the n_gs manifold the
+change between trees includes the solver noise of two separate solves
+(two v3 solves of one chain differ by 3e-3 of the peak, see the rules
+file); the agent's comparison on one seeded state gave 2.2e-7 for item 7
+at T=0. In the scan the manifold is now solved once (get_excited_states
+23.5 s to 6.2 s under the profiler) and the spectra are built twice
+instead of eight times.
