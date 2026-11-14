@@ -282,6 +282,47 @@ def real_up_to_phase(Ws, tol=1e-13):
     return phase, [xp.asarray(R) for R in out]
 
 
+def real_mpo(Ws, tol=1e-12):
+    """The MPO arrays of the same operator as Ws in a real gauge when that
+    operator is real, None otherwise.
+
+    The "python" AutoMPO writes S_y S_y with imaginary site tensors, and its
+    compression mixes the channels, so the MPO of a real H is complex entry
+    by entry. Bond by bond from the left, the left block M (written in the
+    real basis of the bonds before) is replaced by a real orthonormal basis
+    Q of the span of [Re M, Im M], and Q^T M is moved into the next tensor,
+    which keeps the operator to tol. The span of a real operator's minimal
+    left blocks is closed under conjugation, so Q has the bond dimension of
+    M; a larger span (a complex operator, or a bond that is not minimal)
+    returns None, and so does an imaginary part left on the last tensor,
+    which the real bases above make the imaginary part of the operator.
+    Done on the host: the tensors are those of an MPO."""
+    xp = backend.xp()
+    host = [np.asarray(backend.to_host(W)) for W in Ws]
+    if all(not np.iscomplexobj(W) or not np.any(W.imag) for W in host):
+        return [xp.asarray(np.ascontiguousarray(np.real(W))) for W in host]
+    G = np.ones((1, 1))
+    out = []
+    for l, W in enumerate(host):
+        X = np.tensordot(G, W, axes=(1, 0))
+        a, d1, d2, b = X.shape
+        if l == len(host) - 1:
+            if float(np.max(np.abs(X.imag))) > tol * float(np.max(np.abs(X))):
+                return None
+            out.append(np.ascontiguousarray(X.real))
+            break
+        M = X.reshape(a * d1 * d2, b)
+        U, S, _ = np.linalg.svd(np.concatenate([M.real, M.imag], axis=1),
+                                full_matrices=False)
+        r = max(1, int(np.sum(S > tol * S[0]))) if S[0] > 0 else 1
+        if r > b:
+            return None
+        Q = U[:, :r]
+        G = Q.T @ M
+        out.append(np.ascontiguousarray(Q.reshape(a, d1, d2, r)))
+    return [xp.asarray(W) for W in out]
+
+
 def _exact_phase_form(M, phase, tol=1e-12):
     """M as phase times a real matrix with exact zeros, when phase is 1,
     -1, i or -i and M / phase is real to tol of its largest entry; M

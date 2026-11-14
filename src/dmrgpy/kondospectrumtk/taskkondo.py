@@ -97,9 +97,14 @@ class TaskKondoSpectrum():
             op = getattr(chain, name)[site]
             ops.append((op.to_terms(), op.get_dagger().to_terms()))
         self.nkry = int(nkry)
-        e, mats, dim, res = taskdmrg.session_spectrum(chain, ops, int(nkry),
-                                                      residual=True,
-                                                      column=self.column_only)
+        # On "python" the state of a real H is rotated to a real gauge
+        # first, and imaginary_dropped is the part of the state, relative
+        # to its norm, that this drops (0.0 for a state that is real as
+        # exported, None when the complex gauge is kept; see
+        # taskdmrg.real_gauge_state)
+        e, mats, dim, res, self.imaginary_dropped = taskdmrg.session_spectrum(
+                chain, ops, int(nkry), residual=True, column=self.column_only,
+                gauge=True)
         e = np.asarray(e, dtype=float)
         self.residual = np.asarray(res, dtype=float)
         # A state degenerate with the ground state comes out of the Ritz

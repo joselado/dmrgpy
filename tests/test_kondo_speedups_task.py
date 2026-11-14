@@ -425,3 +425,129 @@ def test_a_krylov_candidate_is_gauged_twice_and_not_overlapped_again(monkeypatch
     assert n == 5 * len(starts)  # every candidate of these tensors is kept
     assert counts["overlap"] == 0
     assert counts["gauge"] == 3 * len(starts) + 2 * (n - len(starts))
+
+
+# ---------------------------------------------------------------- item 7
+
+
+def _basis_dtypes(monkeypatch):
+    seen = []
+    build = task.block_krylov
+
+    def spy(ts, starts, nkry, **kwargs):
+        out = build(ts, starts, nkry, **kwargs)
+        seen.append(np.iscomplexobj(out[0]))
+        return out
+
+    monkeypatch.setattr(task, "block_krylov", spy)
+    return seen
+
+
+def _heisenberg(n, field_y=0.):
+    sc = spinchain.Spin_Chain(["S=1/2"] * n, itensor_version="python")
+    h = 0
+    for i in range(n - 1):
+        h = h + 1e-3 * (sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
+                        + sc.Sz[i] * sc.Sz[i + 1])
+    sc.set_hamiltonian(h + 2e-4 * sc.Sz[0] + field_y * sc.Sy[1])
+    return sc
+
+
+def test_the_real_mpo_is_the_same_operator_and_a_complex_one_is_refused():
+    from test_task_batched_spectrum import _dense
+    sc = _heisenberg(5)
+    sc.gs_energy()
+    W = task.mpo_arrays(sc._session.H)
+    assert any(np.any(w.imag) for w in W)  # S_y S_y on "python"
+    Wr = task.real_mpo(W)
+    assert Wr is not None and not any(np.iscomplexobj(w) for w in Wr)
+    assert all(a.shape[3] <= b.shape[3] for a, b in zip(Wr, W))
+    assert _rel(_dense(W), _dense(Wr)) < 1e-13
+    sy = _heisenberg(5, field_y=3e-4)
+    sy.gs_energy()
+    assert task.real_mpo(task.mpo_arrays(sy._session.H)) is None
+
+
+def test_a_python_state_of_a_real_h_runs_in_real_arithmetic(monkeypatch):
+    sc = _chain()
+    T = _cold_T(sc, 3, 200)
+    seen = _basis_dtypes(monkeypatch)
+    sc.__dict__.pop("_task_spectrum_cache", None)
+    real = TaskKondoSpectrum(sc, 3, nkry=200, T=T)
+    monkeypatch.setattr(taskdmrg, "REAL_GAUGE", False)
+    cplx = TaskKondoSpectrum(sc, 3, nkry=200, T=T)
+    assert seen == [False, True]
+    assert 0. <= real.imaginary_dropped < taskdmrg.REAL_GAUGE_DROP
+    assert cplx.imaginary_dropped is None
+    assert cd._spin_triplet(real)[1] and not cd._spin_triplet(cplx)[1]
+    width = np.max(np.abs(cplx.e))
+    conv = cplx.residual < 1e-8 * width
+    conv[0] = False  # the ground state itself
+    assert conv.sum() > 3
+    near = np.array([np.min(np.abs(real.e - x)) for x in cplx.e[conv]])
+    assert np.max(near) < 1e-12 * width
+    eV = np.linspace(-4e-3, 4e-3, 81)
+
+    def curve(k):
+        kw = dict(omega0=20e-3, Gamma0=5e-5)
+        return (cd.second_order_dIdV(k, eV, U=0.3)
+                + cd.third_order_kondo_dIdV(k, eV, -0.1, **kw)
+                + cd.third_order_potential_dIdV(k, eV, -0.1, 0.3, **kw))
+
+    assert _rel(curve(cplx), curve(real)) < 1e-6
+
+
+def test_a_complex_hamiltonian_keeps_the_complex_route_bit_for_bit(monkeypatch):
+    sc = _heisenberg(6, field_y=3e-4)
+    seen = _basis_dtypes(monkeypatch)
+    a = TaskKondoSpectrum(sc, 0, nkry=5)
+    sc.__dict__.pop("_task_spectrum_cache", None)
+    monkeypatch.setattr(taskdmrg, "REAL_GAUGE", False)
+    b = TaskKondoSpectrum(sc, 0, nkry=5)
+    assert seen == [True, True] and a.imaginary_dropped is None
+    for x, y in zip((a.e, a.Sx, a.Sy, a.Sz), (b.e, b.Sx, b.Sy, b.Sz)):
+        assert np.array_equal(x, y)
+
+
+def test_a_complex_mixture_of_a_doublet_keeps_the_complex_route_bit_for_bit(
+        monkeypatch):
+    """A member of a degenerate manifold is in general a complex mixture
+    of two real states, which no real gauge reaches."""
+    sc = _heisenberg(5)
+    sc.set_hamiltonian(sc.hamiltonian - 2e-4 * sc.Sz[0])  # a Kramers doublet
+    sc.maxm, sc.nsweeps, sc.cutoff = 16, 20, 0.
+    _, (m1, m2) = sc.get_excited_states(n=2, purify=True)
+    w = m1 + 1j * m2
+    sc.set_gs(w)
+    seen = _basis_dtypes(monkeypatch)
+    a = TaskKondoSpectrum(sc, 0, nkry=5)
+    sc.__dict__.pop("_task_spectrum_cache", None)
+    monkeypatch.setattr(taskdmrg, "REAL_GAUGE", False)
+    b = TaskKondoSpectrum(sc, 0, nkry=5)
+    assert seen == [True, True] and a.imaginary_dropped is None
+    for x, y in zip((a.e, a.Sx, a.Sy, a.Sz), (b.e, b.Sx, b.Sy, b.Sz)):
+        assert np.array_equal(x, y)
+
+
+def test_the_real_gauge_measures_the_part_it_drops():
+    """A real state in a complex gauge with a global phase is rotated back
+    with nothing dropped; one with an imaginary part of 1e-3 is kept in
+    its complex gauge."""
+    from test_task_batched_spectrum import _tensors
+    rng = np.random.default_rng(31)
+    _, Ms, Ws = _tensors(30, real=True)
+    cplx = [M.astype(complex) for M in Ms]
+    for l in range(len(cplx) - 1):  # a complex gauge on every bond
+        b = cplx[l].shape[2]
+        X = rng.normal(size=(b, b)) + 1j * rng.normal(size=(b, b)) + 3 * np.eye(b)
+        cplx[l] = np.tensordot(cplx[l], X, axes=(2, 0))
+        cplx[l + 1] = np.tensordot(np.linalg.inv(X), cplx[l + 1], axes=(1, 0))
+    cplx[0] = cplx[0] * np.exp(0.4j)
+    Mr, Wr, dropped = taskdmrg.real_gauge_state(cplx, Ws)
+    assert not any(np.iscomplexobj(M) for M in Mr) and dropped < 1e-7
+    o = taskdmrg._mps_overlap
+    assert abs(abs(o(Mr, Ms)) ** 2 / (o(Mr, Mr).real * o(Ms, Ms).real) - 1) < 1e-13
+    bent = [M.copy() for M in cplx]
+    bent[3] = bent[3] + 1e-3j * np.linalg.norm(bent[3]) * rng.normal(size=bent[3].shape) / np.sqrt(bent[3].size)
+    Mb, Wb, gone = taskdmrg.real_gauge_state(bent, Ws)
+    assert gone is None and all(a is b for a, b in zip(Mb, bent))
