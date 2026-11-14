@@ -425,3 +425,13 @@ off costs nothing. The curve moves by 1.5e-12 of the peak with a field and
 by 4.6e-13 at zero field against `90f4ddb`, the same to every digit in the
 three new trees, so this is the change of basis of the block Gram-Schmidt
 and item 2 adds nothing visible.
+
+The test suite on these commits (`-k "not julia_live"`, the 41 groups
+of the night, on Triton): the first run (21578926) had no compiled v3 in
+its tree, so its 80 failures and its v3 skips say nothing about the code,
+apart from one test that compared the Krylov matrices with the sign of
+each Ritz vector, which the block Gram-Schmidt can flip (fixed in
+`016f2b2`). The 18 groups that failed then pass with v3 (21579250: 2476
+tests, 0 failures, 0 errors, 93 skips, all v2 or the known small-units
+xfails), and the other 23 groups passed in the first run (888 tests), but
+there about 118 v3 tests were skipped.
