@@ -171,13 +171,16 @@ the minimum):
 | ED, 10 spins, T=0, 41 biases | 3.20 s | 0.86 s | 3.7 | 5.8e-15 of the peak |
 | ED, 10 spins, 1 K, 41 biases | 6.10 s | 2.37 s | 2.6 | 5.8e-15 |
 | ED, 9 spins, 20 K, 41 biases | 58.4 s | 27.4 s | 2.1 | 2.0e-15 |
+| ED, 10 spins, 10 K, 241 biases (one run each) | 2533 s | 802 s | 3.2 | 5.2e-15 |
 | KRYLOV, 12 spins, 1 K, 61 biases | 51.3 s | 49.8 s | 1.03 | 2.3e-16 |
 
 At T=0 the third-order term went from 1.84 s to 0.22 s and F0 from 1.38 s
 to 0.17 s (item 1 keeps 99 of 1024 final states); at 20 K the coefficient
 build went from 10.4 s to 1.4 s (item 3) and the rest of the third-order
 term is the F tables of item 4. The peak memory went down in every case
-(0.84 to 0.61 GB at 20 K). The Krylov case does not gain, because its
+(0.84 to 0.61 GB at 20 K, and 5.9 to 0.70 GB at 10 K with 241 biases, where
+the hub blocks of item 4 take 796 of the 843 s of the call under the
+profiler). The Krylov case does not gain, because its
 spectra never take the real route and its time is in `state_spectrum`
 (items 11 and 12).
 
