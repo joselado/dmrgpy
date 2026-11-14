@@ -340,9 +340,11 @@ orthogonal to |i>, so [i] + Ritz states is orthonormal, and a
 U=0 only). Ritz energies within the degeneracy tolerance of E_i are
 snapped to it, as on TASK. Exact once each space is exhausted: 1e-15 to
 1e-12 against ED on every model of `tests/test_kondo_krylov.py`.
-`su2=True` takes one member per multiplet with weight 2S+1, the one at
-Sz_tot=0 for an integer S and at Sz_tot=+1/2 for a half-integer S,
-checks [H, S_tot]=0 on a random state and raises otherwise. Do NOT go
+The SU(2) reduction (`su2=None`, the default, or `su2=True`) takes one
+member per multiplet with weight 2S+1, the one at
+Sz_tot=0 for an integer S and at Sz_tot=+1/2 for a half-integer S, and
+checks [H, S_tot]=0 on a random state; `su2=True` raises when it fails,
+`su2=None` takes the full sum. Do NOT go
 back to the sector of the smallest |Sz_tot|: a spinful fermion chain with
 no Nf sector holds both kinds of S, and that sector dropped every
 half-integer multiplet, 0.338 of the peak off ED on a 3-site Hubbard
@@ -375,17 +377,25 @@ peak. (3) The Krylov spectra of a real H already have the real form of
 `_spin_triplet` (since 84090c0, pinned by a test); what costs is the two
 exchange F tables, 90% of the third-order term of one state, with n_f
 about the whole basis here (plan item 2 would halve them on this route; not
-done). (4) `su2` stays opt-in, so do NOT make it the default without
-changing its weight cut: it keeps a multiplet when (2S+1) exp(-x) is above
-p_cut times the largest weight, the full sum keeps a state when exp(-x) is
-above p_cut, and on the zero-field 12-spin chain at 1 K the two differed by
-2.4e-8 of the peak (two multiplets at 18.5 kT), against 3e-12 between
-nkry=100 and 200; on 7 spins at 1.5 K, with no level between the cuts,
-by 2e-15. With the full sum's cut (measured in a scratch copy, not
-committed) they agree to 2.5e-12 and the 12-spin chain is 3.5x faster;
-that change and the default are the author's pick. The residual stop of item 12 is on the branch
+done). (4) `su2=None` is the default since 2026-11-14 (the decider's
+pick): the reduction when the checks pass, the full sum when one fails
+with `SU2Error`, the only error it falls back on, so an error of the
+eigensolver still raises. It rests on the weight cut of the full sum,
+exp(-x) > p_cut on every multiplet whatever its 2S+1 (`ded5439`); do NOT
+go back to the cut on (2S+1) exp(-x) relative to the largest weight: it
+kept two multiplets at 18.5 kT on the zero-field 12-spin chain at 1 K and
+moved dI/dV by 2.4e-8 of the peak, against 3e-12 between nkry=100 and
+200 (the old cut passed on 7 spins only because no level lies between
+the two cuts there). With it auto and off agree to 2.5e-12 on that chain
+(19 s against 66 s) and to 3e-15 on 7 spins and on the 3-site Hubbard
+chain with no Nf sector. A test that reads the full sum on an SU(2)
+chain passes `su2=False`, and the Krylov tests keep their own copy of
+that Hubbard chain, since importing `test_audit_2026_11_13_reread.py`
+starts juliacall. The residual stop of item 12 is on the branch
 `krylov-residual-stop`, not here: it fired only above the default nkry on
-the chains of the plan and cost 8% of `state_spectrum` there.
+the chains of the plan and cost 8% of `state_spectrum` there; what would
+reopen it is a measurement at 12 spins or more with nkry 200 to 400,
+where the Krylov space does not exhaust the Hilbert space.
 
 **Leading-log resummation (2026-11-06)**, `kondospectrumtk/leadinglog.py`,
 is a new method documented in `docs/new_methods/kondo_leading_log/README.md`

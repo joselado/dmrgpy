@@ -167,30 +167,35 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
   differs from the exhausted space by 5.2e-13 of the peak on 10 spins at
   1 K, and by 2.7e-15 in the narrow window: at these sizes nkry=100 is
   already converged for dI/dV, long before every Ritz state of the window
-  is.
-- **`su2` by default, not taken.** Of the three gates, (a) passed: on
-  against off at the default `p_cut` on 7 spins at 1.5 K agree to 2.1e-15
-  of the peak (44 states, 14 multiplets, the same levels). (b) failed: on
-  the zero-field 12-spin chain at 1 K on and off differ by 2.4e-8 of the
-  peak at nkry=100 and 200 alike, while nkry=100 and 200 differ by 3.9e-12
-  (off) and 2.9e-12 (on). The cause is the weight cut, not the reduction:
-  the reduction keeps a multiplet when (2S+1) exp(-x) is above `p_cut`
-  times the largest weight, the full sum a state when exp(-x) is above
-  `p_cut`, and two multiplets (S=2 and S=1 at 18.5 kT, exp(-x) of 9.4e-9
-  and 8.4e-9) are kept by the first and dropped by the second; eigsh found
-  every member of every level. Gate (a) passed only because no level of
-  the 7-spin chain sits between the two cuts. (c) passed with the draft of
-  `su2=None` (auto against off at T>0 on the Heisenberg chain and on the
-  3-site Hubbard chain with no Nf sector: 3.5e-14 and 2.3e-15 of the peak
-  at `p_cut=1e-14`, 2.1e-15 and 1.9e-15 at the defaults), but the draft is
-  not committed. The reduction is worth it: 26 s against 66 s on the
-  12-spin chain. With the cut of the full sum (exp(-x) above `p_cut` for
-  every multiplet, two lines of `su2_initial_states`, measured in a
-  scratch copy and not committed) gate (b) gives 2.5e-12, below the
-  difference between nkry=100 and 200, gate (a) stays at 2.1e-15, and the
-  12-spin chain takes 19 s against 66 s (3.5x). That cut moves
-  `su2=True` results by about `p_cut` (2.4e-8 of the peak here), so it is
-  a pick for the author together with the default.
+  is. So item 12 stays on its branch, measured and not merged (the
+  decider's pick). The measurement that would reopen it as an opt-in
+  keyword is one at 12 spins or more with nkry from 200 to 400, where the
+  Krylov space does not exhaust the Hilbert space. At 10 spins the 1024
+  states are the whole space, which plain ED covers.
+- **`su2=None` by default, taken on the cut of the full sum** (the
+  decider's pick, `ded5439` and `100eb84`). With the first cut the gates
+  gave: (a) on against off at the default `p_cut` on 7 spins at 1.5 K
+  agree to 2.1e-15 of the peak (44 states, 14 multiplets, the same
+  levels); (b) on the zero-field 12-spin chain at 1 K on and off differ by
+  2.4e-8 of the peak at nkry=100 and 200 alike, while nkry=100 and 200
+  differ by 3.9e-12 (off) and 2.9e-12 (on). The cause was the weight cut,
+  not the reduction: it kept a multiplet when (2S+1) exp(-x) was above
+  `p_cut` times the largest weight, the full sum a state when exp(-x) is
+  above `p_cut`, and two multiplets (S=2 and S=1 at 18.5 kT, exp(-x) of
+  9.4e-9 and 8.4e-9) were kept by the first and dropped by the second;
+  eigsh found every member of every level. Gate (a) passed only because
+  no level of the 7-spin chain sits between the two cuts. The reduction
+  now keeps a multiplet when exp(-x) is above `p_cut`, whatever its 2S+1,
+  which moves `su2=True` results by about `p_cut` (2.4e-8 of the peak on
+  the 12-spin chain, in the ledger). On that cut (a) gives 2.1e-15,
+  (b) 2.5e-12, below the difference between nkry=100 and 200, and (c),
+  auto against off at T>0, 2.5e-15 and 2.1e-15 on the 7-spin chain
+  (`p_cut=1e-14` with nkry=40, and the defaults) and 2.3e-15 and 1.9e-15
+  on the 3-site Hubbard chain with no Nf sector. Every `su2=True` test
+  passes. The zero-field case `krylov_n12_T1K_B0` of the harness went
+  from 53.4 s to 18.9 s (2.8x) with the default call. On a chain in a
+  field the check fails at the first component of the total spin, 9 ms
+  on 12 spins, and the call is the full sum as before.
 
 ## The leading-log flow
 
@@ -213,7 +218,8 @@ are good to about 5%. Case 7 is `krylov_n12_T1K`, and the new case
 
 Three items change a default or a number, so they are not taken without a
 pick: `su2=True` by default when H commutes with the total spin (a
-(2S+1)-fold saving at T>0, 3.2x in states measured on 7 spins at 1.5 K);
+(2S+1)-fold saving at T>0, 3.2x in states measured on 7 spins at 1.5 K;
+taken on 2026-11-14 as `su2=None`, see the Krylov section);
 the reuse of the n_gs manifold (item 10), which fixes the solver noise
 between calls; and a default `mem_gb` for order="LL" on the CPU. On 9
 spins with a transverse field one flow of 241 biases needs, by the
@@ -221,14 +227,14 @@ memory model, 2.8 GB at 0.3 K, 34 GB at 1 K and 182 GB at 2 K (complex
 count, about half on the real route), so today a T>0 call above 8 spins
 needs `mem_gb` by hand.
 
-The Krylov work of 2026-11-14 leaves three more picks, each measured in
-the section above: the block Gram-Schmidt of the branch
-`krylov-block-gram-schmidt` (1.7x on `state_spectrum`, dI/dV moves by
-3e-13 of the peak); the residual stop of the branch `krylov-residual-stop`
-(left out, opt-in with `tol=None` by default, or on at 1e-8 for an 8% cost
-at the default nkry); and `su2=None` by default together with the weight
-cut of the full sum (3.5x on the zero-field 12-spin chain, `su2=True`
-results move by about `p_cut`).
+The Krylov work of 2026-11-14 left three more picks, each measured in the
+section above. Two are decided: `su2=None` by default together with the
+weight cut of the full sum is taken (2.8x on the zero-field 12-spin chain,
+`su2=True` results move by about `p_cut`), and the residual stop stays
+on the branch `krylov-residual-stop` until a measurement at 12 spins or
+more with nkry 200 to 400. One is open: the block Gram-Schmidt of the
+branch `krylov-block-gram-schmidt` (1.7x on `state_spectrum`, dI/dV moves
+by 3e-13 of the peak).
 
 ## How to measure
 
