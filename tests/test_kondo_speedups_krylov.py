@@ -82,8 +82,9 @@ def test_state_spectrum_keeps_the_numbers_on_a_truncated_space(field, monkeypatc
     """Item 11 and the block Gram-Schmidt of block_krylov: the Ritz
     energies and dI/dV are the same to roundoff, and the matrices move by
     the roundoff of the basis, which the block Gram-Schmidt changes (3.6e-13
-    of their largest element on this chain, against 7e-16 before it); in a
-    real basis S- is the transpose of S+ and is not projected."""
+    of their largest element on this chain, against 7e-16 before it), up to
+    the phase of each Ritz vector; in a real basis S- is the transpose of
+    S+ and is not projected."""
     sc = heisenberg(6, field)
     kks = krylovkondo.KrylovKondoSpectrum(sc, 1, 1.0, nkry=6, p_cut=1e-6)
     assert kks.real == (field == "xz")
@@ -98,9 +99,14 @@ def test_state_spectrum_keeps_the_numbers_on_a_truncated_space(field, monkeypatc
         # the same space, so the Ritz energies agree to roundoff (8e-16)
         assert np.max(np.abs(old.e - new.e)) <= 1e-14*np.max(np.abs(old.e))
         for a, b in zip((old.Sx, old.Sy, old.Sz), (new.Sx, new.Sy, new.Sz)):
-            # measured 3.6e-13 (field xz) and 2.9e-14 (y); two eigsh starts
-            # of the same code differ by 9e-12 on 12 spins
-            assert np.max(np.abs(a - b)) < 1e-12*np.max(np.abs(a))
+            # in absolute value: eigh fixes a Ritz vector only up to a phase
+            # (a sign in a real basis), and the rounding of the block
+            # Gram-Schmidt can flip it (on Triton one sign flipped on the
+            # y chain, a difference of twice the largest element); dI/dV
+            # below reads only phase-invariant products. Measured 3.6e-13
+            # (field xz) and 2.9e-14 (y) here; two eigsh starts of the same
+            # code differ by 9e-12 on 12 spins
+            assert np.max(np.abs(np.abs(a) - np.abs(b))) < 1e-12*np.max(np.abs(a))
         d0, d1 = _dIdV(old), _dIdV(new)
         assert np.max(np.abs(d1 - d0)) < 1e-13*np.max(np.abs(d0)) # measured 1.2e-15
         # the residual from the recurrence is the explicit one
