@@ -346,3 +346,22 @@ file); the agent's comparison on one seeded state gave 2.2e-7 for item 7
 at T=0. In the scan the manifold is now solved once (get_excited_states
 23.5 s to 6.2 s under the profiler) and the spectra are built twice
 instead of eight times.
+
+## The Krylov route, measured after the changes
+
+Item 11 and the su2 default are on master (merged in `a3eb80a`), before
+(`85ea31a`) against after in one job on one core of Triton (two runs
+each, the minimum):
+
+| case | before | after | factor | largest change of the curve |
+|---|---|---|---|---|
+| KRYLOV, 12 spins, 1 K, a field, 61 biases | 70.7 s | 69.5 s | 1.02 | 4.7e-16 of the peak |
+| KRYLOV, 12 spins, 1 K, zero field, 61 biases | 63.4 s | 22.5 s | 2.8 | 3.5e-12 |
+
+The node of this job was slower than that of the baseline (51.3 s for the
+first case). With a field nothing but item 11 acts, and on this node it
+gave 1.05 on `state_spectrum` and 1.02 on the call, below the 1.1 of the
+rule; it stays because it removes code (the explicit residual and the
+second product of H). At zero field the reduction to one member per
+multiplet does the work, and the change against the full sum is the
+2.5e-12 of gate (b).
