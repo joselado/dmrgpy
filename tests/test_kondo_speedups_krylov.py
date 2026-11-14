@@ -78,9 +78,11 @@ def _dIdV(ks):
 
 @pytest.mark.parametrize("field", ["xz", "y"])
 def test_state_spectrum_keeps_the_numbers_on_a_truncated_space(field, monkeypatch):
-    """Item 11: the Krylov basis is the same to the last bit, the Ritz
-    energies too, and the matrices move at roundoff only; in a real basis
-    S- is the transpose of S+ and is not projected."""
+    """Item 11 and the block Gram-Schmidt of block_krylov: the Ritz
+    energies and dI/dV are the same to roundoff, and the matrices move by
+    the roundoff of the basis, which the block Gram-Schmidt changes (3.6e-13
+    of their largest element on this chain, against 7e-16 before it); in a
+    real basis S- is the transpose of S+ and is not projected."""
     sc = heisenberg(6, field)
     kks = krylovkondo.KrylovKondoSpectrum(sc, 1, 1.0, nkry=6, p_cut=1e-6)
     assert kks.real == (field == "xz")
@@ -92,15 +94,16 @@ def test_state_spectrum_keeps_the_numbers_on_a_truncated_space(field, monkeypatc
         old = _old_state_spectrum(kks, k)
         new = kks.state_spectrum(k)
         assert old.dim == new.dim == 19 # truncated: 63 states are reachable
-        # the same basis: equal here to the last bit, but BLAS may round by
-        # the alignment of the arrays, so the test asks for 1e-14
+        # the same space, so the Ritz energies agree to roundoff (8e-16)
         assert np.max(np.abs(old.e - new.e)) <= 1e-14*np.max(np.abs(old.e))
         for a, b in zip((old.Sx, old.Sy, old.Sz), (new.Sx, new.Sy, new.Sz)):
-            assert np.max(np.abs(a - b)) < 1e-14*np.max(np.abs(a)) # measured 7e-16
+            # measured 3.6e-13 (field xz) and 2.9e-14 (y); two eigsh starts
+            # of the same code differ by 9e-12 on 12 spins
+            assert np.max(np.abs(a - b)) < 1e-12*np.max(np.abs(a))
         d0, d1 = _dIdV(old), _dIdV(new)
-        assert np.max(np.abs(d1 - d0)) < 1e-13*np.max(np.abs(d0)) # measured 6e-16
+        assert np.max(np.abs(d1 - d0)) < 1e-13*np.max(np.abs(d0)) # measured 1.2e-15
         # the residual from the recurrence is the explicit one
-        assert np.max(np.abs(new.residual - old.residual)) < 1e-12*krylovkondo.onenorm(kks.H) # 9e-17
+        assert np.max(np.abs(new.residual - old.residual)) < 1e-12*krylovkondo.onenorm(kks.H) # 9e-15
     assert len(calls) == (2 if kks.real else 3)*min(3, len(kks.weights))
 
 
