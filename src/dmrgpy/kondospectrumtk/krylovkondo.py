@@ -103,6 +103,14 @@ def _as_real(M):
     return np.real(M)
 
 
+def _same(A, B):
+    """Whether two matrices are equal entry by entry (sparse or dense)."""
+    if sp.issparse(A) or sp.issparse(B):
+        D = sp.csr_matrix(A) - sp.csr_matrix(B)
+        return D.nnz == 0 or not np.any(D.data)
+    return bool(np.array_equal(np.asarray(A), np.asarray(B)))
+
+
 def onenorm(H):
     """The 1-norm of H (largest column sum of |H|), a bound of its
     spectral radius, so 2*onenorm(H) bounds the width of the spectrum."""
@@ -166,41 +174,74 @@ def initial_states(H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
 
 
 def block_krylov(H, starts, psi, nkry):
-    """(theta, F, residual): the Ritz values and vectors of H in the block
-    Krylov space started from the columns of starts, orthogonal to psi, of
-    dimension at most 3*nkry. Each new block H@B is projected twice on psi
-    and on every earlier block, and an SVD keeps its directions with a
-    singular value above DROP_TOL of its largest column norm; the space
-    stops growing when a block is empty (the space is exhausted) or would
-    pass 3*nkry columns."""
-    blocks = []
+    """(theta, y, Q, residual): the Ritz values of H in the block Krylov
+    space started from the columns of starts, orthogonal to psi, of
+    dimension at most 3*nkry, and the Ritz vectors as Q @ y, with Q the
+    orthonormal Krylov basis (Q @ y is not formed: state_spectrum works in
+    Krylov coordinates). Each new block H@B is projected twice on psi and
+    on every earlier block, and an SVD keeps its directions with a singular
+    value above DROP_TOL of its largest column norm; the space stops
+    growing when a block is empty (the space is exhausted) or would pass
+    3*nkry columns.
+
+    The products H@B of the loop are kept, so H@Q is not formed again.
+    residual is ||(H - theta_k) Q y_k||, read off the recurrence: H Q = Q
+    Hk + W E^T, W being the part of H@B outside the space for the last
+    block B, taken before the DROP_TOL cut, so the norm is that of W times
+    the rows of y_k on the last block. The directions DROP_TOL dropped
+    from earlier blocks are not in it (below DROP_TOL of the scale of
+    H)."""
+    blocks, hblocks = [], []
 
     def orth(V):
+        """V projected on the complement of psi and of the space, the
+        directions kept, and the factor s Vh of its SVD before the cut."""
         scale = float(np.max(np.linalg.norm(V, axis=0))) if V.size else 0.
         if scale == 0.:
-            return V[:, :0]
+            return V[:, :0], np.zeros((0, V.shape[1]))
         for _ in range(2):
             V = V - np.outer(psi, psi.conj() @ V)
             for Q in blocks:
                 V = V - Q @ (Q.conj().T @ V)
-        U, s, _ = np.linalg.svd(V, full_matrices=False)
-        return U[:, s > DROP_TOL*scale]
+        U, s, Vh = np.linalg.svd(V, full_matrices=False)
+        return U[:, s > DROP_TOL*scale], s[:, None]*Vh
 
-    B = orth(starts)
+    B, W = orth(starts)
     n = 0
     while B.shape[1] > 0 and n + B.shape[1] <= 3*nkry:
         blocks.append(B)
         n += B.shape[1]
-        B = orth(H @ B)
+        HB = H @ B
+        hblocks.append(HB)
+        B, W = orth(HB)
     if not blocks:
-        return np.zeros(0), np.zeros((len(psi), 0), dtype=psi.dtype), np.zeros(0)
+        return (np.zeros(0), np.zeros((0, 0)),
+                np.zeros((len(psi), 0), dtype=psi.dtype), np.zeros(0))
     Q = np.concatenate(blocks, axis=1)
-    HQ = H @ Q
-    Hk = Q.conj().T @ HQ
+    Hk = Q.conj().T @ np.concatenate(hblocks, axis=1)
     theta, y = np.linalg.eigh((Hk + Hk.conj().T)/2.)
-    F = Q @ y
-    residual = np.linalg.norm(HQ @ y - F*theta[None, :], axis=0)
-    return theta, F, residual
+    residual = np.linalg.norm(W @ y[n - blocks[-1].shape[1]:], axis=0)
+    return theta, y, Q, residual
+
+
+def _project(M, psi, Q, y):
+    """<a|M|b> on the basis [psi, Q y_1, Q y_2, ...], from M Q in Krylov
+    coordinates: one product of the size of Q^H M Q and two small
+    rotations by y, instead of forming Q y."""
+    Mpsi = M @ psi
+    if Q.shape[1] == 0: # the spin annihilates psi
+        return np.array([[psi.conj() @ Mpsi]])
+    MQ = M @ Q
+    QH = Q.conj().T
+    yH = y.conj().T
+    n = y.shape[1]
+    dtype = np.result_type(MQ.dtype, Mpsi.dtype, y.dtype)
+    out = np.empty((n + 1, n + 1), dtype=dtype)
+    out[0, 0] = psi.conj() @ Mpsi
+    out[0, 1:] = (psi.conj() @ MQ) @ y
+    out[1:, 0] = yH @ (QH @ Mpsi)
+    out[1:, 1:] = yH @ (QH @ MQ) @ y
+    return out
 
 
 def _total_spin(chain, edobj):
@@ -334,6 +375,9 @@ class KrylovKondoSpectrum():
         if self.real:
             H, Sp, Sm, Sz = (_as_real(M) for M in (H, Sp, Sm, S[2]))
             self._ladder = (Sp, Sm, Sz)
+            # S- = (S+)^T exactly for Hermitian spin matrices, and then the
+            # matrix of S- is the transpose of that of S+
+            self._minus_is_transpose = _same(Sm, Sp.T)
         else:
             H = H.astype(complex)
             self._ladder = None
@@ -360,13 +404,17 @@ class KrylovKondoSpectrum():
             starts = np.stack([Sp @ psi, Sm @ psi, Sz @ psi], axis=1)
         else:
             starts = np.stack([M @ psi for M in self._S], axis=1)
-        theta, F, residual = block_krylov(self.H, starts, psi, self.nkry)
-        basis = np.concatenate([psi[:, None], F], axis=1)
+        theta, y, Q, residual = block_krylov(self.H, starts, psi, self.nkry)
         if self.real:
-            Ap, Am, Az = (basis.T @ (M @ basis) for M in self._ladder)
+            # S- is the transpose of S+ in a real basis, so its matrix is
+            # the transpose of that of S+ and is not built
+            Sp, Sm, Sz = self._ladder
+            Ap = _project(Sp, psi, Q, y)
+            Az = _project(Sz, psi, Q, y)
+            Am = Ap.T if self._minus_is_transpose else _project(Sm, psi, Q, y)
             mats = ((Ap + Am)/2., (Ap - Am)/2j, Az.astype(complex))
         else:
-            mats = tuple(basis.conj().T @ (M @ basis) for M in self._S)
+            mats = tuple(_project(M, psi, Q, y) for M in self._S)
         e = np.concatenate([[0.], theta - Ei])
         # a state degenerate with i comes out at +-1e-16, and Theta0 would
         # read the zero-bias point on one side at random: snapped to 0

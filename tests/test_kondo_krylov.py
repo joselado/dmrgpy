@@ -123,11 +123,16 @@ def test_three_separate_spaces_double_count_with_a_field(monkeypatch):
     conserved, and the shared directions are counted more than once. With
     Sz conserved they lie in different sectors and agree with ED."""
     block = krylovkondo.block_krylov
+    from scipy.linalg import block_diag
 
-    def separate(H, starts, psi, nkry):
+    def separate(H, starts, psi, nkry, **kw):
+        # (theta, y, Q, residual) of the three spaces side by side: the
+        # Ritz vectors Q y are then those of each space, not orthogonal
+        # across them
         out = [block(H, starts[:, [a]], psi, nkry) for a in range(starts.shape[1])]
-        return tuple(np.concatenate([o[k] for o in out], axis=-1 if k == 1 else 0)
-                     for k in range(3))
+        return (np.concatenate([o[0] for o in out]), block_diag(*[o[1] for o in out]),
+                np.concatenate([o[2] for o in out], axis=1),
+                np.concatenate([o[3] for o in out]))
 
     assert compare(heisenberg(5, "xz"), 0.5) < 1e-11 # measured 5e-13
     monkeypatch.setattr(krylovkondo, "block_krylov", separate)
