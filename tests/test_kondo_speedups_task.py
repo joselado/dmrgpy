@@ -551,3 +551,108 @@ def test_the_real_gauge_measures_the_part_it_drops():
     bent[3] = bent[3] + 1e-3j * np.linalg.norm(bent[3]) * rng.normal(size=bent[3].shape) / np.sqrt(bent[3].size)
     Mb, Wb, gone = taskdmrg.real_gauge_state(bent, Ws)
     assert gone is None and all(a is b for a, b in zip(Mb, bent))
+
+
+# ---------------------------------------------------------------- item 10
+
+
+def _doublet(n=5):
+    """An odd Heisenberg chain, a Kramers doublet, at a bond dimension that
+    holds it."""
+    sc = spinchain.Spin_Chain(["S=1/2"] * n, itensor_version="python")
+    h = 0
+    for i in range(n - 1):
+        h = h + 1e-3 * (sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
+                        + sc.Sz[i] * sc.Sz[i + 1])
+    sc.set_hamiltonian(h)
+    sc.maxm, sc.nsweeps, sc.cutoff = 16, 20, 0.
+    return sc
+
+
+KW10 = dict(site=0, Jrho_s=-0.1, U=0.2, T=0., omega0=20e-3, Gamma0=5e-5,
+            order=3, mode="DMRG", submode="TASK", nkry=10, n_gs=2)
+EV10 = np.linspace(-4e-3, 4e-3, 41)
+
+
+def _count_solves(sc):
+    calls = []
+    solve = sc.get_excited_states
+
+    def counted(*a, **k):
+        calls.append(1)
+        return solve(*a, **k)
+
+    sc.get_excited_states = counted
+    return calls
+
+
+def _call(sc, **kw):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return sc.get_kondo_spectrum(EV10, **dict(KW10, **kw))[1]
+
+
+def test_a_repeat_call_reuses_the_manifold_and_its_spectra(monkeypatch):
+    sc = _doublet()
+    solves, builds = _count_solves(sc), _count_builds(monkeypatch)
+    first = _call(sc)
+    again = _call(sc, U=0.3)  # a scan over U at the same state
+    assert len(solves) == 1 and len(builds) == 2
+    assert np.array_equal(_call(sc), first)
+    assert len(solves) == 1 and len(builds) == 2
+    # the old behaviour, a solve and two builds per call, is what dropping
+    # the entry gives back
+    del sc._n_gs_manifold
+    _call(sc)
+    assert len(solves) == 2 and len(builds) == 4
+    assert np.all(np.isfinite(again))
+
+
+def test_a_new_hamiltonian_solves_the_manifold_again():
+    sc = _doublet()
+    solves = _count_solves(sc)
+    _call(sc)
+    sc.set_hamiltonian(sc.hamiltonian + 1e-5 * sc.Sx[1] * sc.Sx[2])
+    _call(sc)
+    assert len(solves) == 2
+
+
+def test_other_solver_settings_solve_the_manifold_again():
+    sc = _doublet()
+    solves = _count_solves(sc)
+    _call(sc)
+    sc.maxm = 12
+    _call(sc)
+    assert len(solves) == 2
+
+
+def test_the_key_holds_the_hamiltonian_and_the_settings():
+    """set_hamiltonian() drops the entry, and the key does not rely on it:
+    the same state under another H, n_gs or solver key is another key."""
+    from dmrgpy.kondospectrumtk import kondomethod
+    sc = _doublet()
+    gs0 = sc.get_gs()
+    key = kondomethod._manifold_key(sc, gs0, 2)
+    assert kondomethod._manifold_key(sc, gs0, 2) == key
+    assert kondomethod._manifold_key(sc, gs0, 3) != key
+    sc.excited_gram_schmidt = True
+    assert kondomethod._manifold_key(sc, gs0, 2) != key
+    sc.excited_gram_schmidt = False
+    sc.set_hamiltonian(sc.hamiltonian + 1e-5 * sc.Sz[1])
+    sc.set_gs(gs0)
+    sc.get_gs()
+    assert kondomethod._manifold_key(sc, gs0, 2) != key
+
+
+def test_a_copy_of_the_chain_solves_its_own_manifold():
+    import copy
+    sc = _doublet()
+    first = _call(sc)
+    cp = copy.deepcopy(sc)
+    assert cp._n_gs_manifold is None
+    solves = _count_solves(sc)
+    out = _call(cp)
+    assert np.max(np.abs(out - first)) < 1e-6 * np.max(np.abs(first))
+    _call(sc)
+    assert not solves  # the original still holds its own

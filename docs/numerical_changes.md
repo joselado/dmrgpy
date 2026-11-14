@@ -1659,3 +1659,18 @@ and do not move: a member of a degenerate manifold (`n_gs>1`) is in
 general a complex mixture of two real states. v3 and `julia_live` export
 their state as it is, and `get_poles` and `dynamical_correlator` with
 `submode="TASK"` are not changed.
+
+`get_kondo_spectrum(mode="DMRG", submode="TASK", n_gs=g)` with $g>1$
+**changes behaviour between calls**. The members of the manifold are now
+kept on the chain, under a digest of the solved ground state, $H$, $g$
+and the solver settings, and a repeat call at the same state takes the
+same members instead of solving them again. Repeated calls, for instance
+a scan over `Jrho_s`, `U`, `T` or the biases, therefore give exactly the
+same manifold, where before each call took new members and the curves
+differed by the solver noise of the manifold: by $4\times 10^{-9}$ of the
+peak on a 9-site truncated doublet at $T=0$ and at 0.1 K, and more on a
+longer chain, where the poles that are not converged are steps. The
+first call gives what it gave before. A new $H$, other solver settings (`maxm`, `nsweeps`, `cutoff`,
+`noise`, `excited_gram_schmidt`), a new solve of the ground state,
+`restart()`, a backend switch and a copy of the chain all solve the
+manifold again. The other submodes still solve it at every call.

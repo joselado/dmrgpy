@@ -23,6 +23,53 @@ def _task_backends():
     from ..taskdmrg import BACKENDS
     return ", ".join(repr(b) for b in BACKENDS)
 
+
+def _manifold_key(chain, gs0, n_gs):
+    """A digest of what the n_gs manifold of get_excited_states depends
+    on: the site arrays of the solved ground state gs0 and of H as the
+    session exports them, n_gs, the solver parameters the state was solved
+    under (the chain's _gs_solver_key, groundstate.solver_key) and
+    excited_gram_schmidt, which the excited-state solve reads too. H is in
+    the key although set_hamiltonian() drops the entry, so that the old
+    state set again after a new H does not find the old members."""
+    from .. import taskdmrg
+    s = chain._session
+    if chain.itensor_version == "python":
+        from ..pyitensor import task
+        from ..pyitensor.chain import _mps_arrays_lpr
+        Ms = _mps_arrays_lpr(gs0.cpp_handle)
+        Ws = task.mpo_arrays(s.H)
+    else:
+        Ms = s.mps_site_arrays(gs0.cpp_handle)
+        Ws = s.mpo_site_arrays(s.hamiltonian_mpo())
+    return taskdmrg._spectrum_key(Ms, Ws, [], (
+        "n_gs", int(n_gs), repr(getattr(chain, "_gs_solver_key", None)),
+        bool(getattr(chain, "excited_gram_schmidt", False))))
+
+
+def _task_manifold(chain, gs0, n_gs):
+    """(energies, members) of the n_gs manifold for submode="TASK", kept on
+    the chain as _n_gs_manifold, one entry, under _manifold_key: a repeat
+    call at the same state and settings takes the same members instead of
+    solving them again, and then the spectrum cache of taskdmrg serves
+    their spectra, since their arrays are the same. A scan over Jrho_s, U,
+    T or the biases at n_gs=2 solved the manifold and built two spectra at
+    every point, and the curves of two calls differed by the solver noise
+    of the manifold. Detached copies are handed out, and the entry is
+    dropped with the state (restart(), set_hamiltonian(), a backend
+    switch, a copy of the chain)."""
+    from .. import groundstate
+    key = _manifold_key(chain, gs0, n_gs)
+    kept = chain.__dict__.get("_n_gs_manifold")
+    if kept is None or kept[0] != key:
+        energies, members = chain.get_excited_states(n=n_gs, purify=True)
+        if len(members) < n_gs:  # raised by the caller, not kept
+            return energies, members
+        kept = (key, np.array(energies),
+                [groundstate.detached_copy(w) for w in members])
+        chain._n_gs_manifold = kept
+    return kept[1].copy(), [groundstate.detached_copy(w) for w in kept[2]]
+
 class KondoSpectrumMixin():
     """get_kondo_spectrum for a chain with Sx/Sy/Sz[site] operators"""
     def get_kondo_spectrum(self, eV, site=0, Jrho_s=0.0, U=0.0, T=1.0,
@@ -525,7 +572,13 @@ class KondoSpectrumMixin():
         from .. import groundstate
         gs0 = self.get_gs() # the solved state, put back afterwards
         e0 = self.gs_energy()
-        energies, members = self.get_excited_states(n=n_gs, purify=True)
+        if submode == "TASK":
+            # kept on the chain: a repeat call at the same state and
+            # settings takes the same members, and the spectrum cache of
+            # taskdmrg serves their spectra (_task_manifold)
+            energies, members = _task_manifold(self, gs0, n_gs)
+        else:
+            energies, members = self.get_excited_states(n=n_gs, purify=True)
         if len(members) < n_gs:
             raise RuntimeError("n_gs=%d: get_excited_states returned only %d "
                                "independent states" % (n_gs, len(members)))
