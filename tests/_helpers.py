@@ -121,9 +121,19 @@ def julia_live_param():
     toolchain is available -- the julia_live counterpart of the
     pytest.param(3, marks=skipif(not cppext.available(3))) idiom used
     throughout this suite."""
+    import importlib.util
     import pytest
-    ok, reason = julia_available()
+    if importlib.util.find_spec("juliacall") is None:
+        return pytest.param("julia_live", id="julia_live",
+                marks=pytest.mark.skip(reason="requires a working "
+                                       "juliacall/Julia toolchain: juliacall "
+                                       "is not installed"))
+    # The probe boots the Julia session (and may resolve its packages over
+    # the network), so it must not run at collection: a string condition
+    # is evaluated by pytest only when the test is set up, so a run with
+    # -k "not julia_live" never starts Julia.
     return pytest.param("julia_live", id="julia_live",
-            marks=pytest.mark.skipif(not ok,
-                reason="requires a working juliacall/Julia toolchain: %s"
-                        % reason))
+            marks=pytest.mark.skipif(
+                "not __import__('_helpers').julia_available()[0]",
+                reason="requires a working juliacall/Julia toolchain (see "
+                       "_helpers.julia_available() for the error)"))

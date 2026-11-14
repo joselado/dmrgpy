@@ -189,7 +189,7 @@ def test_metts_dynamical_correlator_njobs_rejects_julia_live():
                                        nsamples=4, nwarmup=1, njobs=2)
 
 
-def test_metts_dynamical_correlator_tdvp_cutoff_maxdim_reach_julia_backend():
+def test_metts_dynamical_correlator_tdvp_cutoff_maxdim_reach_julia_live():
     """tdvp_cutoff/tdvp_maxdim are wired through for itensor_version=
     "julia_live" too (mpsjulialive/tdvp.jl's tdvp_step takes cutoff/maxdim
     per call, unlike v3's hardcoded restriction -- see
