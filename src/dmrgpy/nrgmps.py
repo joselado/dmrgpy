@@ -189,8 +189,10 @@ class Export(object):
         """<a|b> between the left basis of bond p of self (bra) and of
         other (ket), a chi x chi' matrix."""
         Lm = np.ones((1, 1))
-        for j in range(p + 1):
-            Lm = np.einsum("ab,asc,bsd->cd", Lm, self.As[j].conj(), other.As[j])
+        for j in range(p + 1): # two pair contractions, chi^3 d (a single
+            # three-operand einsum loops over all five indices, chi^4 d)
+            X = np.tensordot(Lm, self.As[j].conj(), axes=(0, 0)) # b, s, c
+            Lm = np.tensordot(X, other.As[j], axes=([0, 1], [0, 1])) # c, d
         return Lm
 
     def block_matrix(self, op, p, other=None):
