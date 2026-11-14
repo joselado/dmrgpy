@@ -1331,7 +1331,7 @@ es = np.logspace(-8, 0, 50)
 (e, a1) = ysr.get_stm_spectrum(fc, es, submode="NRG", head="exact", keep=1600)
 (e, a2) = ysr.get_stm_spectrum(fc, es, submode="NRG", head="dmrg", keep=1600,
                                m=4, nkry=30)
-print(np.max(np.abs(a2/a1 - 1)[es < 1e-3])) # 3e-4 below the hand-over
+print(np.max(np.abs(a2/a1 - 1)[es < 1e-3])) # 4e-4 below the hand-over
 ```
 
 Keeping only the lowest states of the bare spin chain as the impurity is
@@ -1366,7 +1366,8 @@ narrower than all eight states.
 - `join`: how the tail and TASK meet. `"fade"` (the default) mixes the
   two over a factor $\Lambda$ on each side of the energy of the hand-over;
   `"cut"` switches at that energy, which leaves an error of a few percent
-  there.
+  there. The fade needs a converged TASK: at `nkry=30` it is no better
+  than the cut around that energy.
 - `b`, `omega0`: the log-Gaussian broadening, as in `zaverage`.
 
 The examples are `examples/kondo/kondo_resonance_nrg` and

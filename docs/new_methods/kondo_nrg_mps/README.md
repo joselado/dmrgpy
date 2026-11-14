@@ -26,7 +26,7 @@ there, with keep = 3200 at 7 spins (section 3). Beyond that, DMRG solves
 the spins and the first Wilson sites (the head), and the NRG goes on from
 the bond basis of that state (the tail). The tail gives the spectrum below
 the energy of the hand-over, and TASK on the head gives it above. This
-second route agrees with the exact one on 3 spins to 3e-4 below the
+second route agrees with the exact one on 3 spins to 4e-4 below the
 hand-over and on 7 spins to 1.6% of the peak, and on 8 to 10 spins, where
 there is no exact reference, it converges in the size of the hand-over
 basis to 1.4% of the peak or better (section 6).
@@ -267,8 +267,8 @@ the bond at the hand-over stops near 150 states at the cutoff 1e-12 even
 with maxm = 256 or 512. The example `spin_chain_nrg_head_tail` (3 spins,
 maxm = 160, nkry = 30, one mesh) agrees with the exact route to 8e-4
 with one member of the doublet in the hand-over basis and to 2.9e-4 with
-both (the default since 2026-11-14), both
-below 1e-3, in 6 minutes on one core.
+both, both below 1e-3, in 6 minutes on one core; with the fade join of
+section 6 (the default since 2026-11-14) it is 4.0e-4.
 
 ## 6. The joined spectrum
 
@@ -351,7 +351,11 @@ at b = 0.8 gives 0.9 to 2.5% with the fade against 2.8 to 20% with the
 cut at nkry 60 to 150 on 3 spins. The joined weight is within 0.4% of the
 sum rule with the fade (+0.02% to +0.4%). Fades over a factor 2 and 8
 instead of Lambda = 4 gave 1.1 to 1.7% on 3 spins, so the width is not
-tuned. On one spin TASK alone is converged at nkry = 90 as well (0.01%
+tuned. The fade needs a converged TASK: at nkry = 30 on one mesh (b =
+0.8, the example below) it is 14% off in the window against 12% for the
+cut, and it carries the error of TASK below the window, 1.4% below
+w_join/4 against 0.09%; at nkry = 90 it is 1.5% against 2.8% in the
+window and 0.24% below it. On one spin TASK alone is converged at nkry = 90 as well (0.01%
 against nkry = 240 above 2 w_join), and the window weights of the two
 routes agree to 0.3% at nkry = 240.
 
@@ -459,8 +463,9 @@ ranges of section 6, nkry = 30 was 11% off above both cuts, 60 3.0%, and
   those of TASK on the head.
 - More than one channel: the metal is under one spin.
 - A temperature above the scale of the hand-over: TASK on the head is a
-  T = 0 method, so T has to stay far below w_join (a warning above
-  w_join/10). Above it, the exact route of section 3 is the only one.
+  T = 0 method, so T has to stay far below the lowest energy where TASK
+  enters, w_join/Lambda with the fade join (a warning above a tenth of
+  it). Above it, the exact route of section 3 is the only one.
 - A superconducting substrate: the (Q, 2S^z) labels need a conserved
   charge.
 - A reference beyond 7 spins: at 8 spins the exact route is not converged
