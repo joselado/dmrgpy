@@ -333,8 +333,9 @@ the same members, as detached copies, and the spectrum cache serves their
 spectra (a scan of 4 values of U: 4 solves and 8 builds became 1 and 2,
 17.8 s to 4.9 s). It was one of the plan's choices for the author,
 taken on 2026-11-14 knowing that it fixes the manifold between calls, so
-repeated calls no longer differ by solver noise (4e-9 of the peak on the
-9-site doublet). H stays in the key although
+repeated calls no longer differ by solver noise (4e-9 to 2.6e-8 of the
+peak on the 9-site doublet). It runs on "python" and v3, where the
+members' exports are the same from call to call. H stays in the key although
 `set_hamiltonian` drops the entry: `set_gs` of the old state after a new
 H must miss. The entry is dropped wherever `_dcex_excited_cache` is
 (`restart`, `set_hamiltonian`, `_reset_dmrg_state`, `__deepcopy__`),

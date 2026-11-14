@@ -32,6 +32,7 @@ def _chain(version="python", n=10, maxm=12):
         h = h + 6e-4 * (-1) ** i * sc.Sz[i]
     sc.set_hamiltonian(h)
     sc.maxm, sc.nsweeps, sc.cutoff = maxm, 10, 1e-10
+    np.random.seed(5)  # the random start of the solve, for one state every run
     sc.gs_energy()
     return sc
 
@@ -516,6 +517,7 @@ def test_a_complex_mixture_of_a_doublet_keeps_the_complex_route_bit_for_bit(
     sc = _heisenberg(5)
     sc.set_hamiltonian(sc.hamiltonian - 2e-4 * sc.Sz[0])  # a Kramers doublet
     sc.maxm, sc.nsweeps, sc.cutoff = 16, 20, 0.
+    np.random.seed(7)  # one pair of members every run
     _, (m1, m2) = sc.get_excited_states(n=2, purify=True)
     w = m1 + 1j * m2
     sc.set_gs(w)
@@ -556,10 +558,10 @@ def test_the_real_gauge_measures_the_part_it_drops():
 # ---------------------------------------------------------------- item 10
 
 
-def _doublet(n=5):
+def _doublet(n=5, version="python"):
     """An odd Heisenberg chain, a Kramers doublet, at a bond dimension that
     holds it."""
-    sc = spinchain.Spin_Chain(["S=1/2"] * n, itensor_version="python")
+    sc = spinchain.Spin_Chain(["S=1/2"] * n, itensor_version=version)
     h = 0
     for i in range(n - 1):
         h = h + 1e-3 * (sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
@@ -593,8 +595,9 @@ def _call(sc, **kw):
         return sc.get_kondo_spectrum(EV10, **dict(KW10, **kw))[1]
 
 
-def test_a_repeat_call_reuses_the_manifold_and_its_spectra(monkeypatch):
-    sc = _doublet()
+@pytest.mark.parametrize("version", VERSIONS)
+def test_a_repeat_call_reuses_the_manifold_and_its_spectra(monkeypatch, version):
+    sc = _doublet(version=version)
     solves, builds = _count_solves(sc), _count_builds(monkeypatch)
     first = _call(sc)
     again = _call(sc, U=0.3)  # a scan over U at the same state

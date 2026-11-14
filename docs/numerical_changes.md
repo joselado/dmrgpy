@@ -1667,10 +1667,11 @@ and the solver settings, and a repeat call at the same state takes the
 same members instead of solving them again. Repeated calls, for instance
 a scan over `Jrho_s`, `U`, `T` or the biases, therefore give exactly the
 same manifold, where before each call took new members and the curves
-differed by the solver noise of the manifold: by $4\times 10^{-9}$ of the
-peak on a 9-site truncated doublet at $T=0$ and at 0.1 K, and more on a
-longer chain, where the poles that are not converged are steps. The
-first call gives what it gave before. A new $H$, other solver settings (`maxm`, `nsweeps`, `cutoff`,
+differed by the solver noise of the manifold: by $4\times 10^{-9}$ to
+$2.6\times 10^{-8}$ of the peak on a 9-site truncated doublet at $T=0$
+and 0.1 K, and more on a longer chain, where the poles that are not
+converged are steps. The first call gives what it gave before, bit for
+bit. A new $H$, other solver settings (`maxm`, `nsweeps`, `cutoff`,
 `noise`, `excited_gram_schmidt`), a new solve of the ground state,
 `restart()`, a backend switch and a copy of the chain all solve the
 manifold again. The other submodes still solve it at every call.
