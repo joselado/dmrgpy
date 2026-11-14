@@ -1683,3 +1683,53 @@ between the Krylov spaces of the two routes: $2.5\times 10^{-12}$ of the
 peak on the zero-field 12-spin chain at 1 K (`nkry=100`), and
 $2.5\times 10^{-15}$ or less on 7 spins at 1.5 K and on a 3-site Hubbard
 chain with no Nf sector. With a field nothing moves.
+
+## The 2026-11-14 speedups of the TASK Kondo route
+
+Items 6, 8 and 9 of `docs/kondo_speedup_plan.md` move no converged
+number. `order=2` builds only the column it reads, which is the same bit
+for bit. $S_y$ on a real basis is applied as $i$ times a real operator,
+and on one v3 state the matrices agree with the complex products to
+$4\times 10^{-16}$ and dI/dV to $2\times 10^{-16}$ of the peak. The block
+Krylov space reads its overlaps off the projection pass, and the converged
+Ritz energies move by $4\times 10^{-15}$ of the largest entry of the
+projected $H$, which is what the old code itself does when its starts
+change at rounding. A pole that is not converged is a step at $T=0$ and
+moves with rounding, as before: by $7\times 10^{-9}$ of the peak on the
+20-site chain of the plan at `nkry=100`.
+
+`get_kondo_spectrum(mode="DMRG", submode="TASK")` on
+`itensor_version="python"` with a real $H$ **changes numbers**. The
+spectrum is now built on the state rotated to a real gauge
+(`taskdmrg.real_gauge_state`), with $H$ written as a real MPO, so that
+it runs in real arithmetic. The rotation drops the imaginary part the
+solve left, and the spectrum object keeps its norm as
+`imaginary_dropped`; above $10^{-6}$ of the norm of the state the complex
+gauge is kept. On the 20-site chain of the plan the part dropped is
+below $3\times 10^{-8}$, the floor of the measure. The converged poles
+move by $4\times 10^{-15}$ of the width of the spectrum. dI/dV moves by
+$3\times 10^{-14}$ of its peak at `nkry=300` (at $T=0$ and at 0.3 K), by
+$1.6\times 10^{-10}$ at `nkry=100` and 0.3 K, and by $2\times 10^{-7}$
+to $1.5\times 10^{-6}$ at `nkry=100` and $T=0$, where the poles that are
+not converged are steps that move with any change of the state. A complex
+$H$, and a state that is not real up to a phase, keep the complex gauge
+and do not move: a member of a degenerate manifold (`n_gs>1`) is in
+general a complex mixture of two real states. v3 and `julia_live` export
+their state as it is, and `get_poles` and `dynamical_correlator` with
+`submode="TASK"` are not changed.
+
+`get_kondo_spectrum(mode="DMRG", submode="TASK", n_gs=g)` with $g>1$
+**changes behaviour between calls**. The members of the manifold are now
+kept on the chain, under a digest of the solved ground state, $H$, $g$
+and the solver settings, and a repeat call at the same state takes the
+same members instead of solving them again. Repeated calls, for instance
+a scan over `Jrho_s`, `U`, `T` or the biases, therefore give exactly the
+same manifold, where before each call took new members and the curves
+differed by the solver noise of the manifold: by $4\times 10^{-9}$ to
+$2.6\times 10^{-8}$ of the peak on a 9-site truncated doublet at $T=0$
+and 0.1 K, and more on a longer chain, where the poles that are not
+converged are steps. The first call gives what it gave before, bit for
+bit. A new $H$, other solver settings (`maxm`, `nsweeps`, `cutoff`,
+`noise`, `excited_gram_schmidt`), a new solve of the ground state,
+`restart()`, a backend switch and a copy of the chain all solve the
+manifold again. The other submodes still solve it at every call.

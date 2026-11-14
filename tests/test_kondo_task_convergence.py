@@ -268,8 +268,8 @@ def test_a_state_below_the_one_handed_over_is_refused_at_finite_temperature(
     M[0, 2] = M[2, 0] = 0.4
     M[1, 2] = M[2, 1] = 0.1  # the spin reaches the lower state
     monkeypatch.setattr(taskdmrg, "session_spectrum",
-                        lambda chain, ops, nkry, residual=False: (
-                            e, [M, 0 * M, M], 10, np.zeros(3)))
+                        lambda chain, ops, nkry, residual=False, **kw: (
+                            e, [M, 0 * M, M], 10, np.zeros(3), 0.0))
     sc = heisenberg(3, itensor_version="python")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

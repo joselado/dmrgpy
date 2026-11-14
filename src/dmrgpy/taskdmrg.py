@@ -150,10 +150,100 @@ def session_poles(self,terms_i,terms_j,terms_idag,nkry,variance=False,
     return ws,wt,complex(elastic),var,dim,complex(s.vev(terms_ij,wf))
 
 
+# A "python" ground state of a real H comes in a complex gauge (its random
+# start and its tensors are complex), so its TASK spectrum ran in complex
+# arithmetic all the way: task.real_starts gave up at its first line.
+# session_spectrum rotates the export copy to a real gauge before the
+# tangent space is built (real_gauge_state), and the basis is then real.
+# REAL_GAUGE = False keeps the complex gauge, to compare the two on one
+# state.
+REAL_GAUGE = True
+# The largest part of the state, relative to its norm, that the rotation
+# may drop; above it the complex gauge is kept.
+REAL_GAUGE_DROP = 1e-6
+
+
+def _mps_overlap(As,Bs):
+    """<A|B> of two MPS given by their (left, d, right) site arrays."""
+    E = np.ones((1,1),dtype=complex)
+    for A,B in zip(As,Bs):
+        E = np.tensordot(np.tensordot(E,np.conj(A),axes=(0,0)),B,
+                         axes=([0,1],[0,1]))
+    return complex(E[0,0])
+
+
+def real_gauge_state(Ms,Ws):
+    """(arrays, H arrays, dropped): the site arrays Ms of a state rotated
+    to a real gauge (nrgmps.real_gauge, weighted by the bond matrices) and
+    the MPO arrays Ws of H in a real gauge (task.real_mpo, the same
+    operator to rounding), and the norm of the part of the state the
+    rotation dropped, relative to its norm, sqrt(1 - |<real|psi>|^2) for
+    the normalized states. That part is the imaginary part the solve
+    left, since a solved state is real only to the accuracy of the solve;
+    it is resolved down to about 1e-8, the square root of the rounding of
+    the overlap. Arrays that are real already give (Ms, Ws, 0.0).
+    (Ms, Ws, None), the arrays as given, keeps the complex gauge: with
+    REAL_GAUGE off, for a complex H, for a state that is not real up to a
+    phase (a member of a degenerate manifold is in general a complex
+    mixture of two real states, and real_gauge refuses it), and for a
+    dropped part above REAL_GAUGE_DROP."""
+    from .pyitensor import backend
+    host = [np.asarray(backend.to_host(M)) for M in Ms]
+    if all(not np.iscomplexobj(M) or not np.any(M.imag) for M in host):
+        return Ms,Ws,0.0
+    if not REAL_GAUGE: return Ms,Ws,None
+    from .pyitensor import task
+    from .nrgmps import real_gauge
+    Wr = task.real_mpo(Ws)
+    if Wr is None: return Ms,Ws,None # a complex H
+    As,_,Cs = task.mixed_gauge(host)
+    As = [np.asarray(backend.to_host(A)) for A in As]
+    Cs = [np.asarray(backend.to_host(C)) for C in Cs]
+    try:
+        Mr,_ = real_gauge(As,Cs)
+    except RuntimeError: # not real up to a phase
+        return Ms,Ws,None
+    kept = abs(_mps_overlap(Mr,host))**2/(_mps_overlap(Mr,Mr).real
+                                         *_mps_overlap(host,host).real)
+    dropped = float(np.sqrt(max(0.,1.-kept)))
+    if dropped>REAL_GAUGE_DROP: return Ms,Ws,None
+    return Mr,Wr,dropped
+
+
+def _exported_real(Ms):
+    """0.0 when the exported arrays are real, None otherwise: v3 and
+    julia_live hand their state over as it is."""
+    return 0.0 if all(not np.iscomplexobj(M) or not np.any(np.asarray(M).imag)
+                      for M in Ms) else None
+
+
 # How many spectra a chain keeps (SPECTRUM_CACHE_SIZE of them, the most
 # recent ones): enough for the members of a small n_gs manifold on a few
-# sites. Each is a few matrices of the size of the Krylov space.
+# sites. Each holds three (n+1) x (n+1) matrices, n up to 3(nkry+1), kept
+# in real storage where they are real or imaginary (_stored): about 35 MB
+# at nkry=400. The bound is a count, not bytes.
 SPECTRUM_CACHE_SIZE = 8
+
+
+def _stored(M):
+    """A matrix of a spectrum as the cache keeps it: its real part when it
+    is real and its imaginary part when it is imaginary (S_y on a real
+    basis), by exact zeros, as it is otherwise. The first two take half
+    the memory of the complex matrix."""
+    if np.iscomplexobj(M):
+        if not np.any(M.imag): return ("real",np.ascontiguousarray(M.real))
+        if not np.any(M.real): return ("imag",np.ascontiguousarray(M.imag))
+    return ("as is",M)
+
+
+def _handed_out(entry):
+    """A new complex array with the values of a matrix kept by _stored."""
+    kind,A = entry
+    if kind=="as is": return A.copy()
+    out = np.zeros(A.shape,dtype=complex)
+    if kind=="real": out.real = A
+    else: out.imag = A
+    return out
 
 
 def _spectrum_key(Ms,Ws,ops,settings):
@@ -181,12 +271,22 @@ def _spectrum_key(Ms,Ws,ops,settings):
 
 
 def session_spectrum(self,ops_terms,nkry,pad_bonds=None,expand_bonds=None,
-        expand_rounds=1,residual=False):
+        expand_rounds=1,residual=False,column=False,gauge=False):
     """(e, mats, dim) of task.projected_spectrum on the chain's session,
     ops_terms a list of (terms of O, terms of O^dagger). pad_bonds and
     expand_bonds as in session_poles. With residual=True a fourth entry
     is the residual norm of every state (task.projected_spectrum), zero
-    for the ones the Krylov space has converged.
+    for the ones the Krylov space has converged. column=True builds row
+    and column 0 of every matrix only, the tangent-tangent block being
+    zero (task.projected_spectrum); it is kept under its own key, so a
+    full build is never served one of these.
+
+    On "python" the state is first rotated to a real gauge when H is real
+    (real_gauge_state), so that the spectrum runs in real arithmetic; the
+    part of the state this drops is at most REAL_GAUGE_DROP of its norm.
+    With gauge=True a last entry gives it: a float (0.0 for a state that
+    is real as exported, on every backend), or None when the complex gauge
+    was kept.
 
     The result is kept on the chain under a digest of the arrays it was
     computed from (_spectrum_key), so a second call on the same state, the
@@ -203,29 +303,36 @@ def session_spectrum(self,ops_terms,nkry,pad_bonds=None,expand_bonds=None,
         Ws = _julia_mpo_arrays(self,self.hamiltonian)
         ops = [(_julia_mpo_arrays(self,t),_julia_mpo_arrays(self,td))
                for t,td in ops_terms]
+        dropped = _exported_real(Ms)
     elif self.itensor_version=="python":
         Ms,_ = _python_state(s)
         Ws = task.mpo_arrays(s.H)
         ops = [(task.mpo_arrays(s._mpo(t)),task.mpo_arrays(s._mpo(td)))
                for t,td in ops_terms]
+        Ms,Ws,dropped = real_gauge_state(Ms,Ws) # the digest is of these
     else:
         Ms = s.mps_site_arrays(s.gs_wavefunction())
         Ws = s.mpo_site_arrays(s.hamiltonian_mpo())
         ops = [(_v3_arrays(s,t),_v3_arrays(s,td)) for t,td in ops_terms]
+        dropped = _exported_real(Ms)
     key = _spectrum_key(Ms,Ws,ops,(int(nkry),pad_bonds,expand_bonds,
-            int(expand_rounds)))
+            int(expand_rounds),bool(column)))
     cache = self.__dict__.setdefault("_task_spectrum_cache",{})
     if key in cache:
         cache[key] = cache.pop(key) # most recent last
     else:
-        cache[key] = task.spectrum_from_arrays(Ms,Ws,ops,nkry,
+        e,mats,dim,res = task.spectrum_from_arrays(Ms,Ws,ops,nkry,
                 pad_bonds=pad_bonds,expand_bonds=expand_bonds,
-                expand_rounds=expand_rounds,residual=True)
+                expand_rounds=expand_rounds,residual=True,
+                column=bool(column))
+        cache[key] = (e,[_stored(m) for m in mats],dim,res)
         while len(cache)>SPECTRUM_CACHE_SIZE:
             cache.pop(next(iter(cache)))
     e,mats,dim,res = cache[key]
-    if residual: return e.copy(),[m.copy() for m in mats],dim,res.copy()
-    return e.copy(),[m.copy() for m in mats],dim
+    out = (e.copy(),[_handed_out(m) for m in mats],dim)
+    if residual: out = out+(res.copy(),)
+    if gauge: out = out+(dropped,)
+    return out
 
 
 def get_poles(self,name=None,i=0,j=0,nkry=100,variance=False,pad_bonds=None,
