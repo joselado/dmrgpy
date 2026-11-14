@@ -1263,7 +1263,11 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
     the only ones whose image leaves it. A Ritz vector with coefficients u
     then has the residual norm ||(P(H-E0)P - w)|u>|| =
     sqrt(u[j0:]^dagger R u[j0:]), zero for an eigenstate; R is empty when
-    the Krylov space was exhausted before nkry blocks."""
+    the Krylov space was exhausted before nkry blocks.
+
+    On a device the basis, the images and the remainders stay there; what
+    comes to the host is the overlaps of Hq, a vector of the length of
+    the basis per image, and R, block by block, never a tangent vector."""
     xp = backend.xp()
     N = ts.flat_size()
     starts = real_starts(ts, starts)
@@ -1337,16 +1341,18 @@ def block_krylov(ts, starts, nkry, breakdown=1e-10, residual=False):
             if residual:
                 # two passes, as in add(): the remainder of a vector that
                 # is already in the space is then rounding noise; the
-                # first one gives the overlaps of Hu, as in add()
+                # first one gives the overlaps of Hu, as in add(). The
+                # remainders stay on the backend, and only their Gram
+                # matrix, block by block, comes to the host
                 out = []
                 for j, h in zip(range(done, n), Hb):
                     for rep in range(2):
                         c, h = backend.project_rows(store, h, n)
                         if rep == 0:
                             Hu[:n, j] = backend.to_host(c)[:n]
-                    out.append(backend.to_host(h))
-                out = np.array(out)
-                left = (done, out.conj() @ out.T)
+                    out.append(h)
+                out = xp.stack(out)
+                left = (done, np.asarray(backend.to_host(out.conj() @ out.T)))
             done = n
             break
         add(Hb, cols=np.arange(done, n))
