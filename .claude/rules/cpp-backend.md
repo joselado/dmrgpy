@@ -125,13 +125,21 @@ pybind` has rebuilt the `.so` and the test ran against the rebuilt one.
   AutoMPO (its `up_out`), not a maximum over the raw terms, which cancelling
   duplicates made wrong (2026-09-25b finding 28). A new MPO built from an
   AutoMPO, or a new `dmrg()` call, should go through the same two, or it
-  reintroduces the small-units failure (2026-09-25 record, item 2). This
-  fixes the Hamiltonian's units but not a hierarchy inside it: a bond whose
-  strongest term is far below the largest coefficient still loses channels
-  on v2, v3 and `"python"`, held by strict xfails. The cause at small units
-  is ITensor's own `toMPO`, whose svdMPO truncates on an absolute cutoff,
-  plus Davidson's absolute 1e-10 randomization threshold below it, not the
-  `"python"` MPO builder.
+  reintroduces the small-units failure (2026-09-25 record, item 2). A
+  hierarchy inside H, a bond whose strongest term is far below the largest
+  coefficient, is covered by `to_mpo_unit()` too since 2026-11-14:
+  `bond_cutoff_args()` lowers svdMPO's absolute `Cutoff` by m^2, m the
+  strongest coefficient crossing the weakest bond over the largest one
+  (terms merged by operator string), floored at (1e-14)^2, and returns
+  the caller's `Args` untouched when m = 1. Every MPO without such a bond
+  is the same to the bit (v3 site arrays of Heisenberg, XX, dimerized,
+  J1-J2, 1/r^2 and Hubbard chains, compared before and after the rebuild);
+  the offset, field and weak-link cases and the 30-site Wilson chain keep
+  their channels. Do NOT edit the vendored svdMPO for this, and do NOT
+  pass a smaller `Cutoff` to every build: a blanket cutoff stops the
+  compression of long-range MPOs whose singular values decay smoothly.
+  Davidson's absolute 1e-10 is still below it; the ground-state tests at
+  s = 1e-7 next to an O(1) term pass at their tolerance anyway.
 - **NH-DMRG is not a `dmrg()` call.** It is unit-scaled once, at the Python
   entry in `nhdmrg.py`, for all three session backends, so do NOT add a
   second scale inside `Chain::nhdmrg`.

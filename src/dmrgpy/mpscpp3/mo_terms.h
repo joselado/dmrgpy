@@ -337,9 +337,10 @@ build_ampo(SiteSet const& sites, std::vector<MOTerm> const& terms)
 // crossing term is far below the operator's largest coefficient still
 // meets the absolute 1E-13, at any units. An O(1) energy offset or
 // one-site field next to exchange below about 4e-7 of it is one such case
-// ([vev(s*H+1)-1]/s reads 1/3 of vev(H) at s=1e-7), a weak link J'=1e-7 in
-// a J=1 chain another (it reads 1/3 of itself); both are a property of the
+// ([vev(s*H+1)-1]/s read 1/3 of vev(H) at s=1e-7), a weak link J'=1e-7 in
+// a J=1 chain another (it read 1/3 of itself); both are a property of the
 // bond rather than of the units (2026-09-25 audit, small-units, repair).
+// bond_cutoff_args() below covers them since 2026-11-14.
 inline double
 unit_scale_up(double cmax)
     {
@@ -347,6 +348,57 @@ unit_scale_up(double cmax)
     int e = 0;
     std::frexp(cmax,&e); // cmax in [2^(e-1),2^e), and e <= 0
     return std::ldexp(1.0,std::min(1-e,1000)); // cmax*up in [1,2)
+    }
+
+// The cutoff svdMPO is given, per bond (2026-11-14). svdMPO discards the
+// channels of a bond whose squared singular values sum to less than an
+// absolute Cutoff (1e-13 at unit scale), so a bond whose strongest term
+// sits far below the largest coefficient lost its channels on every
+// backend: a Wilson hopping below about 3e-7 of the unit of H (the depth
+// floor of docs/new_methods/kondo_nrg_mps/README.md section 9), a weak
+// link, a small H next to an O(1) term (the 2026-09-25 audit's open
+// bond-local truncation). The vendored svdMPO is not edited; the Cutoff
+// it gets is lowered by m^2 instead, m the strongest coefficient crossing
+// the weakest bond relative to the largest coefficient (terms merged by
+// operator string first, so a cancelling pair counts as what is left),
+// and floored at MPO_CUTOFF_FLOOR = (1e-14)^2, the square of ITensor's own
+// coefficient skip. An operator whose every crossed bond holds a term of
+// the largest size has m = 1 and keeps its Args exactly. The same rule is
+// pyitensor/mpobuilder.py's _bond_cutoff_factor.
+constexpr double MPO_CUTOFF_FLOOR = 1e-28;
+
+double inline
+bond_cutoff_factor(AutoMPO const& ampo)
+    {
+    std::map<SiteTermProd,Cplx> merged;
+    for (auto const& t : ampo.terms()) merged[t.ops] += t.coef;
+    double cmax = 0.0;
+    for (auto const& kv : merged) cmax = std::max(cmax,std::abs(kv.second));
+    if (!(cmax > 0.0)) return 1.0;
+    std::map<int,double> bmax; // bond b (sites b, b+1) -> strongest crossing |coef|
+    for (auto const& kv : merged)
+        {
+        double c = std::abs(kv.second);
+        if (c <= 1e-14*cmax || kv.first.size() < 2) continue;
+        int lo = kv.first.front().i, hi = lo;
+        for (auto const& st : kv.first) { lo = std::min(lo,st.i); hi = std::max(hi,st.i); }
+        for (int b = lo; b < hi; ++b) { auto& v = bmax[b]; v = std::max(v,c); }
+        }
+    double m = 1.0;
+    for (auto const& kv : bmax) m = std::min(m,kv.second/cmax);
+    return m*m;
+    }
+
+// args with svdMPO's Cutoff lowered by bond_cutoff_factor, or args itself.
+Args inline
+bond_cutoff_args(AutoMPO const& ampo, Args const& args)
+    {
+    double f = bond_cutoff_factor(ampo);
+    if (!(f < 1.0)) return args;
+    double base = args.getReal("Cutoff",1E-13);
+    auto a = args;
+    a.add("Cutoff",std::min(base,std::max(base*f,MPO_CUTOFF_FLOOR)));
+    return a;
     }
 
 // toMPO() with the operator at unit scale (see unit_scale_up() above).
@@ -370,10 +422,11 @@ to_mpo_unit(AutoMPO const& ampo, Args const& args = Args::global(),
     for (auto const& t : ampo.terms()) cmax = std::max(cmax,std::abs(t.coef));
     double up = unit_scale_up(cmax);
     if (up_out) *up_out = up;
-    if (up==1.0) return toMPO(ampo,args);
+    auto bargs = bond_cutoff_args(ampo,args);
+    if (up==1.0) return toMPO(ampo,bargs);
     auto scaled = AutoMPO(ampo.sites());
     for (auto t : ampo.terms()) { t.coef *= up; scaled.add(t); }
-    auto W = toMPO(scaled,args);
+    auto W = toMPO(scaled,bargs);
     W *= 1.0/up; // exact: multiplies one tensor's elements by 2^-k
     return W;
     }

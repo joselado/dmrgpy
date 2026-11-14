@@ -1774,3 +1774,29 @@ the largest error in the window at nkry = 90 goes from 4.5% to 1.2% on
 rho J = 0.2; the joined weight stays within 0.4% of the sum rule.
 `task=False` and `head="exact"` do not move. The route is from
 2026-11-13, so only results of the last two days are affected.
+
+
+## The 2026-11-14 per-bond cutoff of the MPO build
+
+Every MPO built from terms on v2, v3 and `"python"` (the Hamiltonian, `vev`,
+correlators, every operator a session builds) now takes a cutoff that is one
+per bond: the cutoff of the build is lowered by $m^2$, $m$ the strongest
+coefficient crossing the weakest bond over the largest coefficient, floored
+at $(10^{-14})^2$ (`mo_terms.h`'s `bond_cutoff_args`,
+`pyitensor/mpobuilder.py`'s `_bond_cutoff_factor`). An operator whose
+every crossed bond holds a term of the largest size ($m=1$) is built
+exactly as before, and so are, measured to the bit on v3 and `"python"`,
+the uniform Heisenberg, XX, dimerized, $J_1$-$J_2$, $1/r^2$ and Hubbard
+chains and the NRG heads of 12 to 14 Wilson sites. What moves is any
+operator with a bond whose strongest term is far below its largest
+coefficient, which lost channels before, and whose numbers were wrong:
+`vev` of $sH+1$, $sH+S^z_0$ and of a weak link $J'=s$ at $s=10^{-7}$ read a
+third of the exchange on v2 and v3 and nothing (or 0.09) on `"python"`,
+and now read it to $10^{-6}$; the ground-state energy of $sH+1$ and
+$sH+S^z_0$ at $s=10^{-7}$, $-1.25$ and $-1.00$ in units of $s$ against
+$-2.4936$ and $-2.0926$, is now right to $10^{-6}$ on v2 and v3. A Wilson
+chain longer than about 21 sites at $\Lambda=4$ moves: its hoppings below
+about $3\times10^{-7}$ of the unit of H were out of the MPO, and the
+lowest block levels of a 30-site chain were off NRG by 0.36 to 1.8 of the
+shell energy past the Wilson site 21; they now agree to $8\times 10^{-4}$
+down to the site 25.

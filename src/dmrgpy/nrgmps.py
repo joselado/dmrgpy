@@ -639,15 +639,16 @@ def lost_wilson_bonds(fc):
     channels the MPO of H on fc's backend has dropped: those whose link
     dimension in the MPO is below that of the first Wilson bond. The last
     bond is left out, since its link dimension is smaller at any |t| (the
-    end of the MPO). On v3, ITensor's svdMPO cuts a squared singular value
-    below an absolute 1e-13 at unit scale, so a hopping below about 3e-7 of
-    the unit of H leaves the MPO and the deeper Wilson sites are nearly
-    decoupled from the chain (measured on 1 spin at rho JK = 0.15: link
-    dimension 7 down to |t| = 4.8e-7, 6 at 3.0e-7 to 3.5e-7, 3 from 1.5e-7
-    on, at Lambda = 2.5, 4 and 6; README section 9). "python" truncates the
-    return sweep of its builder at a relative 1e-14 and loses channels one
-    bond earlier at Lambda = 4. The MPO is built again from fc.hamiltonian
-    with the session's own builder. Returns a sorted list, empty when every
+    end of the MPO). Until 2026-11-14 the MPO cut a hopping below about
+    3e-7 of the unit of H (v3's svdMPO, an absolute 1e-13 on squared
+    singular values; "python" one bond earlier), and the deeper Wilson
+    sites were nearly decoupled from the chain (README section 9); the
+    cutoff of the build is one per bond now (mo_terms.h bond_cutoff_args,
+    pyitensor mpobuilder._bond_cutoff_factor), and what is left is H's own
+    clean threshold, 1e-12 of its largest coefficient, below which the
+    hoppings are not in H at all (from the Wilson site 37 at Lambda = 4 on
+    one spin). The MPO is built again from fc.hamiltonian with the
+    session's own builder. Returns a sorted list, empty when every
     Wilson bond is whole."""
     from .pyitensor import task
     ns, wil = _layout(fc)
@@ -777,9 +778,10 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
         warnings.warn("head_tail_poles: the MPO of H on this backend has dropped "
                       "channels of the Wilson bond %d (|t| = %.3g), inside the "
                       "block that hands over at the Wilson site %d, so that block "
-                      "is not the one of the tail (lost_wilson_bonds; on v3 a "
-                      "hopping below about 3e-7 of the unit of H is cut); hand "
-                      "over at k0 <= %d" % (lost[0], abs(t_h[lost[0]]), k0, lost[0]),
+                      "is not the one of the tail (lost_wilson_bonds; a "
+                      "hopping below 1e-12 of the largest coefficient of H is "
+                      "not in H); hand over at k0 <= %d"
+                      % (lost[0], abs(t_h[lost[0]]), k0, lost[0]),
                       RuntimeWarning, stacklevel=2)
     if sh.info["chi"] < MIN_HANDOVER:
         warnings.warn("head_tail_poles: the hand-over basis at the Wilson site "

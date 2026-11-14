@@ -453,9 +453,15 @@ Do not undo one without reading its finding first.
   VUMPS Lanczos reference is capped by the Hamiltonian's unit; the KPM
   same-vector shortcut and ROOTN's Lanczos breakdown compare against the
   vectors' own norms (`test_audit_2026_09_25_scale.py`,
-  `test_audit_2026_09_25b_{cvm,nh,cpp,ednum,mpobuilder}.py`). Not covered,
-  and held by strict xfails: a bond whose strongest term is far below the
-  largest coefficient still loses channels on every backend.
+  `test_audit_2026_09_25b_{cvm,nh,cpp,ednum,mpobuilder}.py`). A bond whose
+  strongest term is far below the largest coefficient is covered since
+  2026-11-14 by a cutoff of the MPO build that is one per bond
+  (`mo_terms.h`'s `bond_cutoff_args` on v2/v3, `mpobuilder._bond_cutoff_factor`
+  on `"python"`): the cutoff is lowered by m^2, m the strongest coefficient
+  crossing the weakest bond over the largest one, floored at (1e-14)^2,
+  and an operator with m = 1 is built exactly as before. Do NOT edit the
+  vendored svdMPO for this (`test_audit_2026_09_25_scale.py`, whose strict
+  xfails became tests).
 - **A chain constructor keyword is a setting assigned after `initialize()`**,
   exactly as an assignment afterwards, `mode` included (`sites.check_settings`,
   the explicit allowlist `sites.SETTINGS`); anything else, a Hamiltonian
@@ -570,7 +576,7 @@ sections: the `kpm_energy_truncate` window problem outside its worst regime
 `kpm_scale=1/2` where the elastic line is distorted while the moments are
 still under the bound; the truncated CVM regime (warned, about 2x the cost,
 still unconverged); `Thermal_Spin_Chain`'s cost and its variational band
-width; the bond-local truncation above; the MPO-set Hamiltonian and
+width; the MPO-set Hamiltonian and
 small-unit real-time evolution; v3's Krylov exponentiator's absolute error
 goal (`applyExp`) and v3's run-to-run `emax` noise, which is the whole of
 the ED-against-v3 KPM residual; `kpm_finite`'s `window_chain_kwargs` check;

@@ -389,23 +389,44 @@ def test_a_symmetric_handover_needs_zero_field():
         nrgmps.handover_shell(c, 1, Lambda=4.0, symmetric=True)
 
 
-@pytest.mark.parametrize("version,first", [("python", 20), (3, 21)])
-def test_the_mpo_drops_the_deep_wilson_bonds(version, first):
-    """The depth floor of README section 9: on 30 Wilson sites at Lambda =
-    4, v3's svdMPO (a squared singular value below 1e-13 is cut) drops
-    channels of the hoppings from t_21 = 3.0e-7 on (link dimension 7, then
-    6, then 3), and the block levels of DMRG leave those of NRG from the
-    Wilson site 22 on, for every maxm and cutoff; "python" (a relative
-    1e-14 on its return sweep) from t_20 on. 12 sites keep every bond."""
-    if version == 3 and not cppext.available(3):
-        pytest.skip("ITensor v3 not compiled")
+@pytest.mark.parametrize("version", VERSIONS)
+def test_the_mpo_keeps_the_deep_wilson_bonds(version):
+    """The depth floor of README section 9 is gone: on 30 Wilson sites at
+    Lambda = 4 the MPO used to drop the channels of the hoppings from
+    t_21 = 3.0e-7 on (v3's svdMPO cut a squared singular value below an
+    absolute 1e-13) and from t_20 on "python"; since the cutoff of the
+    build is one per bond (mo_terms.h bond_cutoff_args, mpobuilder.py
+    _bond_cutoff_factor) every bond keeps its channels. What is left is
+    the Hamiltonian's own clean threshold, 1e-12 of its largest
+    coefficient, which removes the hoppings from H itself (past the Wilson
+    site 37 on 50 sites)."""
     J = 0.3*ysr.lambda_factor(4.0)
     deep = ysr.spin_chain_on_metal(1, 30, Js=0.01, JK=J, Lambda=4.0,
                                    itensor_version=version)
-    assert nrgmps.lost_wilson_bonds(deep) == list(range(first, 28))
-    short = ysr.spin_chain_on_metal(1, 12, Js=0.01, JK=J, Lambda=4.0,
-                                    itensor_version=version)
-    assert nrgmps.lost_wilson_bonds(short) == []
+    assert nrgmps.lost_wilson_bonds(deep) == []
+    from dmrgpy.pyitensor import mpobuilder
+    ampo = deep._session._ampo(deep.hamiltonian.to_terms()) \
+        if version == "python" else None
+    if ampo is not None:
+        f = mpobuilder._bond_cutoff_factor(ampo)
+        assert 0.0 < f < 1e-12
+
+
+def test_bond_cutoff_factor_reads_the_weakest_bond():
+    """m^2 of the per-bond rule: 1 for a uniform chain, s^2 for a weak link
+    of strength s (merged over duplicate terms), and a one-site term sets
+    the largest coefficient but crosses no bond."""
+    from dmrgpy import spinchain
+    from dmrgpy.pyitensor import mpobuilder
+    sc = spinchain.Spin_Chain(["S=1/2"]*5, itensor_version="python")
+    S = lambda i: sc.Sz[i]*sc.Sz[i+1]
+    h = sum(S(i) for i in range(4))
+    f = lambda op: mpobuilder._bond_cutoff_factor(
+        sc._session._ampo(op.to_terms()))
+    assert f(h) == 1.0
+    assert f(h + 3.0*sc.Sz[0]) == pytest.approx(1/9.0, rel=1e-12)
+    weak = h - S(2) + 1e-6*S(2)
+    assert f(weak) == pytest.approx(1e-12, rel=1e-6)
 
 
 def test_a_handover_past_a_lost_bond_warns(monkeypatch):

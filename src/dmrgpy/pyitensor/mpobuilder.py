@@ -289,6 +289,41 @@ def _unit_scale_up(cmax):
     return math.ldexp(1.0, min(1 - e, 1000))
 
 
+MPO_CUTOFF_FLOOR = 1e-28  # (1e-14)^2, as mo_terms.h
+
+
+def _bond_cutoff_factor(ampo):
+    """mo_terms.h's bond_cutoff_factor(): m^2, m the strongest coefficient
+    crossing the weakest bond relative to the largest coefficient, with the
+    terms merged by operator string first (this AutoMPO keeps duplicates,
+    and a cancelling pair counts as what is left). The return sweep of
+    to_mpo cuts each bond relative to its own operator-Schmidt weight, of
+    which the identity and the finished-term channels are O(1), so a bond
+    whose strongest term sits far below the largest coefficient lost its
+    channels: a Wilson hopping one bond above v3's depth floor, a weak
+    link, a small H next to an O(1) term (2026-09-25 audit, left open
+    until 2026-11-14). Its cutoff is lowered by this factor, floored at
+    MPO_CUTOFF_FLOOR; 1.0 when every crossed bond holds a term of the
+    largest size, which keeps the build exactly as before."""
+    merged = {}
+    for t in ampo.terms:
+        key = tuple(t.ops)
+        merged[key] = merged.get(key, 0.0) + t.coef
+    cmax = max((abs(c) for c in merged.values()), default=0.0)
+    if not cmax > 0.0:
+        return 1.0
+    bmax = {}
+    for ops, c in merged.items():
+        c = abs(c)
+        if c <= 1e-14*cmax or len(ops) < 2:
+            continue
+        sites = [i for _, i in ops]
+        for b in range(min(sites), max(sites)):
+            bmax[b] = max(bmax.get(b, 0.0), c)
+    m = min([1.0] + [v/cmax for v in bmax.values()])
+    return m*m
+
+
 def to_mpo(ampo, cutoff=0.0, maxdim=None):
     if not ampo.terms:
         return _zero_mpo(ampo.sites)
@@ -330,6 +365,9 @@ def to_mpo(ampo, cutoff=0.0, maxdim=None):
         # 13). After an exact left-canonicalizing sweep the return sweep
         # sees true operator-Schmidt values, in which a dead channel has
         # zero weight; the final bond dimension is unchanged.
+        f = _bond_cutoff_factor(ampo)
+        if f < 1.0 and cutoff > 0.0:
+            cutoff = min(cutoff, max(cutoff*f, MPO_CUTOFF_FLOOR))
         result.position(result.length(), cutoff=0.0)
         result.position(1, cutoff=cutoff, maxdim=maxdim)
     return result

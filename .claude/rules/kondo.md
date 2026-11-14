@@ -738,18 +738,23 @@ spins (2026-11-14, Triton) 150 is not enough: the bases of m = 4 (160 to
 210 states) were 2 to 20% off, and m = 5 and 6 (290 to 420 states)
 converge to 0.4% and agree with the exact route at 7 spins to 1.6%;
 the exact route needs keep 3200 at 7 spins and does not converge at 8
-even at 6400 (16% off 3200). The depth floor of N2 is the MPO, not the
-state: v3's svdMPO drops a squared singular value below an absolute
+even at 6400 (16% off 3200). The depth floor of N2 was the MPO, not the
+state: v3's svdMPO dropped a squared singular value below an absolute
 1e-13 at unit scale, so the Wilson hoppings below about 3e-7 of the unit
-of H lose their channels and the sites after them are nearly decoupled;
-the block levels leave NRG at that scale for every maxm, cutoff and
-number of sweeps (shell 21 at Lambda = 4, 32 at 2.5, 17 at 6). Do NOT
-look for the cause in maxm or the sweeps. `nrgmps.lost_wilson_bonds`
-reads the dropped bonds off the MPO and `head_tail_poles` warns for a
-hand-over whose block holds one; "python" loses channels one bond
-earlier, and its 30-site head failed `real_gauge` (the decoupled sites
-keep the complex random start). A per-bond MPO cutoff would remove it;
-it is the open bond-local truncation of the 2026-09-25 audit
+of H lost their channels and the block levels left NRG at that scale
+for every maxm, cutoff and number of sweeps (shell 21 at Lambda = 4, 32
+at 2.5, 17 at 6; "python" one bond earlier). Since 2026-11-14 the cutoff
+of the build is one per bond (`mo_terms.h` `bond_cutoff_args`,
+`mpobuilder._bond_cutoff_factor`, see `cpp-backend.md`), the 30-site
+chain keeps every channel and its block levels follow NRG to 8e-4
+omega_k down to four sites before its end; the heads of 12 to 14 sites
+have the same MPO to the bit. What is left is H's own clean threshold,
+1e-12 of its largest coefficient (no hopping past the Wilson site 37 at
+Lambda = 4 on one spin). Do NOT look for a floor in maxm or the sweeps.
+`nrgmps.lost_wilson_bonds` reads the missing bonds off the MPO and
+`head_tail_poles` warns for a hand-over whose block holds one. A
+"python" head of 30 Wilson sites still fails `real_gauge` (1.9e-3) with
+every bond in the MPO, so that is the solve, not the MPO (open)
 (`tests/test_nrgmps.py`). Keeping
 only the lowest states of the bare spin chain as the impurity is
 uncontrolled (42 times too narrow a resonance on 3 spins); `project=`

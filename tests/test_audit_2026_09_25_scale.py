@@ -361,15 +361,19 @@ def test_kpm_shift_survives_below_the_absolute_coefficient_floor(version, s):
 
 
 # Where one scale per operator does not reach: svdMPO truncates bond by bond,
-# each bond against its own largest weight and the absolute 1e-13, so a bond
+# each bond against an absolute Cutoff of 1e-13 at unit scale, so a bond
 # whose strongest crossing term sits far below the operator's largest
-# coefficient loses channels at any units. An O(1) energy offset (sent as
+# coefficient lost channels at any units. An O(1) energy offset (sent as
 # ('Id', site)) or one-site field next to exchange at 1e-7, and a weak link
-# J'=1e-7 in a J=1 chain, all read 1/3 of the exchange on v3 and v2, before
-# the fix and after it; "python"'s builder drops them outright (0 and 0.09),
-# through the relative cutoff of pyitensor/mpobuilder.py's return sweep. It
-# is a property of the bond rather than of the units, and a per-bond cutoff
-# is what would turn these into plain tests. Strict.
+# J'=1e-7 in a J=1 chain, all read 1/3 of the exchange on v3 and v2;
+# "python"'s builder dropped them outright (0 and 0.09), through the
+# relative cutoff of pyitensor/mpobuilder.py's return sweep. These were
+# strict xfails until 2026-11-14, when the cutoff of the build became one
+# per bond: mo_terms.h's bond_cutoff_args (v2, v3) and mpobuilder.py's
+# _bond_cutoff_factor ("python") lower it by m^2, m the strongest
+# coefficient crossing the weakest bond relative to the largest one, with
+# a floor of (1e-14)^2. The ground-state energies pass too, at the
+# tolerance below, although Davidson's absolute 1e-10 still sits under them.
 
 def _mixed(sc, kind, s):
     """(operator, operator without its small part, small part alone)"""
@@ -382,10 +386,9 @@ def _mixed(sc, kind, s):
     return h - b23 + s*b23, h - b23, b23
 
 
-@pytest.mark.xfail(strict=True, reason="small-units repair: bond-local truncation, not fixed")
 @pytest.mark.parametrize("kind", ["offset", "field", "weak-link"])
 @pytest.mark.parametrize("version", [_backend(3), _backend(2), _backend("python")])
-def test_a_bond_far_below_the_largest_coefficient_still_open(version, kind):
+def test_a_bond_far_below_the_largest_coefficient_keeps_its_channels(version, kind):
     s = 1e-7
     sc = _chain(version)
     sc.set_hamiltonian(_heisenberg(sc, 6))
@@ -395,12 +398,12 @@ def test_a_bond_far_below_the_largest_coefficient_still_open(version, kind):
         pytest.approx(np.real(sc.vev(small)), rel=1e-6)
 
 
-@pytest.mark.xfail(strict=True, reason="small-units repair: bond-local truncation, not fixed")
 @pytest.mark.parametrize("kind", ["offset", "field"])
 @pytest.mark.parametrize("version", CPP)
-def test_small_units_next_to_an_order_one_term_still_open(version, kind):
+def test_small_units_next_to_an_order_one_term(version, kind):
     """gs_energy of s*H + 1 and s*H + Sz0 at s=1e-7: (E-1)/s was -1.25 and
-    (E+0.5)/s -1.25 (v3) or -1.00 (v2), against -2.4936 and -2.0926."""
+    (E+0.5)/s -1.25 (v3) or -1.00 (v2) before the per-bond cutoff, against
+    -2.4936 and -2.0926."""
     s = 1e-7
     sc = _chain(version)
     X, big, small = _mixed(sc, kind, s)

@@ -3043,9 +3043,14 @@ strongest crossing term is far below the largest coefficient still meets
 the absolute cutoff: an $O(1)$ offset or field next to exchange at
 $10^{-7}$, or a weak link $J'=10^{-7}$ in a $J=1$ chain, keeps a third of
 its exchange at any units, and `"python"` drops such a bond altogether
-through the relative return-sweep cutoff of `pyitensor/mpobuilder.py`; a
-per-bond cutoff is the cure, recorded as open with strict xfails in
-`tests/test_audit_2026_09_25_scale.py` (2026-09-25 record, small-units).
+through the relative return-sweep cutoff of `pyitensor/mpobuilder.py`.
+Since 2026-11-14 the cutoff of the build is one per bond: it is lowered
+by $m^2$, $m$ the strongest coefficient crossing the weakest bond over
+the largest one, floored at $(10^{-14})^2$ (`bond_cutoff_args` in both
+`mo_terms.h`, `_bond_cutoff_factor` in `pyitensor/mpobuilder.py`), and an
+operator with $m=1$ is built exactly as before. The strict xfails of
+`tests/test_audit_2026_09_25_scale.py` are plain tests now (2026-09-25
+record, small-units).
 
 **The eigensolvers that do not go through `solver_hamiltonian()`** got
 the same treatment in the 2026-09-25b pass (whose record the finding

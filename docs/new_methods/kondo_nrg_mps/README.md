@@ -471,28 +471,35 @@ ranges of section 6, nkry = 30 was 11% off above both cuts, 60 3.0%, and
 - A reference beyond 7 spins: at 8 spins the exact route is not converged
   at keep = 6400, and the head route is checked by its convergence only
   (section 6).
-- A hand-over below the floor of the MPO. ITensor's svdMPO (v3) cuts a
-  squared singular value below an absolute 1e-13 at unit scale, so a
-  Wilson hopping below about 3e-7 of the unit of H leaves the MPO of the
-  head, and the sites after it are nearly decoupled from the chain (on 30
-  Wilson sites at Lambda = 4 the MPO link dimension is 7 down to
-  |t| = 6e-7, 6 at 3.0e-7 and 3 from 1.5e-7 on). So the depth floor of
-  the plan's N2 is a scale, not a number of sites. Measured on one spin
-  (maxm 128 to 512, cutoff 1e-12 and 1e-14, 30 or 90 sweeps) and three
-  spins (maxm 256 and 512), the lowest levels of the block agree with
-  NRG to below 8e-4 omega_k down to the deepest shell whose hopping is
-  at least 3.5e-7 (the Wilson site 21 at Lambda = 4, 32 at 2.5 and 17 at
-  6), and they are off by 0.36 to 1.8 omega_k from the first shell whose
-  hopping is 3.0e-7 or less, whatever maxm, cutoff and sweeps. On
-  "python" the builder truncates its return sweep at a relative 1e-14 and
-  drops channels one bond earlier at Lambda = 4, and the solve of a head
-  of 30 Wilson sites failed the real gauge (residual 1.07e-4 against
-  1e-4). `nrgmps.lost_wilson_bonds` reads the dropped bonds off the MPO,
-  and `head_tail_poles` warns for a hand-over whose block holds one (at
-  Lambda = 6 this warns one shell before the measured floor). The
-  hand-overs of this record are at the Wilson site 7, scale 1e-2, far
-  above it. A per-bond cutoff of the MPO would remove the floor; it is
-  the bond-local truncation that the 2026-09-25 audit left open.
+- A hand-over below the clean threshold of H. The MultiOperator drops a
+  term below 1e-12 of its largest coefficient, so on one spin at Lambda
+  = 4 the Wilson hoppings past the site 37 (|t| = 4.5e-12) are not in H
+  at all, and `lost_wilson_bonds` reports them. Until 2026-11-14 the
+  floor sat much higher, in the MPO: svdMPO (v3) cut a squared singular
+  value below an absolute 1e-13 at unit scale, so a hopping below about
+  3e-7 of the unit of H left the MPO (link dimension 7 down to |t| =
+  6e-7 on 30 Wilson sites, 6 at 3.0e-7, 3 from 1.5e-7 on), "python" cut
+  one bond earlier, and the lowest levels of the block were off NRG by
+  0.36 to 1.8 omega_k from the first shell whose hopping is 3.0e-7 or
+  less (the Wilson site 22 at Lambda = 4), whatever maxm, cutoff and
+  sweeps. The cutoff of the MPO build is one per bond now
+  (`mo_terms.h`'s `bond_cutoff_args`, `pyitensor/mpobuilder.py`'s
+  `_bond_cutoff_factor`: lowered by m^2, m the strongest coefficient
+  crossing the weakest bond over the largest one, floored at
+  (1e-14)^2). On the same 30 Wilson sites (one spin, v3, maxm 128, 30
+  sweeps) every bond keeps 7 channels, and the lowest 10 levels of the
+  block agree with NRG to within 8e-4 omega_k down to the Wilson site
+  25 (4.4e-3 and 2.7e-2 at 26 and 27, three and two sites before the end
+  of the chain, where the bond holds 54 and 16 states). The heads of
+  12 to 14 Wilson sites of this record have the same MPO as before, to
+  the bit. `head_tail_poles` warns for a hand-over whose block holds a
+  bond `lost_wilson_bonds` reports. On "python" a head of 30 Wilson
+  sites still fails `real_gauge` after the change (residual 1.9e-3 at
+  maxm 128 and 30 sweeps, against the tolerance 1e-4), so that failure is
+  not the MPO: the deep sites keep part of the complex random start. The
+  local solves stop on a residual relative to the scale of the whole H,
+  far above the energy of those sites, which is the likely cause; it was
+  not measured further. The heads of this record (12 to 14 sites) pass.
 - `head_tail_poles` also warns when the hand-over basis holds fewer than
   `MIN_HANDOVER` = 100 states.
 
