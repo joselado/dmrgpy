@@ -239,6 +239,94 @@ def test_a_small_handover_basis_warns():
         nrgmps.head_tail_poles(fc, m=2, keep=100, task=False, n_tail=20)
 
 
+def _doublet_head(version):
+    """3 spins and 4 Wilson sites, the metal under the middle spin: an odd
+    number of electrons, so the head is one member (2Sz = 1) of a
+    doublet."""
+    eps, t = _wilson(4)
+    fc = ysr.spin_chain_on_metal(3, 4, site=1, JK=JK, Js=JS, Lambda=4.0,
+                                 wilson=(eps, t), itensor_version=version)
+    fc.maxm, fc.nsweeps = 64, 20
+    c, e0 = nrgmps.head_state(fc)
+    return c, eps, t
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+def test_the_spin_flip_gives_the_partner_member(version):
+    """R = exp(-i pi S^y_tot), site by site (spin_flip_matrix), maps the
+    head onto the other member of its doublet: the same energy, the
+    opposite S^z, and no overlap with the state."""
+    c, eps, t = _doublet_head(version)
+    ex = nrgmps.Export(c)
+    exr = ex.flipped(nrgmps.spin_flip_matrix(c, ex))
+    last = ex.L - 1
+    Sz = sum(c.Sz[i] for i in range(ex.L))
+    H = c.hamiltonian
+    assert exr.block_matrix(H, last)[0, 0] == \
+        pytest.approx(ex.block_matrix(H, last)[0, 0], abs=1e-12)
+    assert ex.block_matrix(Sz, last)[0, 0] == pytest.approx(0.5, abs=1e-10)
+    assert exr.block_matrix(Sz, last)[0, 0] == pytest.approx(-0.5, abs=1e-10)
+    assert abs(ex.overlap(exr, last)[0, 0]) < 1e-12
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+def test_a_symmetric_handover_is_closed_under_the_flip(version):
+    """The left basis of one member of a doublet is not closed under the
+    flip (partner blocks of different sizes); the joined basis of both
+    members is, with the spectra of (Q, 2Sz) and (Q, -2Sz) equal. With a
+    complete basis it is still the exact NRG."""
+    c, eps, t = _doublet_head(version)
+    def asymmetric(sh):
+        return [(q, s) for (q, s), e in sh.E.items() if (q, -s) not in sh.E
+                or len(sh.E[(q, -s)]) != len(e)
+                or np.max(np.abs(sh.E[(q, -s)] - e)) > 1e-9]
+    plain, _ = nrgmps.handover_shell(c, 1, U=0.1, Lambda=4.0)
+    sym, _ = nrgmps.handover_shell(c, 1, U=0.1, Lambda=4.0, symmetric=True)
+    assert asymmetric(plain)
+    assert asymmetric(sym) == []
+    assert sym.info["chi"] > plain.info["chi"]
+    full, _ = nrgmps.handover_shell(c, 0, U=0.1, Lambda=4.0, symmetric=True,
+                                    pad_bonds="full")
+    r = nrgspectral.spectral_poles(full, eps[1:], t, keep=None,
+                                   bins_per_decade=None)
+    rr = nrgspectral.chain_poles(ns=3, n=4, site=1, JK=JK, Js=JS, U=0.1,
+                                 wilson=(eps, t), keep=None,
+                                 bins_per_decade=None, Lambda=4.0)
+    assert np.max(np.abs(resolvent(r.omega, r.weight)
+                         - resolvent(rr.omega, rr.weight))) < 1e-11
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+def test_auto_joins_the_flipped_basis_only_for_a_head_with_a_moment(version):
+    """symmetric="auto" (the default) takes the joined basis for a head
+    with an odd number of electrons (3 spins and 4 Wilson sites, 2Sz = 1)
+    and the plain one for an even head (5 Wilson sites, 2Sz = 0)."""
+    kw = dict(k0=1, keep=100, task=False, n_tail=20, solved=True)
+    for n, moment in ((4, True), (5, False)):
+        fc = ysr.spin_chain_on_metal(3, n, site=1, JK=JK, Js=JS, Lambda=4.0,
+                                     itensor_version=version)
+        fc.maxm, fc.nsweeps = 64, 20
+        c, e0 = nrgmps.head_state(fc)
+        assert (c.head_sector["Sz"] != 0) == moment
+        chi = {s: nrgmps.head_tail_poles(c, symmetric=s, **kw).chi
+               for s in ("auto", True, False)}
+        assert chi["auto"] == (chi[True] if moment else chi[False])
+        if moment:
+            assert chi[True] > chi[False]
+    with pytest.raises(ValueError, match="symmetric"):
+        nrgmps.head_tail_poles(c, symmetric="yes", **kw)
+
+
+def test_a_symmetric_handover_needs_zero_field():
+    eps, t = _wilson(4)
+    fc = ysr.spin_chain_on_metal(1, 4, JK=JK, Lambda=4.0, B=1e-3,
+                                 wilson=(eps, t), itensor_version="python")
+    fc.maxm, fc.nsweeps = 32, 10
+    c, e0 = nrgmps.head_state(fc)
+    with pytest.raises(ValueError, match="B = 0"):
+        nrgmps.handover_shell(c, 1, Lambda=4.0, symmetric=True)
+
+
 @pytest.mark.parametrize("version,first", [("python", 20), (3, 21)])
 def test_the_mpo_drops_the_deep_wilson_bonds(version, first):
     """The depth floor of README section 9: on 30 Wilson sites at Lambda =

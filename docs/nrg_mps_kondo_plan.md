@@ -26,8 +26,12 @@ is a scale and not a number of sites: the MPO of the head loses the
 Wilson hoppings below about 3e-7 of the unit of H (svdMPO's absolute
 cutoff on v3), and the block levels leave NRG at that scale for every
 maxm, cutoff and number of sweeps; `head_tail_poles` warns for a
-hand-over past it. A flip-symmetric hand-over for a head with a moment is
-still open. The measurements are in
+hand-over past it. The hand-over of a head with a moment now joins the
+left basis of its flipped partner (`symmetric="auto"`), closed under the
+flip exactly: on 3 spins with the metal under the middle spin, 1.5% of the
+peak off the exact route with or without the flip average, against 3.4%
+before.
+The measurements are in
 `docs/new_methods/kondo_nrg_mps/README.md` (sections 3, 6 and 9); what
 follows is the plan as written.
 

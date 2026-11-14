@@ -572,8 +572,18 @@ ones moved A by 1e-2 at T = 1e-14); the B = 0 average of (Q, 2Sz) and
 (which erased B = 5e-11). Keep that average on for a DMRG hand-over: a
 doublet head (odd Nf) has a left basis that is not flip symmetric, and
 without the average the tail was 59% off the exact route with the metal
-under the middle of 3 spins, 3.8% with it (a symmetric basis from both
-members of the doublet is open). The tail chain stops before its scale falls
+under the middle of 3 spins, 3.8% with it. Since 2026-11-14 the hand-over
+of such a head joins the left basis of R|GS>, R = exp(-i pi S^y_tot) site
+by site (`symmetric="auto"`, the decider's pick; `_joined_basis`): 1.5% of
+the peak with or without the average. The join must be closed under R
+EXACTLY (the (Q, -2Sz) basis is the R image of (Q, 2Sz), and 2Sz = 0 is
+cut by the eigenvalues of an R-invariant overlap): a version that only
+cut nearly dependent directions was still 60% off without the average,
+probably because a split of the partner levels acts on the free moment as
+a field. Do
+NOT drop the average either (the exact route is the same with or without
+it, to 1e-4).
+The tail chain stops before its scale falls
 below 1e-30 (`max_sites`, 99 sites at Lambda = 4): `wilson_chain` breaks
 near 1e-35. The hand-over needs a graded basis, so `head_state` solves in
 the sector (Nf, 2Sz), with the v3 charge seed, scans 2Sz in a field and

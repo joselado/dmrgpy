@@ -1644,3 +1644,17 @@ cgroup limit or MemAvailable), and names `mem_gb`.
 the head has dropped the channels of a Wilson bond inside the hand-over
 block (`nrgmps.lost_wilson_bonds`), which on v3 happens to every hopping
 below about $3\times 10^{-7}$ of the unit of H.
+
+## The 2026-11-14 flip-symmetric hand-over of the NRG route
+
+`nrgmps.head_tail_poles` and `ysr.get_stm_spectrum(submode="NRG",
+head="dmrg")` now hand over, for a head with an odd number of electrons
+(2Sz != 0) at B = 0, the left basis of the state joined with that of its
+flipped partner (`symmetric="auto"`, the default, picked by the decider;
+`symmetric=False` gives the old basis). The curves of such heads move. On
+3 spins with the metal under the middle spin (a marginal flow) the error
+against the exact route below w_join/3 goes from 3.4% to 1.5% of the
+peak, and its mean from -2.9% to -0.4%; with the metal under the end spin
+the curve moves by about 0.1% of the peak. A head with 2Sz = 0, and every
+call in a field, is unchanged. The route is from 2026-11-13, so only
+results of the last day are affected.

@@ -225,14 +225,42 @@ average of partner spectra at B = 0 (`flip`) restores most of the
 symmetry, and it is needed: with the metal under the middle spin, an
 effectively ferromagnetic and so marginal flow, the tail is 3.8% off the
 exact route with it (mean -2.3%) and 59% without it; under the end spin
-both are below 0.3% apart. A hand-over basis built from both members of
-the doublet would remove the rest; it is not implemented. A head with an
-even number of electrons (2Sz = 0) is symmetric to 4e-8.
+both are below 0.3% apart. A head with an even number of electrons
+(2Sz = 0) is symmetric to 4e-8.
+
+The hand-over basis of a head with a moment is now built from both
+members of the doublet (`symmetric="auto"`, the default): the left basis
+of the state joined with that of R|GS>, R = exp(-i pi S^y_tot) applied
+site by site, which is the other member exactly (same energy, opposite
+S^z). The join is closed under R exactly: the basis of (Q, -2Sz) is the
+image of that of (Q, 2Sz), and the one of 2Sz = 0 is cut by the
+eigenvalues of an overlap matrix that commutes with R. This matters. A
+first version that dropped the nearly dependent directions (within 1e-3
+of the span) label by label did not keep the closure, and the tail
+without the average was still 60% off; we read this as the split of the
+partner levels acting on the free moment as a field, which the flow
+makes relevant (the size of the split was not measured). Measured on
+the same 3 spins (head of 12 Wilson sites, maxm = 160, keep = 1600 in the
+tail and in the exact route, one mesh, below w_join/3):
+
+| metal under | basis | flip average | max error / peak | max relative | mean relative |
+|---|---|---|---|---|---|
+| middle spin | plain (145 states) | yes | 3.4% | 12.6% | -2.9% |
+| middle spin | plain | no | 3.1% | 60% | -23% |
+| middle spin | joined (284 states) | yes or no | 1.5% | 5.6% | -0.4% |
+| end spin | plain or joined | yes or no | 1.3 to 1.4% | 1.7 to 1.9% | -0.1% |
+
+The exact route gives the same curve with and without the average (to
+1e-4 of the peak), so the average was only ever standing in for the
+basis. The joined basis doubles the hand-over basis and takes the tail
+from about 48 s to 70 to 90 s; the DMRG head and TASK are unchanged.
 
 m = 4 is the default, and the head needs a maxm of at least about 160:
 the bond at the hand-over stops near 150 states at the cutoff 1e-12 even
 with maxm = 256 or 512. The example `spin_chain_nrg_head_tail` (3 spins,
 maxm = 160, nkry = 30, one mesh) agrees with the exact route to 8e-4
+with one member of the doublet in the hand-over basis and to 2.9e-4 with
+both (the default since 2026-11-14), both
 below 1e-3, in 6 minutes on one core.
 
 ## 6. The joined spectrum
@@ -359,9 +387,6 @@ chain). A coarse Krylov space is not enough above w_join: nkry = 30 was
   w_join/10). Above it, the exact route of section 3 is the only one.
 - A superconducting substrate: the (Q, 2S^z) labels need a conserved
   charge.
-- A flip-symmetric hand-over for a head with a moment (section 5): the
-  average of partner spectra stands in for it, a few percent off on a
-  marginal flow.
 - A reference beyond 7 spins: at 8 spins the exact route is not converged
   at keep = 6400, and the head route is checked by its convergence only
   (section 6).
