@@ -92,7 +92,7 @@ def _task_warnings(monkeypatch, coupled):
     if coupled:
         M[1, 2] = M[2, 1] = 0.1
     monkeypatch.setattr(taskdmrg, "session_spectrum",
-                        lambda chain, ops, nkry, residual=False: (
+                        lambda chain, ops, nkry, residual=False, **kw: (
                             e, [M, 0*M, M], 10, np.zeros(3)))
     sc = heisenberg(3, itensor_version="python")
     with warnings.catch_warnings(record=True) as w:
