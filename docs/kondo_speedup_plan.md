@@ -295,7 +295,14 @@ call, so items 8, 9 and 11 stay (8 and 9 give 1.3 together on the real
 "python" build at nkry=300, and 11 removes code). Item 2 is applied on
 the Krylov route only, where n_f is close to dim, and kept only if it
 passes 1.1x on the third-order term on Triton; on the ED route it stays
-out. The 63 commits of the night were pushed on 2026-11-14.
+out. It is on master as `transpose_exchange=True`, which only
+`krylov_kondo_dIdV` sets: on one Krylov spectrum of 10 spins (301
+states) the third-order Kondo term went from 0.83 to 0.49 s at 1 K,
+where every state is final, and from 0.19 to 0.17 s at T=0, where 150
+are (one P-core of the workstation, not Triton). dI/dV moved by 2e-16 of
+the peak at 1 K and not at all at T=0. The saving is n_f/(2 dim) of the
+F values, half at 1 K here and 41% at 248 of 301, so it is less than the
+halving the plan wrote for the term. The 63 commits of the night were pushed on 2026-11-14.
 
 ## How to measure
 

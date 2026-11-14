@@ -537,8 +537,11 @@ def krylov_kondo_dIdV(kks, eV, Jrho_s, U=0.0, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     for w, ks in kks.spectra(emax):
         d = conductance.second_order_dIdV(ks, eV, T0=T0, U=U)
         if order == 3:
+            # n_f is close to dim on a Krylov space, so the exchange table
+            # of -eV is read off the one at +eV (plan item 2)
             d = d + conductance.third_order_kondo_dIdV(
-                ks, eV, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0, Fb=Fb)
+                ks, eV, Jrho_s, T0=T0, omega0=omega0, Gamma0=Gamma0, Fb=Fb,
+                transpose_exchange=True)
             if U != 0.0:
                 d = d + conductance.third_order_potential_dIdV(
                     ks, eV, Jrho_s, U, T0=T0, omega0=omega0, Gamma0=Gamma0, Fb=Fb)

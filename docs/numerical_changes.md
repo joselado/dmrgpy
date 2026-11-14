@@ -1750,4 +1750,8 @@ $3.0\times 10^{-13}$ on 12 spins, and the matrices of the truncated
 $3.6\times 10^{-13}$ of their largest element. For scale, two runs of
 the same code on 12 spins differ by $9\times 10^{-12}$, since `eigsh`
 draws its start vector at random. The residual stop of the same day,
-`tol=`, is opt-in, and a call without it does not move.
+`tol=`, is opt-in, and a call without it does not move. The same day the
+route reads the exchange table of -eV off the one at +eV (plan item 2):
+nothing moves at $T=0$, and at $T>0$ dI/dV moves by the odd part of the
+tabulated F, $2\times 10^{-16}$ of the peak on the test chains. The full
+ED route does not take it.

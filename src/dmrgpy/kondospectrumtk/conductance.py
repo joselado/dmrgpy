@@ -387,7 +387,7 @@ def _levi_civita(S, real, rows, cols, numba=None):
 
 
 def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
-                            Fb=None, p_cut=P_CUT):
+                            Fb=None, p_cut=P_CUT, transpose_exchange=False):
     """Third-order Kondo term, eqs. "3rd-normal" (direct diagram) +
     "3rd-reversed" (exchange diagram -- despite the name this is NOT the
     s->t tunneling direction: the paper's own "t -R-> s" notation on eq.
@@ -438,7 +438,18 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     callers that also need third_order_potential_dIdV with the same
     T/omega0/Gamma0 (e.g. Spin_Chain.get_kondo_spectrum) should build it
     once and pass it to both. Ignored at ks.T==0 (uses the closed-form F0
-    instead)."""
+    instead).
+
+    transpose_exchange (plan item 2, False by default): when F is even
+    (EVEN_TOL) and the coefficients fit in one block, the exchange table of
+    the -eV direction on final x final states is read off the one at +eV,
+    F(-v - (e_f - e_m)) = F(v - (e_m - e_f)), and only its columns over the
+    states that are not final are evaluated. This saves n_f/(2 dim) of the F
+    evaluations, which pays where n_f is close to dim: the Krylov route
+    (krylovkondo.krylov_kondo_dIdV) sets it, while on the full ED route,
+    after the cut of _final_states, n_f is far below dim and it gave 0 to 4%.
+    At T=0 the arguments are exact negatives and F0 is exactly even, so
+    nothing moves; at T>0 the table moves by the odd part of the FBuilder."""
     _require_full_matrices(ks, "third_order_kondo_dIdV")
     eVs = np.asarray(eVs, dtype=float)
     occ = _occupied_states(ks, p_cut) # initial states i that carry weight
@@ -460,6 +471,10 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
         # before the blocking, at the same cost); otherwise _kondo_hub_blocks
         pc = _levi_civita(S, real, occ, fin)
         pc *= (p/2.)[:, None, None] # SA factor: see above
+        if transpose_exchange and _F_is_even(ks, Fcall):
+            out = _kondo_one_block_transposed(ks, eVs, eps_if, eps_im, e_fm, fin,
+                                              pc, Fcall)
+            return 4*np.pi*T0**2*Jrho_s*out
         for d, sign in enumerate((1., -1.)):
             v = sign*eVs
             for s0 in range(0, len(v), chunk):
@@ -476,6 +491,35 @@ def third_order_kondo_dIdV(ks, eVs, Jrho_s, T0=1.0, omega0=20e-3, Gamma0=5e-6,
     out = _kondo_hub_blocks(ks, eVs, occ, fin, S, real, Fcall,
                             _F_is_even(ks, Fcall))
     return 4*np.pi*T0**2*Jrho_s*out # eq. "sym_z": same sign in both directions
+
+
+def _kondo_one_block_transposed(ks, eVs, eps_if, eps_im, e_fm, fin, pc, Fcall):
+    """The one-block sum of third_order_kondo_dIdV, both directions per
+    block of biases, with the exchange table of -v on final x final states
+    read off the one of +v (transpose_exchange, F even): Fx(-v)[f, m] =
+    F(-v - (e_f - e_m)) = F(v - (e_m - e_f)) = Fx(v)[m, f] for m final. The
+    two directions are added to out in the order of the plain loop."""
+    dim, nf, nocc = ks.dim, len(fin), eps_if.shape[0]
+    rest = np.setdiff1d(np.arange(dim), fin) # the states that are not final
+    e_fr = e_fm[:, rest]
+    chunk = max(1, int(CHUNK_ENTRIES)//(2*nf*dim)) # two Fx arrays per block
+    out = np.zeros(len(eVs))
+    for s0 in range(0, len(eVs), chunk):
+        vc = eVs[s0:s0+chunk]
+        nv = len(vc)
+        Fxp = Fcall((vc[:, None, None] - e_fm[None, :, :]).ravel()).reshape(nv, nf, dim)
+        Fxm = np.empty_like(Fxp)
+        Fxm[:, :, fin] = Fxp[:, :, fin].transpose(0, 2, 1)
+        if len(rest):
+            Fxm[:, :, rest] = Fcall((-vc[:, None, None] - e_fr[None, :, :]).ravel()
+                                    ).reshape(nv, nf, len(rest))
+        for v, Fx in ((vc, Fxp), (-vc, Fxm)):
+            Th = _theta_raw(ks, v[:, None, None] - eps_if[None, :, :])
+            Fd = Fcall((v[:, None, None] - eps_im[None, :, :]).ravel()
+                       ).reshape(nv, nocc, dim)
+            out[s0:s0+nv] += (np.einsum('ifm,eif,eim->e', pc, Th, Fd, optimize=True)
+                              + np.einsum('ifm,eif,efm->e', pc, Th, Fx, optimize=True))
+    return out
 
 
 def _kondo_hub_blocks(ks, eVs, occ, fin, S, real, Fcall, even):

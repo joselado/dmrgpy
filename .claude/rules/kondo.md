@@ -455,8 +455,11 @@ entropy, and two runs of the same code on 12 spins differ by 9e-12 of the
 peak. (3) The Krylov spectra of a real H already have the real form of
 `_spin_triplet` (since 84090c0, pinned by a test); what costs is the two
 exchange F tables, 90% of the third-order term of one state, with n_f
-about the whole basis here (plan item 2 would halve them on this route; not
-done). (4) `su2=None` is the default since 2026-11-14 (the decider's
+about the whole basis here. Plan item 2 is taken on this route only
+(`transpose_exchange=True`, set by `krylov_kondo_dIdV`; the full ED route
+keeps the plain loop, where n_f is far below dim): the -eV exchange table
+on final x final is the +eV one transposed, n_f/(2 dim) fewer F values,
+nothing moves at T=0 (exact negatives, F0 exactly even). (4) `su2=None` is the default since 2026-11-14 (the decider's
 pick, confirmed by the author): the reduction when the checks pass, the full sum when one fails
 with `SU2Error`, the only error it falls back on, so an error of the
 eigensolver still raises. It rests on the weight cut of the full sum,

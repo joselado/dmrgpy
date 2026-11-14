@@ -195,3 +195,56 @@ def test_residual_stop_keywords():
     sig = inspect.signature(KondoSpectrumMixin._get_kondo_spectrum_krylov)
     assert sig.parameters["tol"].default is None
     assert inspect.signature(krylovkondo.KrylovKondoSpectrum).parameters["tol"].default is None
+
+
+class _CountingF():
+    """An F that counts the entries it evaluates, keeping odd_part so that
+    conductance._F_is_even reads it as the F it wraps."""
+    def __init__(self, F):
+        self.F, self.count = F, 0
+        if hasattr(F, "odd_part"):
+            self.odd_part = F.odd_part
+
+    def __call__(self, x):
+        self.count += np.size(x)
+        return self.F(x)
+
+
+@pytest.mark.parametrize("field", ["xz", "y"])
+@pytest.mark.parametrize("T", [0., 1.0])
+def test_transposed_exchange_table_keeps_the_numbers(field, T, monkeypatch):
+    """Item 2 on the Krylov route: the exchange table of -eV on final x
+    final states is the transpose of the one at +eV, so each bias needs
+    n_f^2 fewer F values, and dI/dV moves at roundoff only."""
+    from dmrgpy.kondospectrumtk.stepfunctions import cached_fbuilder
+    sc = heisenberg(6, field)
+    kks = krylovkondo.KrylovKondoSpectrum(sc, 1, T, nkry=6, p_cut=1e-6)
+    ks = kks.state_spectrum(0)
+    Fb = cached_fbuilder(T, omega0=20e-3, Gamma0=5e-5, kB=ks.kB) if T > 0 else None
+    get_F = conductance._get_F
+    counters = []
+    monkeypatch.setattr(conductance, "_get_F",
+                        lambda *a: counters.append(_CountingF(get_F(*a))) or counters[-1])
+    d = [conductance.third_order_kondo_dIdV(ks, EV, -0.08, omega0=20e-3, Gamma0=5e-5,
+                                            Fb=Fb, transpose_exchange=flag)
+         for flag in (False, True)]
+    nf = len(conductance._final_states(ks, conductance._occupied_states(ks), EV))
+    assert counters[0].count - counters[1].count == nf*nf*len(EV)
+    # measured 0 at T=0 (F0 is exactly even) and 2.3e-16 at 1 K
+    assert np.max(np.abs(d[1] - d[0])) < 1e-13*np.max(np.abs(d[0]))
+
+
+def test_only_the_krylov_route_transposes_the_exchange_table(monkeypatch):
+    """The full ED route keeps its sum (n_f is far below dim there after
+    the cut of _final_states, and item 2 gave 0 to 4%), the Krylov route
+    takes the transposed table."""
+    calls = []
+    plain = conductance._kondo_one_block_transposed
+    monkeypatch.setattr(conductance, "_kondo_one_block_transposed",
+                        lambda *a: calls.append(1) or plain(*a))
+    sc = heisenberg(5, "xz")
+    kw = dict(site=1, Jrho_s=-0.08, U=0.3, T=1.0, omega0=20e-3, Gamma0=5e-5)
+    sc.get_kondo_spectrum(EV, mode="ED", **kw)
+    assert not calls
+    sc.get_kondo_spectrum(EV, mode="ED", submode="KRYLOV", nkry=6, **kw)
+    assert calls

@@ -192,7 +192,11 @@ xz plane, T=1 K, `nkry=100` and the default `p_cut`:
   block Gram-Schmidt, and 90% of the
   third-order term of one state is the two tables of the exchange log F,
   one per tunneling direction, each over all the final and intermediate
-  states of the space.
+  states of the space. Since F is even, the table of -eV on final x final
+  states is the transpose of the one at +eV, so only its columns over the
+  states that are not final are evaluated; on 10 spins at 1 K, where every
+  state of the space is final, this took the third-order Kondo term of one
+  state from 0.83 to 0.49 s on one core of the workstation.
 
 Per initial state the cost is the block Krylov space (3 `nkry` sparse
 products and the reorthogonalization, O(dim nkry^2)) and the sums of
