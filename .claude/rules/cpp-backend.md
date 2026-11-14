@@ -56,7 +56,13 @@ pybind` has rebuilt the `.so` and the test ran against the rebuilt one.
   the environment's, so loading the extension first made every later
   `scipy.optimize` import fail with `CXXABI_1.3.15 not found`, and with it
   `import dmrgpy` as the first import of any script
-  (`tests/test_warnings_reach_scripts.py` caught it there).
+  (`tests/test_warnings_reach_scripts.py` caught it there). numba's
+  `libllvmlite.so` failed the same way, and a worker that `spawn` starts
+  for `metts_vev`/`metts_dynamical_correlator` with `njobs>1` begins with
+  exactly that import (`dmrgpy.pyitensor.metts`), so every worker died and
+  the pool waited forever: the `njobs=4` tests of `test_metts_vev.py` and
+  `test_metts_dynamical_correlator.py` hung there for more than 1.5 h, and
+  the two files pass in 87 s and 38 s with numpy first.
 - **`mpscppN/chain_session.h`**'s `Chain` class is the stateful, in-process
   session: one `Chain` instance per `Many_Body_Chain` (held as
   `self._session`, created in `sites.py::initialize` whenever
