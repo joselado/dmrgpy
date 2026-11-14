@@ -177,3 +177,69 @@ def test_sz_blocks_on_the_device_warn_and_run_the_device_flow():
     finally:
         backend.set_backend(name)
     assert np.array_equal(got, ref)
+
+
+def _hubbard(cls, n, bz, nf):
+    fc = cls(n)
+    h = 0
+    for i in range(n - 1):
+        for s in ("up", "dn"):
+            C, Cd = getattr(fc, "C" + s), getattr(fc, "Cdag" + s)
+            h = h + 1e-3*(Cd[i]*C[i+1] + Cd[i+1]*C[i])
+    for i in range(n):
+        h = h + 4e-3*fc.Nup[i]*fc.Ndn[i] - 2e-3*(fc.Nup[i] + fc.Ndn[i]) + bz*fc.Sz[i]
+    fc.set_hamiltonian(h)
+    if nf is not None:
+        fc.set_conserved_sector(Nf=nf)
+    return fc
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("nf", [None, 3])
+@pytest.mark.parametrize("bz", [0., 0.3e-3])
+def test_hubbard_chains_run_on_the_blocks(native, nf, bz):
+    """Both spinful classes, with and without an Nf sector (without one the
+    tip spin conserves N too, so the blocks fall in several components),
+    at B=0 (rotated) and in a field along z."""
+    from dmrgpy import fermionchain
+    cls = (fermionchain.Spinful_Fermionic_Chain_Native if native
+           else fermionchain.Spinful_Fermionic_Chain)
+    ks = edkondo.KondoSpectrum(_hubbard(cls, 3, bz, nf), 0, 0.)
+    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        got, info = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=True,
+                                                return_info=True)
+    assert info["sz_blocks"] and info["sz_rotated"] == (bz == 0.)
+    tol = 2e-10 if bz == 0. else 1e-12
+    assert np.max(np.abs(got - ref)) < tol*np.max(np.abs(ref))
+
+
+def test_a_stopped_flow_at_b0_runs_rotated():
+    """Rotation, stop and rotation back: D_stop is read in the rotated basis
+    (a maximum over entries) and moved by 6e-10 relative when measured."""
+    ks = edkondo.KondoSpectrum(_chain(bz=0.), 0, 0.)
+    cols = np.nonzero(ks.p > 0)[0]
+    kw = dict(pole_threshold=0.06, cols=cols)
+    ref, info = leadinglog.tip_vertex(ks, EV, 0.2, -0.05, **kw)
+    got, info2 = leadinglog.tip_vertex(ks, EV, 0.2, -0.05, sz_blocks=True, **kw)
+    assert info2["sz_blocks"] and info2["sz_rotated"]
+    assert info["D_stop"] is not None
+    assert info2["D_stop"] == pytest.approx(info["D_stop"], rel=1e-8)
+    assert np.max(np.abs(got - ref)) < 1e-10*np.max(np.abs(ref))
+
+
+def test_a_field_along_y_warns_on_the_complex_route():
+    sc = spinchain.Spin_Chain(["S=1/2"]*3)
+    h = 0
+    for i in range(2):
+        h = h + 1e-3*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
+    for i in range(3):
+        h = h + 0.3e-3*sc.Sz[i] + 0.1e-3*sc.Sy[i]
+    sc.set_hamiltonian(h)
+    ks = edkondo.KondoSpectrum(sc, 0, 0.)
+    assert not leadinglog._block_is_real(leadinglog._spin_ops(ks))
+    ref = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2)
+    with pytest.warns(RuntimeWarning, match="real route"):
+        got = leadinglog.leading_log_dIdV(ks, EV, -0.05, U=0.2, sz_blocks=True)
+    assert np.array_equal(got, ref)

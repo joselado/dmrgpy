@@ -125,9 +125,10 @@ class KondoSpectrumMixin():
               gives the size, and the call warns when it is above the
               memory the process can still take). sz_blocks (order="LL"
               only, default False) runs the flow on the blocks of total
-              S^z when H conserves S^z and no degenerate level mixes S^z
-              sectors (a field along z), on the CPU; otherwise it warns
-              and runs the dense flow.
+              S^z when H conserves S^z (no field, or a field along z), on
+              the CPU, with the same dI/dV to the rtol of the flow; with a
+              transverse field, or on a GPU, it warns and runs the dense
+              flow.
           mode: "ED" (default) always uses full ED diagonalization of this
               chain's Hamiltonian (every eigenstate is needed as a
               possible virtual intermediate state), via

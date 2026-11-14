@@ -560,8 +560,25 @@ the products 26.1 s to 3.3 s and the hole sum 16.4 s to 7.6 s. 9 spins,
 peak; on 4 to 6 spins at B=0 by 2.6e-12 to 4.1e-11, the rtol of the flow,
 as for any change of basis inside the degenerate levels. At 1 K on 8
 spins the gain is 3%: only the products are blocked at T>0, and there
-the thermal tip sum over the occupied states is what costs. It stays off
-by default. It is CPU only; on the device it warns.
+the thermal tip sum over the occupied states is what costs. It is CPU
+only; on the device it warns.
+
+On small chains the blocks do not pay (61 biases, T=0, one core): up to
+4 spins the call is 30 to 40% slower, on calls of 0.08 to 0.4 s, at 5
+spins it breaks even and at 6 spins it gains 1.7x. With a cold numba
+cache the first call takes 0.55 s more than the dense one (1.28 s against
+0.73 s on 3 spins), once per cache. Both spinful fermion classes, with
+and without an Nf sector, give the dense flow to 9.3e-16 of the peak in a
+field along z and to 3.3e-11 at B=0 (rotated) on 3 Hubbard sites; without
+Nf the blocks fall in several components, since the tip spin conserves N.
+On 10 spins in the field S^z_tot leaks 4.8e-11 in the eigenbasis, within
+a factor 2 of `SZ_TOL`, so when the tip spin shows its labels there the
+unrotated blocks drop a part close to the rtol of the flow, while the
+rotated tip spin leaks 2.6e-12.
+With every flow forced onto the blocks (a pytest plugin that wraps
+`_joint_flow`, the fallback warning muted) the 97 tests of the
+leading-log files pass, the values pinned at 1e-11 against the two-pass
+code included. The default stays off until the author picks it.
 
 What is not done. The tip vertex is integrated as part of the state, so
 its 13 stages are kept like those of the couplings. It does not enter
