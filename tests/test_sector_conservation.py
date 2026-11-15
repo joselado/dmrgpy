@@ -382,6 +382,44 @@ def test_julia_live_total_sz_sector_matches_ed(version, two_sz):
 
 
 @pytest.mark.parametrize("version", JL)
+def test_julia_live_higher_spin_sz_sectors_match_ed(version):
+    """S=3/2, 2 and 5/2 sites carry Sz on julia_live too (the QN spaces of
+    sites_custom.jl): sectors of short mixed chains against ED restricted
+    to them. Only S=1/2, 1 and 2 define S+/S- in the shared bookkeeping
+    (pyitensor/sites/spin.py), so the Heisenberg coupling is on S=2 and
+    S=1/2 sites, and S=3/2 and S=5/2 get an Sz-diagonal model."""
+    sc = spinchain.Spin_Chain(["S=2", "S=1/2", "S=2", "S=1/2"])
+    h = 0
+    for i in range(3):
+        h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] \
+              + 1.3*sc.Sz[i]*sc.Sz[i+1]
+    h = h + 0.2*sc.Sz[0]*sc.Sz[0]
+    cases = [(sc, h, (-10, -2, 0, 4))]   # 2Sz is even here, up to 10
+    sd = spinchain.Spin_Chain(["S=3/2", "S=5/2", "S=3/2"])
+    hd = sd.Sz[0]*sd.Sz[1] + 0.7*sd.Sz[1]*sd.Sz[2] + 0.3*sd.Sz[1]*sd.Sz[1] \
+         - 0.1*sd.Sz[2]
+    cases.append((sd, hd, (-11, -1, 3)))  # 2Sz is odd here, up to 11
+    for chain, ham, sectors in cases:
+        sz = sum(chain.Sz)
+        _jl(chain)
+        chain.set_hamiltonian(ham)
+        for two_sz in sectors:
+            chain.set_conserved_sector(Sz=two_sz)
+            ref = ed_sector_energy(chain, ham, sz, two_sz / 2.0)
+            assert chain.gs_energy() == pytest.approx(ref, abs=DMRG_TOL)
+            assert chain.vev(sz).real == pytest.approx(two_sz / 2.0, abs=1e-8)
+        # the last sector's state, promoted to the dense sites, keeps its
+        # Sz and its energy, and a non-conserving operator is legal again
+        e = chain.gs_energy()
+        chain.promote_to_dense()
+        assert not chain.conserved_sector
+        assert chain.vev(sz).real == pytest.approx(sectors[-1] / 2.0,
+                                                   abs=1e-8)
+        assert chain.vev(ham).real == pytest.approx(e, abs=1e-8)
+        chain.vev(chain.Sx[0])
+
+
+@pytest.mark.parametrize("version", JL)
 def test_julia_live_lowest_sector_is_the_ground_state(version):
     n = 6
     fc, h, number = tV_chain(n)

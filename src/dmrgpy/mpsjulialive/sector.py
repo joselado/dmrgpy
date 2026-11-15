@@ -75,11 +75,11 @@ def apply(MBO):
     sites = _bookkeeping_sites(MBO, names)
     plan = pysector.sector_state_plan(sites, qns)  # ValueError if empty
     for code in set(MBO.sites):
-        if not (code in (0, 1, 2, 3) or 100 < code < 200):
+        if not (code in (0, 1, 2, 3, 4, 5, 6) or 100 < code < 200):
             raise NotImplementedError(
                 "set_conserved_sector on itensor_version=\"julia_live\" "
-                "supports spin-1/2, spin-1, spinless and spinful fermion "
-                "and boson sites; this chain has site code %s. Use "
+                "supports spin sites up to S=5/2, spinless and spinful "
+                "fermion and boson sites; this chain has site code %s. Use "
                 "itensor_version=3 or \"python\", or mode=\"ED\"." % code)
     from .juliasession import Main, to_julia_strvec
     from .sites import sites_text

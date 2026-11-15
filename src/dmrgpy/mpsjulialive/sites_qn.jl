@@ -26,6 +26,8 @@ function get_sites_qn(ls::Vector{String}, conserve_nf::Bool,
       site = siteind("S=1/2",i; conserve_sz=conserve_sz)
     elseif ni==3
       site = siteind("S=1",i; conserve_sz=conserve_sz)
+    elseif ni in (4,5,6) # sites_custom.jl's space(...; conserve_sz)
+      site = siteind(("S=3/2","S=2","S=5/2")[ni-3],i; conserve_sz=conserve_sz)
     elseif 100 < ni < 200
       site = siteind("Boson",i; dim=ni-100, conserve_number=conserve_nb,
                      qnname_number="Nb")
