@@ -645,6 +645,8 @@ def _four_correlation_tensor_default_ctmode(wf):
             return "fold"
         if itensor_version==3 and hasattr(session,"four_correlation_tensor_spinful"):
             return "full"
+        if itensor_version=="julia_live": # gs_extra.jl, 0.35 s against
+            return "full"                  # 0.49 s for "explicit" at 3 sites
         return "explicit"
     if itensor_version in (2,3,"python") and hasattr(session,"four_correlation_tensor"):
         return "full"

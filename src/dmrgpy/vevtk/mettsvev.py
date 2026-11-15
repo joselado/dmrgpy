@@ -120,12 +120,11 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
         steps of a logarithmic grid (imaginarytime.py, arXiv:2606.02930),
         whose number grows as log(beta), with itime_options the keywords
         of evolve_imaginary_time (nsteps, default 8 here, tau0, order,
-        shift, nsweeps, tol, krylov, maxiter), itensor_version=3 and
-        "python" only. None (the default) takes whichever needs fewer
-        steps at the accuracy of the TDVP default, see
-        imaginarytime.metts_plan: TDVP at high T, on julia_live and for a
-        non-Hermitian H, the implicit steps below T of about 0.12 in units
-        of the largest coupling.
+        shift, nsweeps, tol, krylov, maxiter). None (the default) takes
+        whichever needs fewer steps at the accuracy of the TDVP default,
+        see imaginarytime.metts_plan: TDVP at high T, in a conserved
+        sector and for a non-Hermitian H, the implicit steps below T of
+        about 0.12 in units of the largest coupling.
     Returns (mean, stderr) for a single Op, or a list of (mean, stderr)
     pairs -- one per operator, same order as given -- for a list/tuple of
     Ops. See pyitensor.metts.metts_thermal_average's own docstring for

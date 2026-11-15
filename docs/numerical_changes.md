@@ -1968,3 +1968,19 @@ ITensorMPS's `correlation_matrix`, instead of `"fast"`: 0.09 s against
 14 s at 32 sites, the two differing by $5\times10^{-9}$, the truncation of
 `"fast"`. `inverse_solver="bicgstab"` and `dmmode="fast"` give the
 numbers of before.
+
+## The 2026-11-15 METTS steps and native spinful four-point tensor of `julia_live`
+
+`metts_vev` and `metts_dynamical_correlator` on `julia_live` now follow
+the `itime=None` rule of v3 and `"python"`: the implicit steps of the
+logarithmic grid whenever the grid needs fewer solves than TDVP needs
+steps (below $T\approx0.12$ in units of the largest coupling), TDVP
+otherwise, in a conserved sector and for a non-Hermitian $H$. On a
+10-site Heisenberg chain at $T=0.05$ the same Markov chain took 10 s
+against 521 s by TDVP, the energy $-4.257268$ against $-4.257258$, inside
+the statistical error. `itime_options=` without `itime=` no longer raises
+there. `get_four_correlation_tensor` on native spinful sites of
+`julia_live` now takes `ctmode="full"` (`gs_extra.jl`'s
+`four_correlation_tensor_spinful`) instead of `"explicit"`: 0.35 s against
+0.49 s at 3 sites, the two equal to $10^{-10}$. `itime="tdvp"` and
+`ctmode="explicit"` give the numbers of before.

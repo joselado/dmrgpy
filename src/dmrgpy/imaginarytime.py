@@ -272,15 +272,17 @@ _PLAN_KEYWORDS = ("nsteps", "tau0", "order", "shift", "nsweeps", "tol",
 def _implicit_available(self):
     """True when the automatic choices (metts_plan, and
     thermal.auto_anneal_method) may take the implicit steps on this chain:
-    a v3 or "python" session, no conserved sector, at least 3 sites on v3,
-    and a Hermitian Hamiltonian. julia_live takes the implicit steps when
-    asked (evolve_imaginary_time, anneal_method="implicit", METTS with
-    itime="implicit") but keeps its TDVP and Taylor defaults, so it is not
-    one of them."""
-    if self.itensor_version not in (3, "python"): return False
+    a v3 or "python" session or a julia_live chain (mpsjulialive/implicit.jl,
+    since 2026-11-15: METTS at T=0.05 on 10 sites took 10 s against 521 s by
+    TDVP, the same energy to 1e-5), no conserved sector, at least 3 sites on
+    v3 and 2 on julia_live, and a Hermitian Hamiltonian.
+    thermal.auto_anneal_method adds its own v3-only test."""
+    if self.itensor_version not in (3, "python", "julia_live"): return False
     if getattr(self, "conserved_sector", None): return False
     if self.itensor_version == 3 and self.ns < 3: return False
-    if not hasattr(getattr(self, "_session", None), "implicit_step"):
+    if self.itensor_version == "julia_live":
+        if self.ns < 2: return False
+    elif not hasattr(getattr(self, "_session", None), "implicit_step"):
         return False
     return bool(self.is_hermitian(self.hamiltonian))
 
@@ -320,9 +322,6 @@ def metts_plan(self, T, itime=None, itime_options=None, dbeta_half_step=0.05):
     if unknown:
         raise TypeError("itime_options: unknown keyword(s) %s; the known "
                         "ones are %s" % (unknown, list(_PLAN_KEYWORDS)))
-    if itime is None and opts and self.itensor_version == "julia_live":
-        raise ValueError("itime_options= needs itime='implicit' on "
-                         "julia_live, whose default is TDVP steps")
     if itime is None and not _implicit_available(self):
         return None
     if itime == "implicit":
