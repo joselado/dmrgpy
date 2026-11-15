@@ -273,8 +273,10 @@ def _implicit_available(self):
     """True when the automatic choices (metts_plan, and
     thermal.auto_anneal_method) may take the implicit steps on this chain:
     a v3 or "python" session, no conserved sector, at least 3 sites on v3,
-    and a Hermitian Hamiltonian. julia_live runs evolve_imaginary_time but
-    keeps its TDVP and Taylor defaults, so it is not one of them."""
+    and a Hermitian Hamiltonian. julia_live takes the implicit steps when
+    asked (evolve_imaginary_time, anneal_method="implicit", METTS with
+    itime="implicit") but keeps its TDVP and Taylor defaults, so it is not
+    one of them."""
     if self.itensor_version not in (3, "python"): return False
     if getattr(self, "conserved_sector", None): return False
     if self.itensor_version == 3 and self.ns < 3: return False
@@ -318,13 +320,12 @@ def metts_plan(self, T, itime=None, itime_options=None, dbeta_half_step=0.05):
     if unknown:
         raise TypeError("itime_options: unknown keyword(s) %s; the known "
                         "ones are %s" % (unknown, list(_PLAN_KEYWORDS)))
+    if itime is None and opts and self.itensor_version == "julia_live":
+        raise ValueError("itime_options= needs itime='implicit' on "
+                         "julia_live, whose default is TDVP steps")
     if itime is None and not _implicit_available(self):
         return None
     if itime == "implicit":
-        if self.itensor_version == "julia_live": # its METTS driver has no plan
-            raise NotImplementedError("METTS with itime='implicit' is "
-                    "implemented for itensor_version=3 and 'python'; "
-                    "julia_live takes TDVP steps")
         _check_dmrg(self)
     order = opts.get("order", 2)
     beta_half = 1./(2.*T)

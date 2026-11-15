@@ -157,16 +157,8 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
     # one, rather than silently becoming deterministic.
     seed_arg = seed if seed is not None else random.getrandbits(63)
 
-    if itime == "implicit" and MB.itensor_version == "julia_live":
-        raise NotImplementedError("metts_dynamical_correlator: itime=%r is "
-                "implemented for itensor_version=3 and 'python'; julia_live "
-                "takes TDVP steps" % (itime,))
     from ..imaginarytime import metts_plan, session_plan_kwargs
-    if itime_options and MB.itensor_version == "julia_live":
-        raise ValueError("itime_options= has no effect on julia_live, which "
-                         "takes TDVP steps")
-    plan = None if MB.itensor_version == "julia_live" else \
-        metts_plan(MB, T, itime, itime_options, dbeta_half_step)
+    plan = metts_plan(MB, T, itime, itime_options, dbeta_half_step)
     if MB.itensor_version == "julia_live":
         # This backend has no MB._session at all (its state lives in the
         # live Julia session instead, via MB.hamiltonian/MB.jlsites) --
@@ -174,7 +166,7 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
         from ..mpsjulialive.metts import metts_dynamical_correlator as metts_dc_jl
         means, stderrs = metts_dc_jl(MB, A, B, T, nt, dt, nsamples, nwarmup,
                 dbeta_half_step, basis_ops, seed_arg, niter,
-                tdvp_cutoff, tdvp_maxdim, tdvp_niter)
+                tdvp_cutoff, tdvp_maxdim, tdvp_niter, plan=plan)
         ts = np.array([dt * k for k in range(nt)])
         return ts, np.array(means), np.array(stderrs)
 

@@ -172,7 +172,7 @@ are:
   grows as $\log\beta$ instead of $\beta$. `itime="tdvp"` or
   `itime="implicit"` forces one, and `itime_options` takes the keywords of
   `evolve_imaginary_time`, with 8 steps per panel by default here.
-  `"julia_live"` always takes TDVP steps.
+  `"julia_live"` takes TDVP steps unless `itime="implicit"` is given.
 
 METTS works with `itensor_version=3` (at least 3 sites), `"python"` and
 `"julia_live"`. It

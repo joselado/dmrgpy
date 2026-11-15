@@ -206,6 +206,37 @@ function metts_imaginary_time_evolve(psi, H, dbeta_half, nsteps, cutoff, maxdim)
 end
 
 
+# The evolution of a sample to beta/2: TDVP steps when `implicit` is
+# nothing, and otherwise the implicit steps of the logarithmic grid that
+# imaginarytime.metts_plan built (implicit.jl's implicit_step, normalized
+# after each step), as pyitensor/metts.py takes them. `implicit` is a
+# NamedTuple with the fields of that plan: steps (one vector of betas per
+# step), shift, shift_energy, nsweeps, tol, krylov, maxiter.
+function metts_evolve(psi, H, beta_half, nsteps, cutoff, maxdim, implicit)
+	implicit === nothing &&
+		return metts_imaginary_time_evolve(psi, H, beta_half, nsteps, cutoff,
+		                                   maxdim)
+	for betas in implicit.steps
+		psi = implicit_step(psi, H, betas, implicit.shift,
+			implicit.shift_energy, maxdim, cutoff, implicit.nsweeps,
+			implicit.tol, implicit.krylov, implicit.maxiter)
+	end
+	return psi
+end
+
+
+# The plan of metts_evolve from the separate arguments Python hands over,
+# or nothing without steps
+function metts_implicit_plan(steps, shift, shift_energy, nsweeps, tol, krylov,
+		maxiter)
+	steps === nothing && return nothing
+	return (steps = [ComplexF64.(collect(b)) for b in steps],
+		shift = Float64(shift), shift_energy = Bool(shift_energy),
+		nsweeps = Int(nsweeps), tol = Float64(tol), krylov = Int(krylov),
+		maxiter = Int(maxiter))
+end
+
+
 # Thermal <Op> for every op in opmpos, via METTS sampling -- the
 # julia_live counterpart of pyitensor/metts.py's metts_thermal_average()/
 # mpscpp3/chain_session.h's Chain::metts_vev(), see either for the
@@ -220,7 +251,7 @@ end
 # samples -- likely optimistic since consecutive METTS samples are
 # Markov-correlated (see pyitensor/metts.py's own docstring).
 function metts_vev(H, sites, opmpos, T, nsamples, nwarmup, dbeta_half_step,
-		basis_ops, seed, cutoff, maxdim)
+		basis_ops, seed, cutoff, maxdim; implicit = nothing)
 	beta_half = 1.0 / (2.0 * T)
 	nsteps = max(1, Int(ceil(beta_half / dbeta_half_step)))
 	rng = MersenneTwister(seed)
@@ -232,7 +263,7 @@ function metts_vev(H, sites, opmpos, T, nsamples, nwarmup, dbeta_half_step,
 	samples = [ComplexF64[] for _ in 1:nops]
 	total_iters = nwarmup + nsamples
 	for it in 1:total_iters
-		phi = metts_imaginary_time_evolve(cps, H, beta_half, nsteps, cutoff, maxdim)
+		phi = metts_evolve(cps, H, beta_half, nsteps, cutoff, maxdim, implicit)
 		if it > nwarmup
 			for k in 1:nops
 				push!(samples[k], inner(phi, opmpos[k], phi))
@@ -291,7 +322,7 @@ end
 # timedependent.py's evolve_and_measure_tdvp.
 function metts_dynamical_correlator(H, sites, Aop, Bop, T, nt, dt, nsamples,
 		nwarmup, dbeta_half_step, basis_ops, seed, cutoff, maxdim,
-		tdvp_cutoff, tdvp_maxdim)
+		tdvp_cutoff, tdvp_maxdim; implicit = nothing)
 	beta_half = 1.0 / (2.0 * T)
 	nsteps = max(1, Int(ceil(beta_half / dbeta_half_step)))
 	rng = MersenneTwister(seed)
@@ -302,7 +333,7 @@ function metts_dynamical_correlator(H, sites, Aop, Bop, T, nt, dt, nsamples,
 	samples = [ComplexF64[] for _ in 1:nt]
 	total_iters = nwarmup + nsamples
 	for it in 1:total_iters
-		phi = metts_imaginary_time_evolve(cps, H, beta_half, nsteps, cutoff, maxdim)
+		phi = metts_evolve(cps, H, beta_half, nsteps, cutoff, maxdim, implicit)
 		if it > nwarmup
 			v = apply_op(Bop, phi, tdvp_maxdim, tdvp_cutoff)
 			w = phi

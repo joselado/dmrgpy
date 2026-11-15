@@ -18,8 +18,20 @@ from .juliasession import to_julia_strvec
 from .mpo import MPO
 
 
+def _implicit(plan):
+    """The implicit plan of imaginarytime.metts_plan as the NamedTuple
+    metts.jl's metts_evolve reads, or Julia's nothing for TDVP steps."""
+    if plan is None: return Mainjl.nothing
+    from .juliasession import jlconvert
+    steps = jlconvert(Mainjl.Vector[Mainjl.Vector[Mainjl.ComplexF64]],
+                      [[complex(b) for b in betas] for betas in plan["steps"]])
+    return Mainjl.metts_implicit_plan(steps, float(plan["shift"]),
+            bool(plan["shift_energy"]), int(plan["nsweeps"]),
+            float(plan["tol"]), int(plan["krylov"]), int(plan["maxiter"]))
+
+
 def metts_vev(self, ops, T, nsamples, nwarmup, dbeta_half_step, basis_ops,
-              seed, niter):
+              seed, niter, plan=None):
     """Thermal <op> for every op in `ops` (a list of MultiOperators), via
     METTS sampling on the live Julia backend.
 
@@ -30,6 +42,9 @@ def metts_vev(self, ops, T, nsamples, nwarmup, dbeta_half_step, basis_ops,
     quench_tdvp in timedependent.py don't take one either), so it is
     silently ignored here rather than threaded through to Julia.
 
+    `plan` is imaginarytime.metts_plan's implicit plan, or None for the
+    TDVP steps of dbeta_half_step.
+
     Returns (means, stderrs) -- means[k]/stderrs[k] as complex/real
     Python floats, one entry per op in `ops`, same convention as the
     other two backends' Chain.metts_vev.
@@ -39,7 +54,7 @@ def metts_vev(self, ops, T, nsamples, nwarmup, dbeta_half_step, basis_ops,
     basis_ops_jl = to_julia_strvec(list(basis_ops))
     means, stderrs = Mainjl.metts_vev(H.jlmpo, self.jlsites, opmpos, T,
             int(nsamples), int(nwarmup), dbeta_half_step, basis_ops_jl,
-            int(seed), self.cutoff, self.maxm)
+            int(seed), self.cutoff, self.maxm, implicit=_implicit(plan))
     means = [complex(m) for m in means]
     stderrs = [float(s) for s in stderrs]
     return means, stderrs
@@ -47,7 +62,8 @@ def metts_vev(self, ops, T, nsamples, nwarmup, dbeta_half_step, basis_ops,
 
 def metts_dynamical_correlator(self, A_op, B_op, T, nt, dt, nsamples, nwarmup,
                                 dbeta_half_step, basis_ops, seed, niter,
-                                tdvp_cutoff, tdvp_maxdim, tdvp_niter):
+                                tdvp_cutoff, tdvp_maxdim, tdvp_niter,
+                                plan=None):
     """Real-time C_AB(t)=<A(t)B>_T for the (A_op,B_op) MultiOperator pair,
     via dynamical METTS sampling on the live Julia backend -- thin
     wrapper over metts.jl's metts_dynamical_correlator (the whole
@@ -81,7 +97,8 @@ def metts_dynamical_correlator(self, A_op, B_op, T, nt, dt, nsamples, nwarmup,
     means, stderrs = Mainjl.metts_dynamical_correlator(
             H.jlmpo, self.jlsites, Ampo, Bmpo, T, int(nt), dt,
             int(nsamples), int(nwarmup), dbeta_half_step, basis_ops_jl,
-            int(seed), self.cutoff, self.maxm, tdvp_cutoff, tdvp_maxdim)
+            int(seed), self.cutoff, self.maxm, tdvp_cutoff, tdvp_maxdim,
+            implicit=_implicit(plan))
     means = [complex(m) for m in means]
     stderrs = [float(s) for s in stderrs]
     return means, stderrs

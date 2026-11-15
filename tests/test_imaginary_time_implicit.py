@@ -136,17 +136,28 @@ def test_julia_live_agrees_with_python(backend):
 
 @JL
 def test_julia_live_keeps_tdvp_in_metts(backend):
-    """METTS on julia_live stays on TDVP: the automatic plan is None and
-    itime="implicit" is refused, with no solve on the chain"""
-    sc = spinchain.Spin_Chain(["S=1/2"]*6, itensor_version=backend)
+    """METTS on julia_live stays on TDVP by default, where v3 and "python"
+    take the implicit steps, and takes them when asked: the same Markov
+    chain (same seed) evolved both ways agrees to the time-step error, as
+    test_metts_implicit_steps_follow_the_tdvp_ones checks on the others."""
+    sc = spinchain.Spin_Chain(["S=1/2"]*6, itensor_version=backend, maxm=30,
+                              cutoff=1e-10)
     h = sum(sc.Sx[i]*sc.Sx[i+1]+sc.Sy[i]*sc.Sy[i+1]+sc.Sz[i]*sc.Sz[i+1]
             for i in range(5))
     sc.set_hamiltonian(h)
-    assert imaginarytime.metts_plan(sc, 0.05) is None
-    with pytest.raises(NotImplementedError):
-        imaginarytime.metts_plan(sc, 0.05, itime="implicit")
-    with pytest.raises(NotImplementedError):
-        sc.metts_vev(h, 0.05, itime="implicit", nsamples=2, nwarmup=1, seed=1)
+    assert imaginarytime.metts_plan(sc, 0.1) is None
+    assert imaginarytime.metts_plan(sc, 0.1, itime="implicit") is not None
+    with pytest.raises(ValueError):
+        imaginarytime.metts_plan(sc, 0.1, itime_options=dict(nsteps=2))
+    kw = dict(nsamples=6, nwarmup=1, seed=4)
+    m1, _ = sc.metts_vev(h, 0.1, **kw)
+    m2, _ = sc.metts_vev(h, 0.1, itime="implicit", **kw)
+    assert abs(m1-m2) < 1e-3
+    ts, c1, _ = sc.metts_dynamical_correlator((sc.Sz[0], sc.Sz[0]), 0.1,
+            nt=3, dt=0.1, **kw)
+    ts, c2, _ = sc.metts_dynamical_correlator((sc.Sz[0], sc.Sz[0]), 0.1,
+            nt=3, dt=0.1, itime="implicit", **kw)
+    assert np.max(np.abs(c1-c2)) < 1e-3
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

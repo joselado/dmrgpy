@@ -204,23 +204,15 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
     # non-reproducible-by-default behavior every other seed= kwarg in
     # this codebase has, rather than silently becoming deterministic.
     seed_arg = seed if seed is not None else random.getrandbits(63)
-    if itime == "implicit" and MB.itensor_version == "julia_live":
-        raise NotImplementedError("metts_vev: itime=%r is implemented for "
-                "itensor_version=3 and 'python'; julia_live takes TDVP steps"
-                % (itime,))
     from ..imaginarytime import metts_plan, session_plan_kwargs
-    if itime_options and MB.itensor_version == "julia_live":
-        raise ValueError("itime_options= has no effect on julia_live, which "
-                         "takes TDVP steps")
-    plan = None if MB.itensor_version == "julia_live" else \
-        metts_plan(MB, T, itime, itime_options, dbeta_half_step)
+    plan = metts_plan(MB, T, itime, itime_options, dbeta_half_step)
     if MB.itensor_version == "julia_live":
         # This backend has no MB._session at all (its state lives in the
         # live Julia session instead, via MB.hamiltonian/MB.jlsites) --
         # mirrors groundstate.py's gs_energy_generalized julia_live branch.
         from ..mpsjulialive.metts import metts_vev as metts_vev_jl
         means, stderrs = metts_vev_jl(MB, ops, T, nsamples, nwarmup,
-                dbeta_half_step, basis_ops, seed_arg, niter)
+                dbeta_half_step, basis_ops, seed_arg, niter, plan=plan)
         if single:
             return means[0], stderrs[0]
         return list(zip(means, stderrs))
