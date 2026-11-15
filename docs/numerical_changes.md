@@ -1924,3 +1924,19 @@ moved from $3.3\times10^{-10}$ to $1.7\times10^{-7}$ off ED, and from
 $1.7\times10^{-7}$ to $1.9\times10^{-9}$ off `"python"`. A larger
 `tdvp_gse_krylov_order` gives back the extra vector. Every other backend
 is unchanged.
+
+## The 2026-11-15 density-matrix default of pyitensor's MPO application and MPS sum
+
+On `itensor_version="python"` every MPO application and every MPS sum now
+takes the density-matrix route (`pyitensor.mpsalgebra.APPLY_METHOD` and
+`SUM_METHOD`, the author's pick "default everywhere"), the algorithm of
+ITensorMPS.jl. Under truncation it keeps the same Schmidt vectors as the
+exact route, so the states agree to about 3e-14, up to the choice inside a
+degenerate Schmidt multiplet at a cut, and the KPM correlator of a 20-site
+Heisenberg chain moved by 1.7e-8 of its peak, 1.8 times faster. What
+moves more is a small result by cancellation: the density matrix carries a
+roundoff of eps ||K||^2 ||x||^2, so on an 8-site Heisenberg ground state
+held exactly `gs_energy_fluctuation()` went from 2.05e-12 to 4.5e-13, and
+a residual at cutoff 0 floors near 1e-8 of ||K|| ||x||. Setting both names
+to `"exact"` gives the numbers of before. The full suite had not run on
+this change when it was made; 176 tests of the most exposed files passed.

@@ -393,7 +393,7 @@ def _bond_dims(chain):
 # Which algorithm sum_many and sum use when the caller names none, read at
 # call time: "exact" (the direct sum, then one truncating sweep) or
 # "densitymatrix" (_sum_densitymatrix, for MPS only).
-SUM_METHOD = "exact"
+SUM_METHOD = "densitymatrix"  # the author's pick of 2026-11-15
 
 _SUM_METHODS = ("exact", "densitymatrix")
 
@@ -959,7 +959,7 @@ def _apply_densitymatrix(K, x, cutoff=0.0, maxdim=None):
 
 # Which algorithm applyMPO uses when the caller names none, read at call
 # time: "exact" (_apply_chain) or "densitymatrix" (_apply_densitymatrix).
-APPLY_METHOD = "exact"
+APPLY_METHOD = "densitymatrix"  # the author's pick of 2026-11-15
 
 
 def applyMPO(K, x, x0=None, cutoff=0.0, maxdim=None, method=None):

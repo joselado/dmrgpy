@@ -199,10 +199,11 @@ def test_truncated_result_is_an_orthogonal_projection(model, method):
 
 
 def test_default_is_exact_and_unknown_methods_raise():
-    """The default stays the exact route, an unknown name is an error
+    """The default is the density-matrix route (the author's pick of
+    2026-11-15) and equals the exact one here, an unknown name is an error
     rather than a fallback, and a zero operator gives the zero state, not
     NaN."""
-    assert ma.APPLY_METHOD == "exact"
+    assert ma.APPLY_METHOD == "densitymatrix"  # the default since 2026-11-15
     sites, _ampo, K, x = _case("heisenberg", 6, 4)
     a = _vec(ma.applyMPO(K, x, cutoff=0.0, maxdim=4), sites)
     b = _vec(ma.applyMPO(K, x, cutoff=0.0, maxdim=4, method="exact"), sites)

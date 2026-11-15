@@ -3633,7 +3633,8 @@ random MPS goes from 1.06 s to 0.39 s at `maxdim=60` and from 4.03 s to
 1.43 s at 100, a 20-site long-range MPO (bond dimension 14) from 5.07 s to
 1.44 s at 60, the states agreeing to 3e-14 in 2-norm; the KPM correlator
 of a 20-site Heisenberg chain at `kpmmaxm=40` goes from 27.0 s to 15.1 s,
-the spectra agreeing to 1.7e-8 of the peak. Two limits keep it opt-in: the
+the spectra agreeing to 1.7e-8 of the peak. It is the default since the
+author's pick of 2026-11-15 ("default everywhere"), with two limits: the
 eigenvalues of the density matrix are squared singular values and carry a
 roundoff of about eps ||K||^2 ||x||^2, so singular values below about
 1e-8 of ||K|| ||x|| are not resolved. That is not of the product's own
@@ -3648,9 +3649,9 @@ and 4e-5, the two agree to every printed digit. The exact residual of
 `implicit.py` (cutoff 0) would floor the same way. And a cut
 inside a degenerate Schmidt multiplet, the rule for SU(2) states, can pick
 a different member than the SVD sweep, which moves a number at the
-truncation level. `pyitensor.mpsalgebra.APPLY_METHOD = "densitymatrix"`
-switches every session call; `tests/test_pyitensor_apply_densitymatrix.py`
-pins the agreement. The MPS sum has the same opt-in route since the same
+truncation level. `pyitensor.mpsalgebra.APPLY_METHOD = "exact"`
+switches every session call back; `tests/test_pyitensor_apply_densitymatrix.py`
+pins the agreement. The MPS sum has the same route, also the default since the same
 night (`sum(..., method="densitymatrix")`, `SUM_METHOD`): unlike
 ITensorMPS.jl it keeps the cross terms of the operands and sweeps from the
 left, so it gives the truncation of the exact route, and two random

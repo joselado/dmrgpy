@@ -203,10 +203,11 @@ def test_one_site_chains():
 
 
 def test_default_is_exact_and_unknown_methods_raise():
-    """The default stays the exact route, and an unknown name is an error
+    """The default is the density-matrix route (the author's pick of
+    2026-11-15) and equals the exact one here, and an unknown name is an error
     rather than a fallback, also for a single chain, which is returned
     before any work is done."""
-    assert ma.SUM_METHOD == "exact"
+    assert ma.SUM_METHOD == "densitymatrix"  # the default since 2026-11-15
     sites, states = _inputs(6, (3, 4))
     a = _vec(ma.sum_many(states, maxdim=4), sites)
     b = _vec(ma.sum_many(states, maxdim=4, method="exact"), sites)
