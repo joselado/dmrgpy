@@ -300,10 +300,11 @@ def applyoperator_dmrg(self,A,wf):
 
 def resolve_inverse_solver(self,A=None):
     """The solver applyinverse() takes on DMRG for the operator A:
-    inverse_solver as set, or for None (the default) "sweep" on
+    inverse_solver as set ("sweep" exists on itensor_version="python" and
+    "julia_live"), or for None (the default) "sweep" on
     itensor_version="python" without a conserved sector when A is not
     proven Hermitian (MultiOperator.is_hermitian(), the symbolic one-sided
-    proof), and "bicgstab" everywhere else.
+    proof), and "bicgstab" everywhere else, julia_live included.
 
     The reason for the Hermitian test: for a resolvent z - H with Im z != 0,
     the case of CVM_explicit and of the analytic continuation, every local
@@ -325,10 +326,17 @@ def resolve_inverse_solver(self,A=None):
     if solver not in ("bicgstab","sweep"):
         raise ValueError("inverse_solver must be None, 'bicgstab' or "
                          "'sweep', got "+repr(solver))
-    if solver=="sweep" and self.itensor_version!="python":
+    if solver=="sweep" and self.itensor_version not in ("python","julia_live"):
         raise NotImplementedError("inverse_solver='sweep' is implemented "
-                "for itensor_version='python' only (got itensor_version=%r)"
-                %(self.itensor_version,))
+                "for itensor_version='python' and 'julia_live' only (got "
+                "itensor_version=%r)"%(self.itensor_version,))
+    if solver=="sweep" and self.itensor_version=="julia_live" and \
+            getattr(self,"conserved_sector",None):
+        # the "python" session refuses the same in its apply_inverse_sweep
+        raise ValueError("conserved-sector mode (%s): inverse_solver='sweep' "
+                "works on dense sites only; clear the sector with "
+                "set_conserved_sector() or take inverse_solver='bicgstab'"
+                %(self.conserved_sector,))
     return solver
 
 
@@ -362,8 +370,21 @@ def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
     solver = resolve_inverse_solver(self,A)
     norm = np.sqrt(abs(wf.dot(wf).real)) # ||wf||, the scale of the residual
     if norm==0.: return wf.copy() # A^-1 0 = 0
-    if _is_julia(wf): # mpsjulialive/bicgstab.jl, the same BiCGSTAB
+    if _is_julia(wf):
         from .mpsjulialive.juliasession import Main
+        if solver=="sweep": # mpsjulialive/implicit.jl, the same sweeps
+            jlmps, history = Main.implicit_linear_solve(_julia_mpo(self,A),
+                    wf.jlmps,float(delta*norm),int(self.inverse_nsweeps),
+                    int(self.maxm),float(self.cutoff))
+            history = [float(r) for r in history]
+            if min(history)>delta*norm:
+                import warnings
+                warnings.warn("applyinverse (inverse_solver='sweep'): the "
+                    "relative residual is %.1e after %d sweeps, above the "
+                    "requested %.1e"%(min(history)/norm,len(history)-1,delta),
+                    RuntimeWarning,stacklevel=3)
+            return _julia_mps(self,jlmps)
+        # mpsjulialive/bicgstab.jl, the same BiCGSTAB
         jlmps = Main.mps_bicgstab(_julia_mpo(self,A),wf.jlmps,
                 float(delta*norm),int(maxn),int(self.maxm),float(self.cutoff))
         return _julia_mps(self,jlmps)

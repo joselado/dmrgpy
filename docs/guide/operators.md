@@ -102,7 +102,7 @@ by two-site sweeps on `itensor_version="python"` when $A$ is not
 Hermitian, such as the resolvent $z-H$ off the real axis, as DMRG solves
 the ground state. A Hermitian $A$, the other backends and a conserved
 sector take BiCGSTAB. `sc.inverse_solver="bicgstab"` or `"sweep"` forces one (`"sweep"`
-only on `"python"`). The sweeps warn if the residual stays above the
+on `"python"` and `"julia_live"`). The sweeps warn if the residual stays above the
 tolerance, as it can for an $A$ with eigenvalues of both signs.
 `sc.inverse_nsweeps` is the largest number of sweeps (default 10).
 

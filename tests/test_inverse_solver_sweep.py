@@ -1,6 +1,7 @@
 """applyinverse by two-site sweeps (inverse_solver="sweep",
-pyitensor/implicit.py's linear_solve), against the exact solve on the ED
-matrix of the same chain.
+pyitensor/implicit.py's linear_solve, and its port
+mpsjulialive/implicit.jl on julia_live), against the exact solve on the
+ED matrix of the same chain.
 
 The solver shares its sweep with the implicit imaginary-time factor
 (implicit._galerkin_sweep), so test_imaginary_time_implicit.py pins that
@@ -14,11 +15,16 @@ import pytest
 
 from dmrgpy import cppext, spinchain
 from dmrgpy.pyitensor import implicit
+from _helpers import julia_live_param
+
+# every julia_live test carries the julia_live id, so -k "not julia_live"
+# skips them
+JL = pytest.mark.parametrize("version", [julia_live_param()])
 
 
-def _chain(n=6, maxm=64, solver="sweep"):
+def _chain(n=6, maxm=64, solver="sweep", version="python"):
     np.random.seed(1)
-    sc = spinchain.Spin_Chain(["S=1/2"]*n, itensor_version="python")
+    sc = spinchain.Spin_Chain(["S=1/2"]*n, itensor_version=version)
     h = 0
     for i in range(n-1):
         h = h + sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1]
@@ -115,3 +121,36 @@ def test_default_solver_per_backend_and_operator():
     if cppext.available(3):
         sc3 = spinchain.Spin_Chain(["S=1/2"]*4, itensor_version=3)
         assert mpsalgebra.resolve_inverse_solver(sc3, res) == "bicgstab"
+
+
+@JL
+def test_julia_live_resolvent_matches_ed(version):
+    """z - H off the real axis by the julia_live sweeps
+    (mpsjulialive/implicit.jl), on the chain of test_resolvent_matches_ed"""
+    sc, h = _chain(version=version)
+    e0 = sc.gs_energy()
+    A = (e0 + 1.0 + 0.1j) - h
+    B = sc.Sz[3]
+    psi = B*sc.get_gs()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        x = sc.applyinverse(A, psi, delta=1e-8)
+    exact = _exact(sc, A, B)
+    assert abs(psi.dot(x) - exact)/abs(exact) < 1e-7
+
+
+@JL
+def test_julia_live_default_solver_is_bicgstab(version):
+    """inverse_solver=None stays BiCGSTAB on julia_live for every operator,
+    as on v3; "sweep" is taken only when asked, and refused in a conserved
+    sector"""
+    from dmrgpy import mpsalgebra
+    sc, h = _chain(n=4, solver=None, version=version)
+    res, shift = (1.0 + 0.1j) - h, h - 0.3
+    assert mpsalgebra.resolve_inverse_solver(sc, res) == "bicgstab"
+    assert mpsalgebra.resolve_inverse_solver(sc, shift) == "bicgstab"
+    sc.inverse_solver = "sweep"
+    assert mpsalgebra.resolve_inverse_solver(sc, res) == "sweep"
+    sc.set_conserved_sector(Sz=0)
+    with pytest.raises(ValueError):
+        mpsalgebra.resolve_inverse_solver(sc, res)

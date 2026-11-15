@@ -131,8 +131,8 @@ class Thermal_Spin_Chain():
     anneal_order = 8
     # anneal_method="implicit" takes the implicit steps on a logarithmic
     # grid instead (anneal_implicit(), arXiv:2606.02930), on
-    # itensor_version=3 and "python", and on mode="ED" as the exact
-    # e^{-tau H} on the same grid; anneal_options takes the keywords of
+    # itensor_version=3, "python" and "julia_live", and on mode="ED" as
+    # the exact e^{-tau H} on the same grid; anneal_options takes the keywords of
     # evolve_imaginary_time but the shift, which is the lower band edge.
     # anneal_step and anneal_order belong to the Taylor stepper only.
     # None, the default, picks one of the two (auto_anneal_method()).

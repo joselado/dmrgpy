@@ -34,10 +34,11 @@ above it a long step can meet the pole of the trapezoid factor on the
 states below it.
 
 Each factor is a two-site sweep with local GMRES (pyitensor/implicit.py,
-mpscpp3's Chain::implicit_step), the state is normalized after every
-step, and the cost of one step does not grow with its size, so at fixed
-bond dimension the cost of reaching tau grows as log(tau). mode="ED" is
-the exact e^{-tau H} on the same grid, the reference.
+mpscpp3's Chain::implicit_step, mpsjulialive/implicit.jl), the state is
+normalized after every step, and the cost of one step does not grow with
+its size, so at fixed bond dimension the cost of reaching tau grows as
+log(tau). mode="ED" is the exact e^{-tau H} on the same grid, the
+reference.
 """
 
 from math import factorial
@@ -106,11 +107,11 @@ def _plan(self, tau, tau0, nsteps, order):
 
 
 def _check_dmrg(self):
-    if self.itensor_version not in (3, "python"):
+    if self.itensor_version not in (3, "python", "julia_live"):
         raise NotImplementedError(
-            "evolve_imaginary_time is implemented for itensor_version=3 and "
-            "'python' (got itensor_version=%r); use mode='ED' for a small "
-            "chain" % (self.itensor_version,))
+            "evolve_imaginary_time is implemented for itensor_version=3, "
+            "'python' and 'julia_live' (got itensor_version=%r); use "
+            "mode='ED' for a small chain" % (self.itensor_version,))
     if getattr(self, "conserved_sector", None):
         raise ValueError("conserved-sector mode (%s): evolve_imaginary_time "
                 "works on dense sites only; clear the sector with "
@@ -119,7 +120,13 @@ def _check_dmrg(self):
         raise NotImplementedError("evolve_imaginary_time with "
                 "itensor_version=3 needs at least 3 sites; use "
                 "itensor_version='python' or mode='ED'")
-    if not hasattr(getattr(self, "_session", None), "implicit_step"):
+    if self.itensor_version == "julia_live":
+        # no session: the steps are mpsjulialive/implicit.jl's
+        if self.ns < 2:
+            raise NotImplementedError("evolve_imaginary_time with "
+                    "itensor_version='julia_live' needs at least 2 sites; "
+                    "use mode='ED'")
+    elif not hasattr(getattr(self, "_session", None), "implicit_step"):
         raise NotImplementedError("evolve_imaginary_time needs the "
                 "itensor_version=%r session, which is not available here "
                 "(is the extension compiled?); use itensor_version='python' "
@@ -202,6 +209,9 @@ def evolve(self, wf, tau, operators=None, nsteps=4, tau0=None, order=2,
         raise ValueError("mode must be 'DMRG' or 'ED' (got %r)" % (mode,))
     _check_dmrg(self)
     value, from_energy = _shift(self, shift)
+    if self.itensor_version == "julia_live":
+        return _evolve_julia(self, wf, steps, taus, order, value, from_energy,
+                             operators, nsweeps, tol, krylov, maxiter)
     from .groundstate import send_hamiltonian
     session = self._session
     session.set_sweep_params(self.maxm, self.nsweeps, self.cutoff, self.noise)
@@ -225,14 +235,46 @@ def evolve(self, wf, tau, operators=None, nsteps=4, tau0=None, order=2,
     return taus, vals, state
 
 
+def _evolve_julia(self, wf, steps, taus, order, shift, from_energy, operators,
+                  nsweeps, tol, krylov, maxiter):
+    """evolve() on julia_live, which has no session: each step is
+    mpsjulialive/implicit.jl's implicit_step, the port of
+    pyitensor/implicit.py, on the MPO of the chain's Hamiltonian (built
+    once) at the chain's maxm and cutoff."""
+    from .mpsjulialive.juliasession import Main, jlconvert
+    from .mpsjulialive.mpo import get_MPO
+    from .mpsalgebra import _julia_mps
+    H = get_MPO(self.hamiltonian, self)
+    norm = wf.dot(wf).real
+    if norm <= 0.:
+        raise ValueError("evolve_imaginary_time: the initial state is zero")
+    psi = (wf*(1./np.sqrt(norm))).jlmps
+    def measure(jlmps):
+        state = _julia_mps(self, jlmps)
+        return [state.aMb(op, state) for op in operators]
+    vals = [measure(psi)]
+    for dt in steps:
+        betas = jlconvert(Main.Vector[Main.ComplexF64],
+                          [complex(b) for b in step_factors(dt, order)])
+        psi = Main.implicit_step(psi, H, betas, float(shift),
+                                 bool(from_energy), int(self.maxm),
+                                 float(self.cutoff), int(nsweeps), float(tol),
+                                 int(krylov), int(maxiter))
+        if operators: vals.append(measure(psi))
+    vals = np.array(vals) if operators else np.zeros((len(taus), 0))
+    return taus, vals, _julia_mps(self, psi)
+
+
 _PLAN_KEYWORDS = ("nsteps", "tau0", "order", "shift", "nsweeps", "tol",
                   "krylov", "maxiter")
 
 
 def _implicit_available(self):
-    """True when the implicit steps can run on this chain: a v3 or
-    "python" session, no conserved sector, at least 3 sites on v3, and a
-    Hermitian Hamiltonian."""
+    """True when the automatic choices (metts_plan, and
+    thermal.auto_anneal_method) may take the implicit steps on this chain:
+    a v3 or "python" session, no conserved sector, at least 3 sites on v3,
+    and a Hermitian Hamiltonian. julia_live runs evolve_imaginary_time but
+    keeps its TDVP and Taylor defaults, so it is not one of them."""
     if self.itensor_version not in (3, "python"): return False
     if getattr(self, "conserved_sector", None): return False
     if self.itensor_version == 3 and self.ns < 3: return False
@@ -279,6 +321,10 @@ def metts_plan(self, T, itime=None, itime_options=None, dbeta_half_step=0.05):
     if itime is None and not _implicit_available(self):
         return None
     if itime == "implicit":
+        if self.itensor_version == "julia_live": # its METTS driver has no plan
+            raise NotImplementedError("METTS with itime='implicit' is "
+                    "implemented for itensor_version=3 and 'python'; "
+                    "julia_live takes TDVP steps")
         _check_dmrg(self)
     order = opts.get("order", 2)
     beta_half = 1./(2.*T)

@@ -50,7 +50,7 @@ is accurate to about $10^{-6}$ relative at the defaults. The keywords are:
   solves than the expansion needs steps, that is on long chains, and the
   expansion otherwise. Setting `anneal_step` or
   `anneal_order` keeps the expansion. The implicit steps run on
-  `itensor_version=3` and `"python"`.
+  `itensor_version=3`, `"python"` and `"julia_live"`.
 - `tc.anneal_options`: the keywords of `evolve_imaginary_time` for
   `"implicit"`, except `shift`. The default is `order=8` with `nsteps=2`:
   the $T=\infty$ state holds every energy of the spectrum, and the
@@ -129,8 +129,8 @@ at intermediate $\tau$, where the energy is off by about $2\times10^{-3}$
   energy. It must be the ground-state energy: with a lower shift the long
   steps stop projecting.
 
-It works with `itensor_version=3` (at least 3 sites) and `"python"`, for a
-Hermitian $H$.
+It works with `itensor_version=3` (at least 3 sites), `"python"` and
+`"julia_live"`, for a Hermitian $H$.
 
 ## METTS
 

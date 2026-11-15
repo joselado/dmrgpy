@@ -1,6 +1,7 @@
 """Imaginary-time evolution by implicit steps on a logarithmic grid
-(arXiv:2606.02930): imaginarytime.py, pyitensor/implicit.py and
-mpscpp3's Chain::implicit_step, and the METTS route built on them."""
+(arXiv:2606.02930): imaginarytime.py, pyitensor/implicit.py,
+mpscpp3's Chain::implicit_step and mpsjulialive/implicit.jl, and the
+METTS route built on them."""
 from math import factorial
 
 import numpy as np
@@ -10,8 +11,12 @@ from scipy.sparse.linalg import spsolve
 
 from dmrgpy import spinchain, imaginarytime
 from dmrgpy import cppext
+from _helpers import julia_live_param
 
 BACKENDS = ["python"] + ([3] if cppext.available(3) else [])
+# every julia_live test carries the julia_live id, so -k "not julia_live"
+# skips them; they reuse the 8-site chain of _neel_chain
+JL = pytest.mark.parametrize("backend", [julia_live_param()])
 
 
 def test_pade_factors_are_the_diagonal_approximant():
@@ -100,6 +105,48 @@ def test_v3_agrees_with_python():
         out.append(sc.evolve_imaginary_time_and_measure(
             [h, sc.Sz[0]*sc.Sz[1]], wf, 10., nsteps=2, order=4)[1])
     assert np.max(np.abs(out[0]-out[1])) < 1e-7
+
+
+@JL
+def test_julia_live_solves_the_rational_steps_exactly(backend):
+    """test_sweeps_solve_the_rational_steps_exactly on julia_live, at
+    order=4: complex betas and the mixed environments <x|H|psi>"""
+    sc, h, wf, wfed = _neel_chain(backend)
+    taus, e = sc.evolve_imaginary_time_and_measure(h, wf, 5., nsteps=2,
+            order=4, nsweeps=3, tol=1e-13, krylov=30, maxiter=1000)
+    er = _rational(sc, h, np.array(wfed.v, dtype=complex), taus, 4,
+                   sc.gs_energy())
+    assert np.max(np.abs(e.real-er)) < 1e-10
+
+
+@JL
+def test_julia_live_agrees_with_python(backend):
+    """test_v3_agrees_with_python on julia_live. The shift is the
+    ground-state energy, as by default, solved once on "python" and handed
+    to both, since a julia_live solve varies run to run by solver noise"""
+    out, shift = [], None
+    for b in ("python", backend):
+        sc, h, wf, wfed = _neel_chain(b, cutoff=1e-12)
+        if shift is None: shift = float(np.real(sc.gs_energy()))
+        out.append(sc.evolve_imaginary_time_and_measure(
+            [h, sc.Sz[0]*sc.Sz[1]], wf, 10., nsteps=2, order=4,
+            shift=shift)[1])
+    assert np.max(np.abs(out[0]-out[1])) < 1e-7
+
+
+@JL
+def test_julia_live_keeps_tdvp_in_metts(backend):
+    """METTS on julia_live stays on TDVP: the automatic plan is None and
+    itime="implicit" is refused, with no solve on the chain"""
+    sc = spinchain.Spin_Chain(["S=1/2"]*6, itensor_version=backend)
+    h = sum(sc.Sx[i]*sc.Sx[i+1]+sc.Sy[i]*sc.Sy[i+1]+sc.Sz[i]*sc.Sz[i+1]
+            for i in range(5))
+    sc.set_hamiltonian(h)
+    assert imaginarytime.metts_plan(sc, 0.05) is None
+    with pytest.raises(NotImplementedError):
+        imaginarytime.metts_plan(sc, 0.05, itime="implicit")
+    with pytest.raises(NotImplementedError):
+        sc.metts_vev(h, 0.05, itime="implicit", nsamples=2, nwarmup=1, seed=1)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

@@ -247,7 +247,8 @@ class Many_Body_Chain():
       self.inverse_solver = None # applyinverse() on DMRG:
           # "bicgstab" (global BiCGSTAB over whole-MPS primitives, every
           # backend) or "sweep" (two-site sweeps with local GMRES,
-          # pyitensor/implicit.py's linear_solve, itensor_version="python");
+          # pyitensor/implicit.py's linear_solve, itensor_version="python"
+          # and "julia_live");
           # None takes "sweep" on "python" without a conserved sector for
           # an operator not proven Hermitian (a resolvent z-H off the real
           # axis) and "bicgstab" otherwise (mpsalgebra.resolve_inverse_solver)
@@ -1114,7 +1115,8 @@ class Many_Body_Chain():
           the projection once the steps exceed about 1/m.
       nsweeps, tol, krylov, maxiter: sweeps per linear solve, and the
           local GMRES tolerance, restart length and matrix-vector cap.
-      mode: "DMRG" (itensor_version=3 or "python") or "ED"."""
+      mode: "DMRG" (itensor_version=3, "python" or "julia_live") or
+          "ED"."""
       from . import imaginarytime
       return imaginarytime.evolve(self,wf,tau,**kwargs)[2]
   def evolve_imaginary_time_and_measure(self,operators,wf,tau,**kwargs):

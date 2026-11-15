@@ -14,6 +14,11 @@ import pytest
 from dmrgpy import cppext, imaginarytime, thermal
 
 from test_audit_2026_09_25b_thermal import _spectrum, _boltzmann, _thermal
+from _helpers import julia_live_param
+
+# every julia_live test carries the julia_live id, so -k "not julia_live"
+# skips them
+JL = pytest.mark.parametrize("version", [julia_live_param()])
 
 
 def _closed_form(ev, T, order, nsteps, tau0=0.01):
@@ -61,6 +66,18 @@ def test_dmrg_route_is_the_boltzmann_average(version, T):
     ev = _spectrum(4)[0]
     exact = _boltzmann(ev, T)
     e, m, nst, wl = _thermal(4, T, version=version, mode="DMRG",
+                             anneal_method="implicit")
+    assert nst == 0
+    assert abs(e - exact)/abs(exact) < 1e-5
+
+
+@JL
+def test_julia_live_route_is_the_boltzmann_average(version):
+    """the DMRG route on julia_live (mpsjulialive/implicit.jl) at T=0.1,
+    within the bound of the "python" and v3 routes"""
+    ev = _spectrum(4)[0]
+    exact = _boltzmann(ev, 0.1)
+    e, m, nst, wl = _thermal(4, 0.1, version=version, mode="DMRG",
                              anneal_method="implicit")
     assert nst == 0
     assert abs(e - exact)/abs(exact) < 1e-5
@@ -127,6 +144,20 @@ def test_default_takes_the_grid_on_v3_at_low_temperature():
     assert abs(e - _boltzmann(ev, 0.01))/abs(_boltzmann(ev, 0.01)) < 1e-6
     e, m, nst, wl = _thermal(4, 0.5, version=3, mode="DMRG")
     assert nst > 0
+
+
+@JL
+def test_default_keeps_taylor_on_julia_live(version):
+    """the automatic choice does not take the grid on julia_live, at a T
+    where v3 takes it (test_default_takes_the_grid_on_v3_at_low_temperature)"""
+    tc = thermal.Thermal_Spin_Chain(["S=1/2"]*4, itensor_version=version)
+    h = sum(tc.Sx[i]*tc.Sx[i+1] + tc.Sy[i]*tc.Sy[i+1] + tc.Sz[i]*tc.Sz[i+1]
+            for i in range(3))
+    tc.set_hamiltonian(h)
+    ev = _spectrum(4)[0]
+    wf = tc.MBChain.random_mps()
+    assert thermal.auto_anneal_method(tc, wf, 0.01,
+                                      (ev.min(), ev.max())) == "taylor"
 
 
 @pytest.mark.parametrize("mode", ["ED", "DMRG"])
