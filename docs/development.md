@@ -3392,8 +3392,9 @@ Notable, deliberate implementation details (not bugs to "fix"):
   conjugate of the right one. The pair goes through `nhdmrg()`'s own
   certificate (`nhdmrg._certificate`) and is stored by
   `nhdmrg.store_nh_pair`, the storage NH-DMRG uses; a failed certificate
-  or a raised route falls back to `gs_energy_nhdmrg` with the same
-  keywords. v2, `julia_live` (its own branch, ITensorNHDMRG.jl), a
+  runs `nhdmrg()` and keeps the pair of smaller residual (marked
+  unconverged if it is still above the tolerance), and a raised route
+  goes to `gs_energy_nhdmrg` with the same keywords. v2, `julia_live` (its own branch, ITensorNHDMRG.jl), a
   conserved sector and v3 below 3 sites stay on NH-DMRG. The grid is in
   units of the largest coefficient off the identity, so an offset does not
   shrink it. The cost is two evolutions of 136 implicit steps plus 48 MPO
@@ -3401,7 +3402,9 @@ Notable, deliberate implementation details (not bugs to "fix"):
   NH-DMRG solve (10-site PT chain, `maxm=30`: 16 s against 2 s on
   `"python"`), in exchange for reaching the levels where NH-DMRG stalls
   (every distinct level of smallest real part of that chain up to 16
-  sites). `Many_Body_Chain.get_nh_levels()` exposes the Ritz pairs
+  sites; the stored pair, a Ritz vector compressed to `maxm`, holds all
+  16 tied levels there and passes the certificate at `maxm=64`, not at
+  30). `Many_Body_Chain.get_nh_levels()` exposes the Ritz pairs
   themselves. `tests/test_nh_levels.py`.
 - A few pre-existing bugs in the original (pre-refactor) file-based
   backend are deliberately reproduced rather than silently fixed —

@@ -62,6 +62,7 @@ def no_fallback(monkeypatch):
     def refuse(*args, **kwargs):
         raise AssertionError("the imaginary-time route fell back to NH-DMRG")
     monkeypatch.setattr(nhdmrg, "gs_energy_nhdmrg", refuse)
+    monkeypatch.setattr(nhdmrg, "nhdmrg", refuse)
 
 
 @pytest.mark.parametrize("version", VERSIONS)
@@ -188,3 +189,77 @@ def test_backends_without_the_route_use_nhdmrg():
     sc.nh_gs_method = "imaginary_time"
     e = sc.gs_energy()
     assert e.real == pytest.approx(ev.real.min(), abs=1e-6)
+
+
+def _count_fallbacks(monkeypatch):
+    from dmrgpy import nhdmrg
+    calls = []
+    real = nhdmrg.gs_energy_nhdmrg
+    monkeypatch.setattr(nhdmrg, "gs_energy_nhdmrg",
+                        lambda *a, **k: calls.append(1) or real(*a, **k))
+    return calls
+
+
+def test_the_better_pair_is_kept_when_both_miss(monkeypatch, capsys):
+    """When NH-DMRG does no better than a pair above the tolerance, the
+    imaginary-time pair is kept, marked unconverged, with a warning."""
+    from dmrgpy import nhdmrg
+    real_pair = nhlevels.ground_pair
+    def fake_nhdmrg(self, **kwargs):
+        e, l, r = real_pair(self, self.hamiltonian)
+        self._nh_last_residual = (1.0, 1e-4)
+        return e + 0.5, l, r
+    monkeypatch.setattr(nhdmrg, "nhdmrg", fake_nhdmrg)
+    np.random.seed(29)
+    sc, h = nh_asymmetric_hopping_chain(6, "python")
+    ev = _ed(sc)
+    e = sc.gs_energy(tol=1e-30)  # nothing passes
+    assert np.min(np.abs(ev - e)) < 1e-6
+    assert sc._gs_unconverged is not None
+    assert "kept over NH-DMRG" in capsys.readouterr().out
+
+
+def test_a_route_that_raises_falls_back_to_nhdmrg(monkeypatch):
+    """A failure inside the route, a LinAlgError from the small
+    eigenproblems included, hands the solve to NH-DMRG."""
+    calls = _count_fallbacks(monkeypatch)
+    def broken(*args, **kwargs):
+        raise np.linalg.LinAlgError("Eigenvalues did not converge")
+    monkeypatch.setattr(nhlevels, "ground_pair", broken)
+    np.random.seed(17)
+    sc, h = nh_asymmetric_hopping_chain(6, "python")
+    ev = _ed(sc)
+    e = sc.gs_energy()
+    assert calls == [1]
+    assert e.real == pytest.approx(ev.real.min(), abs=1e-6)
+
+
+def test_a_pair_that_fails_the_certificate_falls_back_to_nhdmrg(monkeypatch):
+    """A pair that is not an eigenpair is not stored: NH-DMRG runs, and
+    its better pair is the one kept."""
+    from dmrgpy import nhdmrg
+    calls = []
+    real = nhdmrg.nhdmrg
+    monkeypatch.setattr(nhdmrg, "nhdmrg",
+                        lambda *a, **k: calls.append(1) or real(*a, **k))
+    def wrong(self, H=None, **kwargs):
+        r = self.random_state()
+        return -1.0 + 0j, r.copy(), r
+    monkeypatch.setattr(nhlevels, "ground_pair", wrong)
+    np.random.seed(19)
+    sc, h = nh_asymmetric_hopping_chain(6, "python")
+    ev = _ed(sc)
+    e = sc.gs_energy()
+    assert calls == [1]
+    assert e.real == pytest.approx(ev.real.min(), abs=1e-6)
+
+
+def test_get_nh_levels_on_a_chain_pinned_to_ed():
+    """The route evolves an MPS even when the chain's own random state is
+    an ED vector."""
+    np.random.seed(23)
+    sc, _ = _pt_chain(6, "python")
+    sc.mode = "ED"
+    exact, e0 = _pt_levels(6)
+    es, rs = sc.get_nh_levels()
+    assert np.min(np.abs(es - exact[0])) < 1e-6

@@ -182,8 +182,11 @@ $\lVert H^\dagger|\psi_L\rangle-E^*|\psi_L\rangle\rVert$. The keywords are:
   residual is too large (default 5).
 - `fc.nh_gs_method` (default `"imaginary_time"`): `"nhdmrg"` makes
   `gs_energy()` use NH-DMRG. NH-DMRG is faster where it converges, and the
-  imaginary-time route uses it when its own result fails the residual
-  check.
+  imaginary-time route also runs it when its own result fails the residual
+  check, keeping the better of the two.
+- `fc.maxm`: the state has to hold all the levels that share the real part
+  at once, so a multiplet of many tied levels needs a larger bond
+  dimension than one level does. Raise it when the check fails.
 
 !!! note "Backends"
     The imaginary-time route and `get_nh_levels()` run on

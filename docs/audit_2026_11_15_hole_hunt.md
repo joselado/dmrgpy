@@ -254,8 +254,10 @@ cases, so the number is not silent. A smaller lead: on 10 sites a smaller
 cutoff gives a larger residual, 1.1e-4 at 1e-14 against 3.4e-6 at 1e-10,
 on the reference too.
 
-A route that does reach these chains, measured but not part of the fix,
-tried on the author's suggestion: implicit imaginary-time steps with the
+A route that does reach these chains, measured here and since added to
+the library as `get_nh_levels()` and as the default of `gs_energy()` for a
+non-Hermitian H on DMRG (`4ed4891`, `94367c8`; `nhlevels.py`), tried on the
+author's suggestion: implicit imaginary-time steps with the
 non-Hermitian H itself (the session's `implicit_step`, the log grid of
 arXiv:2606.02930), renormalized every step, with the shift at the running
 Re <H>, which needs no knowledge of E0. With the shift at Re E0 the Cayley

@@ -31,14 +31,18 @@ real parts within 1e-5 of the exact ones, where NH-DMRG stalls from 14
 sites. A level exactly degenerate with one in another symmetry sector comes
 out once, as one Ritz vector in their common eigenspace.
 
-levels() returns the accepted Ritz pairs. ground_pair() selects the one of
-smallest real part, builds its Ritz vector as one weighted sum of the last
+levels() returns the accepted Ritz pairs. ground_pair() selects, among the
+ones that share the smallest real part, the one of smallest residual, builds its Ritz vector as one weighted sum of the last
 states (sum_mps_weighted), evolves a left state under H^dagger from its
 conjugate, which already is the left eigenvector of a complex-symmetric H,
 reads the left Ritz vector closest to conj(E) and maximally overlapping
 with the right one, and biorthonormalizes the pair; gs_energy_imaginary_time
 stores it as nhdmrg.gs_energy_nhdmrg stores NH-DMRG's, behind the same
-two-sided certificate, and falls back to NH-DMRG when the certificate fails.
+two-sided certificate; when the certificate fails it runs NH-DMRG and keeps
+the better of the two pairs. The Ritz vector is compressed to the chain's
+maxm, which has to hold every tied level at once: on the 16-site PT chain
+(16 tied levels) the levels come out at maxm=30, the stored pair passes the
+certificate at maxm=64 only.
 """
 
 import numpy as np
@@ -165,7 +169,9 @@ def _combine(self, snaps, c):
 def _right_states(self, H, tau, nsteps, nsnap):
     _require(self)
     s = _prepare(self)
-    wf = self.random_state()
+    # an MPS even on a chain pinned to mode="ED", whose random_state() is
+    # an ED vector with no handle
+    wf = mps.random_mps(self)
     wf = wf * (1.0 / np.sqrt(wf.dot(wf).real))
     Hop = s.build_operator(H.to_terms())
     return _evolve(self, wf.cpp_handle, Hop, _grid(H, tau, nsteps), nsnap)
@@ -204,7 +210,15 @@ def ground_pair(self, H=None, nsnap=NSNAP, tau=None, nsteps=NSTEPS,
     if not acc:
         raise RuntimeError("nhlevels: no Ritz pair of the imaginary-time "
                            "states reached the residual tolerance")
-    theta, _, c = acc[0]
+    # among the pairs that share the smallest real part, within the scale
+    # of the certificate's tolerance, the best converged one: on 16 sites
+    # the lowest Ritz value of a 16-fold tied set had residual 5.7e-4
+    # where the others had 2e-4 or less
+    rscale, e_id = _scale(H)
+    remin = acc[0][0].real
+    tied = [p for p in acc
+            if p[0].real <= remin + 1e-4 * (rscale + abs(acc[0][0] - e_id))]
+    theta, _, c = min(tied, key=lambda p: p[1])
     psir = _combine(self, snaps, c)
     psir = psir * (1.0 / np.sqrt(psir.dot(psir).real))
     # the left state: evolved under H^dagger from conj(psir), the left
@@ -215,7 +229,6 @@ def ground_pair(self, H=None, nsnap=NSNAP, tau=None, nsteps=NSTEPS,
     lsnaps = _evolve(self, s.conjugate(psir.cpp_handle), Hdop,
                      _grid(H, tau, nsteps), int(nsnap))
     lpairs = _rayleigh_ritz(lsnaps, Hd)
-    rscale, e_id = _scale(H)
     window = 1e-4 * (rscale + abs(theta - e_id))
     near = [p for p in lpairs if abs(p[0] - np.conj(theta)) <= window]
     if near:
@@ -243,8 +256,9 @@ def gs_energy_imaginary_time(self, **kwargs):
     route (nh_gs_method="imaginary_time"): ground_pair(), nhdmrg()'s
     two-sided certificate at its tol= (1e-4 by default), and the pair
     stored as NH-DMRG's is (nhdmrg.store_nh_pair). When the route raises
-    or the certificate fails, it falls back to NH-DMRG with the same
-    keywords, so no chain NH-DMRG solves is worse off. H= is refused as
+    it hands the solve to NH-DMRG with the same keywords; when the
+    certificate fails it runs NH-DMRG and keeps the pair of smaller
+    residual, so no chain NH-DMRG solves is worse off. H= is refused as
     on the NH-DMRG route, through it."""
     from . import nhdmrg as fnh
     if "H" in kwargs or not available(self):
@@ -253,7 +267,7 @@ def gs_energy_imaginary_time(self, **kwargs):
     H = self.hamiltonian
     try:
         E, psil, psir = ground_pair(self, H)
-    except RuntimeError as e:
+    except (RuntimeError, np.linalg.LinAlgError) as e:
         if self.verbose > 0:
             print("nhlevels: imaginary-time route failed (%r), using NH-DMRG" % (e,))
         return fnh.gs_energy_nhdmrg(self, **kwargs)
@@ -262,7 +276,19 @@ def gs_energy_imaginary_time(self, **kwargs):
     if not (resid < tol):
         if self.verbose > 0:
             print("nhlevels: imaginary-time pair at relative residual",
-                  resid, "above", tol, "- using NH-DMRG")
-        return fnh.gs_energy_nhdmrg(self, **kwargs)
+                  resid, "above", tol, "- trying NH-DMRG")
+        # NH-DMRG's best attempt, and the better of the two pairs is kept:
+        # on the 16-site PT chain at maxm=30 the imaginary-time pair
+        # missed the tolerance and NH-DMRG stalled further off, 3.3e-2. A
+        # pair kept above the tolerance is marked unconverged and warns
+        # (store_nh_pair), as NH-DMRG's own is.
+        known = ("krylovdim", "restarts", "tol", "ntries")
+        E2, psil2, psir2 = fnh.nhdmrg(self, **{k: v for k, v in kwargs.items()
+                                               if k in known})
+        resid2, tol2 = self._nh_last_residual
+        if resid2 <= resid:
+            return fnh.store_nh_pair(self, E2, psil2, psir2)
+        print("Warning: the imaginary-time pair, at relative residual "
+              + str(resid) + ", is kept over NH-DMRG's")
     self._nh_last_residual = (resid, tol)
     return fnh.store_nh_pair(self, E, psil, psir)

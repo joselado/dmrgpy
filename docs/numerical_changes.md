@@ -2050,9 +2050,10 @@ builds. `julia_live` is unchanged.
 
 `gs_energy()` and `get_gs()` on a non-Hermitian Hamiltonian with
 `mode="DMRG"` on `itensor_version=3` and `"python"` now solve by
-imaginary time (`nh_gs_method="imaginary_time"`, `nhlevels.py`) and use
-NH-DMRG only when that pair fails the residual check, or on a backend
-without the route (v2, `julia_live`, a conserved sector). Where NH-DMRG
+imaginary time (`nh_gs_method="imaginary_time"`, `nhlevels.py`). When
+that pair fails the residual check NH-DMRG runs too and the pair of
+smaller residual is kept; a backend without the route (v2, `julia_live`,
+a conserved sector) uses NH-DMRG as before. Where NH-DMRG
 converged the eigenvalue is the same, within the residual check
 ($10^{-14}$ to $10^{-7}$ against ED on the `tests/test_nh_dmrg.py`
 models and the 10-site PT-symmetric XX chain). The stored right and left

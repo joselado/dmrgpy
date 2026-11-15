@@ -236,12 +236,13 @@ def test_nhdmrg_pt_symmetric_spin_chain(version):
 
 
 @pytest.mark.parametrize("version", VERSIONS)
-def test_gs_energy_routes_to_nhdmrg(version):
-    """For a non-Hermitian Hamiltonian, gs_energy() runs NH-DMRG
-    (groundstate.py's non-Hermitian branch) instead of the Arnoldi route,
-    stores the right eigenvector as wf0, and returns the
-    smallest-real-part eigenvalue. On the session backends (v2, v3, pure
-    Python) that means nhdmrg.py's driver; julia_live reaches the same
+def test_gs_energy_routes_to_the_nh_solver(version):
+    """For a non-Hermitian Hamiltonian, gs_energy() runs a non-Hermitian
+    solver (groundstate.py's non-Hermitian branch) instead of the Arnoldi
+    route, stores the right eigenvector as wf0, and returns the
+    smallest-real-part eigenvalue. On v3 and pure Python that is the
+    imaginary-time route of nhlevels.py by default (nh_gs_method), with
+    NH-DMRG behind it, and on v2 nhdmrg.py's driver; julia_live reaches the same
     ITensorNHDMRG.jl solver through its own, older branch in
     groundstate.py (mpsjulialive/groundstate.py's get_gs_dmrg with
     ishermitian=False), which keeps only the right eigenvector -- the

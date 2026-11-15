@@ -583,8 +583,9 @@ Do not undo one without reading its finding first.
   `nh_gs_method` (a setting, in `method_key`) defaults to
   `"imaginary_time"`: `nhlevels.py` on v3 and `"python"` without a
   sector, its pair checked by `nhdmrg()`'s own certificate and stored by
-  `nhdmrg.store_nh_pair`, with `gs_energy_nhdmrg` as the fallback for a
-  failed check and for every other backend; `mode="ED"` is untouched. Its
+  `nhdmrg.store_nh_pair`; a failed check runs `nhdmrg()` and keeps the
+  pair of smaller residual, a raised route and every other backend go to
+  `gs_energy_nhdmrg`; `mode="ED"` is untouched. Its
   grid is in units of the largest coefficient off the identity, since an
   offset as the unit leaves nothing projected. `get_nh_levels()` returns
   the accepted Ritz pairs (`test_nh_levels.py`).
@@ -607,9 +608,10 @@ sector solves going wrong between 56 and 80 sites at `maxm=128`, and
 `maxm=128`), and the lead of its finding 3, fixed at 10 sites: on the
 PT-symmetric XX chain, several eigenvalues with one real part, one
 NH-DMRG attempt in three still stalls at 12 sites and the attempts stall
-at 14 (ITensorNHDMRG.jl does worse), while implicit imaginary-time steps
-with H plus a Rayleigh-Ritz on the late states find every distinct level
-of smallest real part up to 16 sites (not wired into the API);
+at 14 (ITensorNHDMRG.jl does worse), while the imaginary-time route,
+now `get_nh_levels()` and the default of `gs_energy()`, finds every
+distinct level of smallest real part up to 16 sites (its stored pair
+needs maxm=64 there, at maxm=30 neither route passes the certificate);
 the `kpm_energy_truncate` window problem outside its worst regime
 (`docs/known_issue_kpm_energy_truncation_window.md`); the sliver just below
 `kpm_scale=1/2` where the elastic line is distorted while the moments are
