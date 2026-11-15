@@ -174,7 +174,7 @@ tell a start-state problem from a solver setting.
 
 `bug` &middot; severity **MEDIUM** &middot; FIXED at 10 sites, larger chains open &middot; found by the benchmark
 
-**Status**: FIXED on 2026-11-15 on v2, v3 and `"python"`, and not in the
+**Status**: FIXED in `009d141` on 2026-11-15 on v2, v3 and `"python"`, and not in the
 way the suggested fix below proposes, since the reading in this finding
 was wrong. The fidelity isometry is not the cause: `julia_live` runs
 ITensorNHDMRG.jl with `biorthoalg="fidelity"` too
