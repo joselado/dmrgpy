@@ -2012,3 +2012,17 @@ no bond to place the operands along; they now return the sum of the site
 tensors, as the density-matrix route already did. `mpo_is_hermitian`
 builds on it, so on one site it no longer reports a Hermitian MPO as
 non-Hermitian. Chains of two sites or more are unchanged.
+
+## The 2026-11-15 four-point tensor of `itensor_version=3` in a sector
+
+`get_four_correlation_tensor` on a v3 chain with a conserved sector
+aborted the whole process (ITensor's "Mismatched QN Index arrows") on its
+default route for spinless fermion sites, `ctmode="sweep"`, and on
+`ctmode="fold"` for native spinful sites: the closing delta at the right
+end took its link from the tensor already folded, with the ket's own
+arrow. It now takes it from the next tensor, and in an `Nf=3` sector the
+two routes equal `ctmode="explicit"` to $10^{-15}$; without a sector
+nothing changes, since a dense index has no arrow. `ctmode="full"`,
+one raw AutoMPO per tuple, aborted inside ITensor on spinless sites in any
+sector and on native spinful sites when $S^z$ is conserved; it now raises
+`ValueError` there and names the route that works.

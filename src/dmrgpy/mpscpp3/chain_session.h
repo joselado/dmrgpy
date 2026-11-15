@@ -2795,6 +2795,14 @@ class Chain
     std::vector<std::complex<double>>
     four_correlation_tensor(MPS const& wf, bool accelerate=true) const
         {
+        // One raw AutoMPO per tuple, which ITensor aborts the process on
+        // under quantum numbers ("Index does not contain given QN block");
+        // four_correlation_tensor_sweep is the same tensor and handles them.
+        if (has_sector_)
+            throw std::invalid_argument(tinyformat::format(
+                "Chain::four_correlation_tensor (ctmode=\"full\") does not "
+                "support conserved-sector mode (%s); use ctmode=\"sweep\" "
+                "(the default here) or \"explicit\"",sector_string()));
         int N = sites_.length();
         std::vector<std::complex<double>> out(N*N*N*N,0.0);
         auto idx = [N](int i,int j,int k,int l) { return ((i*N+j)*N+k)*N+l; };
@@ -2860,6 +2868,16 @@ class Chain
     std::vector<std::complex<double>>
     four_correlation_tensor_spinful(MPS const& wf, bool accelerate=true) const
         {
+        // The tuples that flip a spin change Sz, and their raw AutoMPO
+        // aborts the process when Sz is conserved ("Index does not contain
+        // given QN block"); an Nf sector alone is fine, and so is
+        // four_correlation_tensor_fold in both.
+        for (auto const& sq : sector_)
+            if (sq.first=="Sz")
+                throw std::invalid_argument(tinyformat::format(
+                    "Chain::four_correlation_tensor_spinful (ctmode=\"full\") "
+                    "does not support a sector that conserves Sz (%s); use "
+                    "ctmode=\"fold\" (the default here)",sector_string()));
         int Ns = sites_.length(); // number of physical (Electron) sites
         int N = 2*Ns; // number of flat fermionic modes
         std::vector<std::complex<double>> out(N*N*N*N,0.0);
@@ -3118,7 +3136,10 @@ class Chain
                                         ITensor Labcd = fold(LabcdRunning,d,false,opD);
                                         if (d<N)
                                             {
-                                            auto rn = commonIndex(psi.A(d),psi.A(d+1));
+                                            // the link as psi.A(d+1) holds it, so the
+                                            // delta meets the ket's with the opposite
+                                            // arrow (a QN sector aborted on A(d)'s)
+                                            auto rn = commonIndex(psi.A(d+1),psi.A(d));
                                             Labcd = Labcd*delta(dag(prime(rn)),rn);
                                             }
                                         Cplx val = eltC(Labcd);
@@ -3241,7 +3262,7 @@ class Chain
                     }
                 if (mx<N)
                     {
-                    auto rn = commonIndex(psi.A(mx),psi.A(mx+1));
+                    auto rn = commonIndex(psi.A(mx+1),psi.A(mx)); // arrow, as above
                     E = E*delta(dag(prime(rn)),rn);
                     }
                 int ss[4] = {i,j,k,l};
@@ -3356,7 +3377,7 @@ class Chain
                     }
                 if (mx<N)
                     {
-                    auto rn = commonIndex(psi.A(mx),psi.A(mx+1));
+                    auto rn = commonIndex(psi.A(mx+1),psi.A(mx)); // arrow, as above
                     E = E*delta(dag(prime(rn)),rn);
                     }
                 int ss[4] = {factors[0].second,factors[1].second,
