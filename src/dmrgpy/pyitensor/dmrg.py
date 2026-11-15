@@ -427,11 +427,37 @@ _NOISE_RNG = np.random.default_rng(0)
 # of chain_session.h's dmrg_niter_ (see the comment there for why ITensor's
 # own default of 2 is too few). The sweep schedule's niter can raise it.
 DAVIDSON_NITER = 4
-# The excited-state (overlap-penalized) solve needs more: with 4 or 8 steps
-# the excited-state tests missed ED by up to 3e-4 and lost orthogonality at
-# 2.6e-5, while 20 steps with a 1e-8 residual stop reach ED at an average of
-# 3.6 matvecs per solve.
+# The excited-state (overlap-penalized) solve needs more on its last sweeps:
+# with 4 or 8 steps the excited-state tests missed ED by up to 3e-4 and lost
+# orthogonality at 2.6e-5, while 20 steps with a 1e-8 residual stop reach ED.
+# The budget is used in full on long chains: get_excited(n=2) on the S=1/2
+# Heisenberg chain H = 2 sum S_i.S_{i+1} (maxm=40, nsweeps=8, cutoff=1e-8)
+# took 14.0 matvecs per penalized solve on average at N=22, with 46% of the
+# solves at the cap, and 19.7 s in the penalized sweeps, against 9.3 s with
+# 8 steps and 6.8 s with 4; at N=14 7.0, 3.3 and 2.5 s; at N<=10 about 4
+# matvecs per solve whatever the budget. The accuracy on those chains was
+# unchanged at 4 steps, but a fixed budget below 20 fails the tests: at 8
+# steps the native spinful-fermion excited energies of
+# test_excited_states_pyitensor.py miss ED by more than 1e-6; at 4 steps
+# both spinful-fermion cases fail, test_returned_states_are_orthonormal sees
+# an overlap of 5.6e-5, and in a conserved sector the three lowest levels of
+# test_sector_penalty_scales.py's Sz=1 sector (two_sz=2) miss sector ED and
+# test_sector_conservation_python.py's states leave the sector
+# (<(Q-q)^2> = 9.15e-6).
 DAVIDSON_NITER_PENALIZED = 20
+# The budget can depend on the sweep (_penalized_budget): the last
+# PENALIZED_FULL_SWEEPS sweeps of dmrg_excited take DAVIDSON_NITER_PENALIZED,
+# the earlier ones DAVIDSON_NITER_PENALIZED_EARLY, with the same 1e-8
+# residual stop in every sweep. By default the two are equal, which is the
+# fixed budget exactly. A cheaper start was measured and refused: 4 steps
+# before the last 2 full sweeps took the N=22 chain above from 23.5 s to
+# 15.5 s (N=14: 8.6 s to 5.4 s, same energies), but the native
+# spinful-fermion test of test_excited_states_pyitensor.py then misses ED at
+# levels 5 and 6 (4e-3 apart) by 1.7e-5, with energy fluctuations up to
+# 6.4e-5: the cheap early sweeps leave those states where two full sweeps
+# do not bring them back.
+DAVIDSON_NITER_PENALIZED_EARLY = 20
+PENALIZED_FULL_SWEEPS = 2
 _DAVIDSON_RTOL = 1e-12
 _DAVIDSON_RTOL_PENALIZED = 1e-8
 _DAVIDSON_VTOL = 1e-14
@@ -958,12 +984,17 @@ def _bond_projections(penalty_states, left_ov, right_ov, i):
 
 
 def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, weight,
-                                  penalty=None):
+                                  penalty=None, budget=None):
     """Same as _local_ground_state, but the matvec also adds
     weight*sum_k|proj_k><proj_k| (see this section's module-level note).
     penalty, when given, is (P, PL, PLbra, PR, PRbra) as in
     _local_ground_state: a charge penalty H already contains, whose
-    diagonal is taken out of the Davidson stop scale too."""
+    diagonal is taken out of the Davidson stop scale too. budget is the
+    Davidson step budget, floored by niter; None takes
+    DAVIDSON_NITER_PENALIZED, and dmrg_excited passes _penalized_budget's
+    value for the sweep."""
+    if budget is None:
+        budget = DAVIDSON_NITER_PENALIZED
     matvec_H, order_in, shape, x0 = two_site_heff(L, Lbra, H, ket, i, R, Rbra)
     proj_flats = [p.transpose_to(order_in).reshape(-1) for p in projs]
 
@@ -1002,7 +1033,8 @@ def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, wei
         # little in practice -- most bonds still exit in far fewer than
         # 200 iterations once bond dimension saturates.
         # (The Davidson solve keeps the larger budget this floor stood for:
-        # DAVIDSON_NITER_PENALIZED steps with a 1e-8 residual stop. The
+        # DAVIDSON_NITER_PENALIZED steps with a 1e-8 residual stop on the
+        # last sweeps, fewer before them, see _penalized_budget. The
         # penalty's diagonal, weight*|proj_k|^2 elementwise, goes into the
         # preconditioner.) The stop scale is that of H alone: without the
         # overlap penalty and, in a conserved sector, without the charge
@@ -1016,11 +1048,22 @@ def _local_ground_state_penalized(L, Lbra, R, Rbra, H, ket, i, niter, projs, wei
             hdiag = hdiag - _heff_diagonal(PL, PLbra, P, i, PR, PRbra,
                                            order_in)
         eval0, evec0 = _davidson_ground_state(
-            matvec, x0, diag, max(niter, DAVIDSON_NITER_PENALIZED),
+            matvec, x0, diag, max(niter, budget),
             _DAVIDSON_RTOL_PENALIZED, hdiag=hdiag)
 
     theta = ITensor(tuple(order_in), evec0.reshape(shape))
     return float(eval0.real), theta
+
+
+def _penalized_budget(sweep_i, nsweep):
+    """Davidson step budget of dmrg_excited's sweep sweep_i (0-based) out
+    of nsweep: DAVIDSON_NITER_PENALIZED on the last PENALIZED_FULL_SWEEPS
+    sweeps, so on every sweep when nsweep <= PENALIZED_FULL_SWEEPS, and
+    DAVIDSON_NITER_PENALIZED_EARLY before them. The module values are read
+    at call time."""
+    if sweep_i >= nsweep - PENALIZED_FULL_SWEEPS:
+        return DAVIDSON_NITER_PENALIZED
+    return DAVIDSON_NITER_PENALIZED_EARLY
 
 
 def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True,
@@ -1073,20 +1116,36 @@ def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True,
     out of the Davidson stop scale, as the overlap penalty's already was:
     with it in the scale the local solves stopped on the scale of the
     charge penalty rather than of H. None, outside a sector, changes
-    nothing."""
+    nothing.
+
+    The Davidson step budget of the local solves depends on the sweep
+    (_penalized_budget, see DAVIDSON_NITER_PENALIZED): full on the last
+    PENALIZED_FULL_SWEEPS sweeps, DAVIDSON_NITER_PENALIZED_EARLY before."""
     n = psi.length()
     k_states = len(penalty_states)
     charge_penalty = penalty
     energy = None
     for sweep_i in range(sweeps.nsweep):
         maxdim, cutoff, noise, niter = sweeps.at(sweep_i)
+        budget = _penalized_budget(sweep_i, sweeps.nsweep)
 
-        right_env = _all_right_environments(H, psi)
-        right_ov = [_all_overlap_right(wk, psi) for wk in penalty_states]
+        if sweep_i == 0:
+            # Only the first sweep builds the right environments from
+            # scratch. A later sweep starts from the ones the previous
+            # backward half-sweep left: it rebuilt right_env, right_ov and
+            # pright from the n+1 sentinel down to key 2, each from
+            # psi's final tensors of that sweep, with the same
+            # _extend_right/_extend_overlap_right calls a fresh build
+            # makes, so the forward half-sweep below reads (keys 3..n+1)
+            # the same numbers. Only the dangling bra links have other
+            # ids, and nothing contracted depends on an id's value.
+            right_env = _all_right_environments(H, psi)
+            right_ov = [_all_overlap_right(wk, psi) for wk in penalty_states]
+            if charge_penalty is not None:
+                pright = _all_right_environments(charge_penalty, psi)
         left_env = {0: (None, None)}
         left_ov = [{0: None} for _ in range(k_states)]
         if charge_penalty is not None:
-            pright = _all_right_environments(charge_penalty, psi)
             pleft = {0: (None, None)}
         for i in range(1, n):
             L, Lbra = left_env[i - 1]
@@ -1096,7 +1155,8 @@ def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True,
                 pen = (charge_penalty,) + pleft[i - 1] + pright[i + 2]
             projs = _bond_projections(penalty_states, left_ov, right_ov, i)
             energy, theta = _local_ground_state_penalized(
-                L, Lbra, R, Rbra, H, psi, i, niter, projs, weight, pen)
+                L, Lbra, R, Rbra, H, psi, i, niter, projs, weight, pen,
+                budget=budget)
             _apply_local_update(psi, i, theta, cutoff, maxdim, "right")
             left_env[i] = _extend_left(L, Lbra, H, psi, i)
             if charge_penalty is not None:
@@ -1117,7 +1177,8 @@ def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True,
                 pen = (charge_penalty,) + pleft[i - 1] + pright[i + 2]
             projs = _bond_projections(penalty_states, left_ov, right_ov, i)
             energy, theta = _local_ground_state_penalized(
-                L, Lbra, R, Rbra, H, psi, i, niter, projs, weight, pen)
+                L, Lbra, R, Rbra, H, psi, i, niter, projs, weight, pen,
+                budget=budget)
             _apply_local_update(psi, i, theta, cutoff, maxdim, "left")
             right_env[i + 1] = _extend_right(R, Rbra, H, psi, i + 1)
             if charge_penalty is not None:
@@ -1126,8 +1187,6 @@ def dmrg_excited(psi, H, penalty_states, weight, sweeps, quiet=True,
                                               charge_penalty, psi, i + 1)
             for k, wk in enumerate(penalty_states):
                 right_ov[k][i + 1] = _extend_overlap_right(right_ov[k][i + 2], wk, psi, i + 1)
-        left_env = {0: (None, None)}
-        left_ov = [{0: None} for _ in range(k_states)]
 
         if not quiet:
             print("sweep {}: penalized energy = {}".format(sweep_i, energy))
