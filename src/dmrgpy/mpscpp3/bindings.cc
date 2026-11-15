@@ -237,6 +237,12 @@ PYBIND11_MODULE(_dmrgcpp, m)
              "normalized: x -> (1 + b(H-shift))^-1 (1 - b(H-shift)) x for "
              "each b in betas, by two-site sweeps with local GMRES "
              "(arXiv:2606.02930; pyitensor/implicit.py)")
+        .def("implicit_step_with",&Chain::implicit_step_with,py::arg("H"),
+             py::arg("wf"),py::arg("betas"),py::arg("shift"),
+             py::arg("shift_energy")=false,py::arg("nsweeps")=1,
+             py::arg("tol")=1E-10,py::arg("krylov")=10,py::arg("maxiter")=100,
+             "implicit_step under the MPO H (build_operator) instead of the "
+             "chain's own H")
         .def("product_mps",&Chain::product_mps,py::arg("vecs"),
              "The product state with one local vector per site")
         .def("mps_from_site_arrays",[](Chain& self,
@@ -997,6 +1003,9 @@ PYBIND11_MODULE(_dmrgcpp, m)
                 return self.overlap_aMb(wf1,terms_from_python(terms),wf2);
             }, py::arg("wf1"),py::arg("terms"),py::arg("wf2"))
         .def("sum_mps",&Chain::sum_mps,py::arg("wf1"),py::arg("wf2"))
+        .def("sum_mps_weighted",&Chain::sum_mps_weighted,py::arg("wfs"),
+             py::arg("coefs"),
+             "sum_k coefs[k]*wfs[k] in one sum at the chain's maxm/cutoff")
         .def("scale_mps",&Chain::scale_mps,py::arg("wf"),py::arg("z"),
              "Rescale an MPS by a complex number (single-tensor, no truncation)")
         .def("conjugate",&Chain::conjugate,py::arg("wf"))

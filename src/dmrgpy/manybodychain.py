@@ -177,6 +177,11 @@ class Many_Body_Chain():
           # other backend raises). Only the ground-state solve reads
           # it; the excited-state, generalized and non-Hermitian solves
           # raise under "CBE" (groundstate.require_two_site).
+      self.nh_gs_method = "nhdmrg" # how gs_energy()/get_gs() solve a
+          # non-Hermitian H on DMRG: "nhdmrg" (NH-DMRG, nhdmrg.py) or
+          # "imaginary_time" (implicit imaginary-time steps with H and a
+          # Rayleigh-Ritz on the last states, nhlevels.py; v3 and "python"
+          # without a sector, NH-DMRG elsewhere and as its fallback)
       self.cbe_delta = 0.1 # "CBE" and tevol_method="TDVP_CBE": each bond is
           # expanded to (1+cbe_delta)*maxm before a one-site update and
           # trimmed back to maxm after it (the paper's delta)
@@ -1381,6 +1386,15 @@ class Many_Body_Chain():
       biorthogonal left/right eigenvector MPS. See nhdmrg.py"""
       from .nhdmrg import nhdmrg
       return nhdmrg(self,**kwargs)
+  def get_nh_levels(self,**kwargs):
+      """The levels of smallest real part of a non-Hermitian Hamiltonian
+      (itensor_version 3 or "python"): (energies, residuals), and their
+      right eigenvectors with vectors=True, sorted by real part. Every
+      level that shares the smallest real part comes out, which NH-DMRG,
+      returning one, cannot give. Imaginary-time steps with H and a
+      Rayleigh-Ritz on the last states; see nhlevels.py"""
+      from .nhlevels import levels
+      return levels(self,**kwargs)
   def gs_energy_fluctuation(self,**kwargs):
       """Compute the energy fluctuation sqrt(|<H^2>-<H>^2|), a measure of
       how sharply the computed state is an eigenstate of H (~0 when it

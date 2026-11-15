@@ -1436,6 +1436,27 @@ class Chain
         return sum(wf1,wf2,{"MaxDim",maxm_,"Cutoff",cutoff_});
         }
 
+    // sum_k coefs[k]*wfs[k] in one ITensor sum(std::vector<MPS>) call at
+    // the chain's maxm_/cutoff_: the Ritz vectors of nhlevels.py, whose
+    // coefficients cancel between nearly parallel states, so a chain of
+    // pairwise sums would truncate the partial sums first.
+    MPS
+    sum_mps_weighted(std::vector<MPS> const& wfs,
+                     std::vector<Cplx> const& coefs) const
+        {
+        if (wfs.empty() || wfs.size()!=coefs.size())
+            throw std::invalid_argument("Chain::sum_mps_weighted: need as many coefficients as states, at least one");
+        std::vector<MPS> terms;
+        for (size_t k=0;k<wfs.size();++k)
+            {
+            MPS t = wfs[k];
+            t *= coefs[k];
+            terms.push_back(t);
+            }
+        if (terms.size()==1) return terms[0];
+        return sum(terms,{"MaxDim",maxm_,"Cutoff",cutoff_});
+        }
+
     // Rescale an MPS by a complex number. ITensor's own operator*=(MPS,Cplx)
     // multiplies a *single* site tensor (mps.cc: x.ref(x.leftLim()+1) *= z),
     // so this is O(chi^2 d) with no contraction, no bond growth and no
@@ -2131,11 +2152,12 @@ class Chain
     // (RestartIter krylov, MaxIter maxiter, relative ErrGoal tol); the
     // split back into two sites is the only truncation, at the chain's
     // cutoff_/maxm_. Returns x with its centre on site 1, not normalized.
+    // H is the session's H_ for implicit_step and any MPO on this chain's
+    // sites for implicit_step_with (the non-Hermitian levels' H^dagger).
     MPS
-    implicit_factor(MPS const& psi, Cplx beta, double shift, int nsweeps,
-                    double tol, int krylov, int maxiter) const
+    implicit_factor(MPS const& psi, MPO const& H, Cplx beta, double shift,
+                    int nsweeps, double tol, int krylov, int maxiter) const
         {
-        auto const& H = H_;
         Cplx a0 = 1.0 - beta*shift, b0 = 1.0 + beta*shift;
         MPS x = psi;
         int n = length(x);
@@ -2236,16 +2258,31 @@ class Chain
                   double shift, bool shift_energy, int nsweeps, double tol,
                   int krylov, int maxiter) const
         {
-        reject_sector("implicit_step");
         if (!have_H_) throw std::runtime_error("Chain::implicit_step called before set_hamiltonian");
+        return implicit_step_with(H_,psi,betas,shift,shift_energy,nsweeps,
+                                  tol,krylov,maxiter);
+        }
+
+    // implicit_step under a given MPO H on this chain's sites instead of
+    // the session's own: nhlevels.py steps the left state under H^dagger
+    // (built with build_operator) as pyitensor/implicit.py's implicit_step
+    // takes any H. H need not be Hermitian: the local systems are GMRES
+    // solves, and the shift is the real part of <psi|H|psi>/<psi|psi>.
+    MPS
+    implicit_step_with(MPO const& H, MPS const& psi,
+                       std::vector<Cplx> const& betas, double shift,
+                       bool shift_energy, int nsweeps, double tol,
+                       int krylov, int maxiter) const
+        {
+        reject_sector("implicit_step");
         if (length(psi)<3) throw std::invalid_argument("Chain::implicit_step needs at least 3 sites");
         if (nsweeps<1 || krylov<1 || maxiter<1)
             throw std::invalid_argument("Chain::implicit_step: nsweeps, krylov and maxiter must be >= 1");
         if (shift_energy)
-            shift = innerC(psi,H_,psi).real()/innerC(psi,psi).real();
+            shift = innerC(psi,H,psi).real()/innerC(psi,psi).real();
         MPS x = psi;
         for (auto const& b : betas)
-            x = implicit_factor(x,b,shift,nsweeps,tol,krylov,maxiter);
+            x = implicit_factor(x,H,b,shift,nsweeps,tol,krylov,maxiter);
         double nrm = std::sqrt(innerC(x,x).real());
         if (!(nrm>0.0)) throw std::runtime_error("Chain::implicit_step: the state vanished");
         x /= nrm;

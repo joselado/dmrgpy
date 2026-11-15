@@ -118,10 +118,12 @@ def require_two_site(self,where):
 
 def method_key(self):
     """The ground-state solver, as part of the send-cache key and of
-    solver_key(): a change of dmrg_method or cbe_delta between two bare
-    gs_energy() calls must give a fresh solve, as for ramp_key()."""
+    solver_key(): a change of dmrg_method, cbe_delta or nh_gs_method
+    between two bare gs_energy() calls must give a fresh solve, as for
+    ramp_key()."""
     return (getattr(self,"dmrg_method","TWO_SITE"),
-            getattr(self,"cbe_delta",0.1))
+            getattr(self,"cbe_delta",0.1),
+            getattr(self,"nh_gs_method","nhdmrg"))
 
 
 def sector_key(self):
@@ -965,6 +967,13 @@ def gs_energy(self,**kwargs):
                 # state as given, as on the Hermitian route; NH-DMRG takes
                 # no start state, so set_initial_wf_guess() still re-solves
                 return _take_injected_state(self,self.wf0)
+            method = getattr(self,"nh_gs_method","nhdmrg")
+            if method=="imaginary_time":
+                from .nhlevels import gs_energy_imaginary_time
+                return gs_energy_imaginary_time(self,**kwargs)
+            if method!="nhdmrg":
+                raise ValueError("nh_gs_method must be 'nhdmrg' or "
+                        "'imaginary_time' (got %r)" % (method,))
             from .nhdmrg import gs_energy_nhdmrg
             return gs_energy_nhdmrg(self,**kwargs)
         else: # any other backend falls back to Krylov

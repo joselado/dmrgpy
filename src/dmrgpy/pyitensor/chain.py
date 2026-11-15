@@ -23,7 +23,7 @@ from .mpobuilder import to_mpo, _bond_cutoff_factor, MPO_CUTOFF_FLOOR
 from .mpsalgebra import applyMPO, inner, nmultMPO, BatchedBras
 from .mpsalgebra import sum as mps_sum
 from .mpsalgebra import randomMPS, traceC, mpo_dagger, mpo_is_hermitian
-from .mpsalgebra import _fresh_link_copy
+from .mpsalgebra import _fresh_link_copy, sum_many
 from .metts import metts_thermal_average as _metts_thermal_average
 from .metts import metts_dynamical_correlator as _metts_dynamical_correlator
 from . import sector as sectortk
@@ -907,6 +907,20 @@ class Chain:
     def sum_mps(self, wf1, wf2):
         return mps_sum(wf1, wf2, cutoff=self.cutoff, maxdim=self.maxm)
 
+    def sum_mps_weighted(self, wfs, coefs):
+        """sum_k coefs[k]*wfs[k] in one sum_many at the chain's
+        cutoff/maxm, as mpscpp3's Chain::sum_mps_weighted (the Ritz vectors
+        of nhlevels.py, whose coefficients cancel between nearly parallel
+        states)."""
+        wfs, coefs = list(wfs), list(coefs)
+        if not wfs or len(wfs) != len(coefs):
+            raise ValueError("sum_mps_weighted: need as many coefficients "
+                             "as states, at least one")
+        terms = [w * complex(c) for w, c in zip(wfs, coefs)]
+        if len(terms) == 1:
+            return terms[0]
+        return sum_many(terms, cutoff=self.cutoff, maxdim=self.maxm)
+
     def scale_mps(self, wf, z):
         """Rescale an MPS by a complex number, mirroring
         mpscppN/chain_session.h's scale_mps(). mpscontainer.MPS.__mul__
@@ -1075,6 +1089,18 @@ class Chain:
             raise RuntimeError("Chain.implicit_step called before set_hamiltonian")
         self._reject_sector("implicit_step")
         return _implicit_step(wf, self.H, [complex(b) for b in betas],
+                              float(shift), self.cutoff, self.maxm,
+                              nsweeps=int(nsweeps), tol=float(tol),
+                              krylov=int(krylov), maxiter=int(maxiter),
+                              shift_energy=bool(shift_energy))
+
+    def implicit_step_with(self, H, wf, betas, shift, shift_energy=False,
+                           nsweeps=1, tol=1e-10, krylov=10, maxiter=100):
+        """implicit_step under the MPO H (build_operator) instead of the
+        chain's own H, as mpscpp3's Chain::implicit_step_with: nhlevels.py
+        steps the left state under H^dagger. H need not be Hermitian."""
+        self._reject_sector("implicit_step")
+        return _implicit_step(wf, H, [complex(b) for b in betas],
                               float(shift), self.cutoff, self.maxm,
                               nsweeps=int(nsweeps), tol=float(tol),
                               krylov=int(krylov), maxiter=int(maxiter),

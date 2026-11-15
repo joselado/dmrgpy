@@ -84,6 +84,30 @@ def _generalized_residual_scale(terms_h,terms_a):
     return (min(1.0,cmax) if cmax>0.0 else 1.0),0.0,s_a
 
 
+def _certificate(Hc,Hcd,up,rscale,e_id,energy,psil,psir):
+    """nhdmrg()'s eigen-residual certificate of a pair (see its
+    docstring): max(||H psir - E psir||, ||H^dagger psil - E* psil||) over
+    c + |E - e_id|, formed at the unit scale up (Hc = up*H, Hcd its
+    adjoint). Shared with nhlevels.py's imaginary-time route."""
+    # at unit scale: up*(H psir - E psir), divided by up*(c + |E-e_id|)
+    eu = energy*up
+    r = Hc*psir - eu*psir
+    l = Hcd*psil - eu.conjugate()*psil
+    return max(abs(r.dot(r))**0.5,abs(l.dot(l))**0.5)/(
+            up*(rscale+abs(energy-e_id)))
+
+
+def certificate_scales(H):
+    """(Hc, Hcd, up, rscale, e_id) for _certificate, as nhdmrg() forms
+    them from H (see its docstring)."""
+    Hd = H.get_dagger()
+    terms = H.to_terms()
+    rscale,e_id = _residual_scale(terms)
+    up = _unit_scale_up(_max_abs_coef(terms))
+    Hc,Hcd = (H,Hd) if up==1.0 else (up*H,up*Hd)
+    return Hc,Hcd,up,rscale,e_id
+
+
 def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
     """Run non-Hermitian DMRG on a session-backend chain. Returns
     (energy,psil,psir) with energy the (complex) eigenvalue of smallest
@@ -218,12 +242,7 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
                 print("nhdmrg attempt",i,"raised",repr(e),
                       "-- retrying with a fresh random start")
             continue
-        # at unit scale: up*(H psir - E psir), divided by up*(c + |E-e_id|)
-        eu = energy*up
-        r = Hc*psir - eu*psir
-        l = Hcd*psil - eu.conjugate()*psil
-        resid = max(abs(r.dot(r))**0.5,abs(l.dot(l))**0.5)/(
-                up*(rscale+abs(energy-e_id)))
+        resid = _certificate(Hc,Hcd,up,rscale,e_id,energy,psil,psir)
         if best is None or resid<best[0]:
             best = (resid,energy,psil,psir)
         if resid<tol: break
@@ -509,6 +528,15 @@ def gs_energy_nhdmrg(self,**kwargs):
         print("nhdmrg: ignoring keyword arguments",ignored,
               "(not NH-DMRG parameters)")
     e0,psil,psir = nhdmrg(self,**passed)
+    return store_nh_pair(self,e0,psil,psir)
+
+
+def store_nh_pair(self,e0,psil,psir):
+    """Store a solved biorthogonal pair as the chain's ground state, the
+    way every non-Hermitian gs_energy() route does (gs_energy_nhdmrg above,
+    nhlevels.gs_energy_imaginary_time): e0, the unit-norm right state as
+    wf0, the left one as nh_left_wf paired with it, and the residual of
+    self._nh_last_residual as the unconverged mark. Returns e0."""
     self.computed_gs = True
     from .groundstate import solver_key
     self._gs_solver_key = solver_key(self) # see groundstate.gs_is_current
