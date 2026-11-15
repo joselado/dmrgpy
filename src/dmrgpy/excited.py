@@ -66,6 +66,34 @@ def get_excited_states_dmrg(self,n=2,noise=0.0,scale=10.0):
     return np.array(energies),wfs
 
 
+def get_excited_states_sa(self,n=2,nguard=0):
+    """
+    Excited states by state-averaged two-site DMRG (pyitensor/sadmrg.py):
+    the n lowest eigenstates in one sweep sequence, one MPS whose center
+    carries a state index, no overlap penalty and no ground state solved
+    first. nguard solves n+nguard states and returns the n lowest, for an n
+    that would cut a degenerate level. Only itensor_version="python" has
+    it; the states come back orthonormal and diagonal in H in their span,
+    so there is no purification step.
+    """
+    if self.itensor_version!="python":
+        raise NotImplementedError(
+            "method=\"state_averaged\" is implemented only for "
+            "itensor_version=\"python\" (this chain uses %s); switch with "
+            "setup_python() or use the default method=\"penalty\""
+            %repr(self.itensor_version))
+    from .groundstate import _session_parameters, send_hamiltonian
+    _session_parameters(self)
+    send_hamiltonian(self) # H on the session, without solving a ground state
+    energies,fluctuations,handles = self._session.excited_states_sa(n,nguard)
+    _warn_unconverged_excited_states(energies,fluctuations)
+    wfs = [mps.MPS(MBO=self,cpp_handle=h).copy() for h in handles]
+    return np.array(energies),wfs
+
+
+EXCITED_METHODS = ("penalty","state_averaged")
+
+
 def get_excited(*args,**kwargs):
     """Return the excited state energies"""
     (es,ws) = get_excited_states(*args,**kwargs)
@@ -81,8 +109,14 @@ def remove_none(ws):
 
 
 
-def get_excited_states(self,n=2,purify=True,**kwargs):
-    """Excited states"""
+def get_excited_states(self,n=2,purify=True,method="penalty",**kwargs):
+    """Excited states. method="penalty" (the default) is the overlap-penalty
+    search, one DMRG per state; method="state_averaged" is state-averaged
+    DMRG on itensor_version="python" (get_excited_states_sa), which takes
+    nguard= and no other keyword."""
+    if method not in EXCITED_METHODS:
+        raise ValueError("get_excited_states: unknown method %r, expected "
+                         "one of %s"%(method,EXCITED_METHODS))
     # A request for more states than the Hilbert space holds has no answer
     # and no clean failure: the non-Hermitian Krylov route in particular
     # spins for minutes printing "state is not normalizable" once it runs
@@ -108,6 +142,13 @@ def get_excited_states(self,n=2,purify=True,**kwargs):
             "get_excited_states: asked for %d states, but this chain's "
             "Hilbert space has dimension %d"%(n,dim))
     H = self.hamiltonian # make a check
+    if method=="state_averaged":
+        # before the n==1 shortcut and the purify branch, so that n=1 runs
+        # the state-averaged solve too
+        if not self.is_hermitian(H):
+            raise ValueError("method=\"state_averaged\" needs a Hermitian "
+                             "Hamiltonian")
+        return get_excited_states_sa(self,n=n,**kwargs)
     if not self.is_hermitian(H): # non-Hermitian Hamiltonians
         if n==1 and self.itensor_version in (2,3,"python","julia_live"):
             # ground state only: use the same NH-DMRG solve gs_energy()

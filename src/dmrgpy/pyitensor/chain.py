@@ -839,6 +839,29 @@ class Chain:
             wavefunctions.append(wf)
         return energies, fluctuations, wavefunctions
 
+    def excited_states_sa(self, n, nguard=0):
+        """The n lowest eigenstates by state-averaged two-site DMRG
+        (sadmrg.py), from a fresh random MPS with the excited_states()
+        schedule. Same return shape as excited_states(). Leaves the
+        session's ground state (wf0) and its caches untouched, and solves
+        no ground state first. Refuses a conserved sector."""
+        if not self.have_H:
+            raise RuntimeError("Chain.excited_states_sa called before set_hamiltonian")
+        if self.sector:
+            raise NotImplementedError(
+                "state-averaged DMRG does not support a conserved sector yet; "
+                "clear it with set_conserved_sector() or use the overlap-penalty "
+                "route")
+        from .sadmrg import dmrg_state_averaged
+        _, wfs = dmrg_state_averaged(self._default_mps(), self.H, n,
+                                     self._make_sweeps(),
+                                     quiet=not self.verbose, nguard=nguard)
+        energies, fluctuations = [], []
+        for wf in wfs:
+            fluctuations.append(self._energy_fluctuation(wf, self.H))
+            energies.append(inner(wf, self.H, wf).real)
+        return energies, fluctuations, wfs
+
     def vev(self, terms, wf, npow=1):
         self._check_wf_sites(wf, "vev")
         A = self._mpo(terms)
