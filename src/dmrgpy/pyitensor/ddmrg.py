@@ -85,14 +85,19 @@ def _fresh_copy(chain):
 
 def _overlap_left(L, x, b, i):
     """One more site of the left environment <x_{<=i}|b_{<=i}>: free
-    indices are (x's right link, b's right link)."""
-    piece = dag(x.A(i)) * b.A(i)
-    return piece if L is None else L * piece
+    indices are (x's right link, b's right link). The environment is
+    contracted with b first and then with the bra (makeL! of
+    ITensorMPS.jl), d*chi^3, never through the four-link product
+    dag(x.A(i)) * b.A(i) (d*chi^4)."""
+    if L is None:
+        return dag(x.A(i)) * b.A(i)
+    return dag(x.A(i)) * (L * b.A(i))
 
 
 def _overlap_right(R, x, b, i):
-    piece = dag(x.A(i)) * b.A(i)
-    return piece if R is None else piece * R
+    if R is None:
+        return dag(x.A(i)) * b.A(i)
+    return dag(x.A(i)) * (b.A(i) * R)
 
 
 def _all_overlap_right(x, b):

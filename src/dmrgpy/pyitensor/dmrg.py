@@ -893,13 +893,18 @@ def dmrg_generalized(psi, H, A, sweeps, quiet=True, lam0=None, penalty=None):
 # wfs_k's tensors is safe.
 
 def _extend_overlap_left(L, wfs_k, psi, i):
-    piece = dag(wfs_k.A(i)) * psi.A(i)
-    return piece if L is None else L * piece
+    # Environment first, then psi, then the bra (makeL! of ITensorMPS.jl):
+    # d*chi^3, where dag(wfs_k.A(i)) * psi.A(i) alone has four link legs
+    # (d*chi^4). Free indices stay (wfs_k's link, psi's link).
+    if L is None:
+        return dag(wfs_k.A(i)) * psi.A(i)
+    return dag(wfs_k.A(i)) * (L * psi.A(i))
 
 
 def _extend_overlap_right(R, wfs_k, psi, i):
-    piece = dag(wfs_k.A(i)) * psi.A(i)
-    return piece if R is None else piece * R
+    if R is None:
+        return dag(wfs_k.A(i)) * psi.A(i)
+    return dag(wfs_k.A(i)) * (psi.A(i) * R)
 
 
 def _all_overlap_right(wfs_k, psi):

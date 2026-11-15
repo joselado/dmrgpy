@@ -67,13 +67,18 @@ def _fresh_copy(chain):
 
 
 def _overlap_left(L, x, b, i):
-    piece = dag(x.A(i)) * b.A(i)
-    return piece if L is None else L * piece
+    # Environment first, then b, then the bra (makeL! of ITensorMPS.jl):
+    # d*chi^3, where dag(x.A(i)) * b.A(i) alone has four link legs
+    # (d*chi^4). Free indices stay (x's link, b's link).
+    if L is None:
+        return dag(x.A(i)) * b.A(i)
+    return dag(x.A(i)) * (L * b.A(i))
 
 
 def _overlap_right(R, x, b, i):
-    piece = dag(x.A(i)) * b.A(i)
-    return piece if R is None else piece * R
+    if R is None:
+        return dag(x.A(i)) * b.A(i)
+    return dag(x.A(i)) * (b.A(i) * R)
 
 
 def _local_overlap(Lov, Rov, b, i, order_in):
