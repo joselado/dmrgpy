@@ -11,9 +11,10 @@ On the MPS backends the product is computed by recursive sketched
 interpolation (pyitensor/rsi.py, arXiv:2602.17974), or exactly by the
 Kronecker product of the site tensors followed by an SVD compression. The
 kernel runs on the site arrays, so it is the same code for
-itensor_version=3 and "python"; the arrays come out of and go back into
-the session (mps_site_arrays, mps_from_site_arrays). mode="ED" multiplies
-the dense vectors.
+itensor_version=3, "python" and "julia_live"; the arrays come out of and
+go back into the session (mps_site_arrays, mps_from_site_arrays), or the
+Julia MPS (mpsjulialive/arrays.jl). mode="ED" multiplies the dense
+vectors.
 """
 
 import numpy as np
@@ -21,22 +22,90 @@ import numpy as np
 from .. import mps
 
 
+class _SessionStates:
+    """Site arrays in and out of a v3 or "python" session."""
+
+    def __init__(self, chain, session):
+        self.chain = chain
+        self.session = session
+
+    def arrays(self, wf, conj):
+        arrs = [np.asarray(a) for a in
+                self.session.mps_site_arrays(wf.cpp_handle)]
+        return [a.conj() for a in arrs] if conj else arrs
+
+    def to_mps(self, arrays):
+        handle = self.session.mps_from_site_arrays(_host(arrays))
+        return mps.MPS(self.chain, cpp_handle=handle).copy()
+
+    def compress(self, wf, maxm):
+        """An exact (in bond dimension) state compressed by SVD to the
+        chain's cutoff and at most maxm states per bond: the sum of the
+        state with zero, which every session truncates the way sum_mps
+        does."""
+        chain, session = self.chain, self.session
+        session.set_sweep_params(int(maxm), chain.nsweeps, chain.cutoff,
+                                 chain.noise)
+        try:
+            zero = session.scale_mps(wf.cpp_handle, 0.0)
+            handle = session.sum_mps(wf.cpp_handle, zero)
+        finally:
+            session.set_sweep_params(chain.maxm, chain.nsweeps, chain.cutoff,
+                                     chain.noise)
+        return mps.MPS(chain, cpp_handle=handle).copy()
+
+
+class _JuliaStates:
+    """Site arrays in and out of a julia_live MPS (mpsjulialive/arrays.jl),
+    on the chain's own Julia site indices."""
+
+    def __init__(self, chain):
+        from ..mpsjulialive.juliasession import Main
+        self.chain = chain
+        self.Main = Main
+
+    def arrays(self, wf, conj):
+        arrs = [np.asarray(a) for a in self.Main.mps_site_arrays(wf.jlmps)]
+        return [a.conj() for a in arrs] if conj else arrs
+
+    def to_mps(self, arrays):
+        from ..mpsalgebra import _julia_mps
+        return _julia_mps(self.chain, self.Main.mps_from_site_arrays(
+                _host(arrays), self.chain.jlsites))
+
+    def compress(self, wf, maxm):
+        from ..mpsalgebra import _julia_mps
+        return _julia_mps(self.chain, self.Main.compress_mps(wf.jlmps,
+                int(maxm), float(self.chain.cutoff)))
+
+
+def _host(arrays):
+    from ..pyitensor import backend as bk
+    return [np.ascontiguousarray(bk.to_host(a), dtype=complex)
+            for a in arrays]
+
+
 def _check_session(self, wfs, where):
-    from ..mpsalgebra import _is_julia
-    if any(_is_julia(wf) for wf in wfs):
-        raise NotImplementedError(where+" is not available on "
-                "itensor_version='julia_live'; use itensor_version=3, "
-                "'python', or mode='ED'")
-    session = getattr(self, "_session", None)
-    if session is None or not hasattr(session, "mps_from_site_arrays"):
-        raise NotImplementedError(where+" needs itensor_version=3 or "
-                "'python' (got itensor_version=%r); use mode='ED' for a "
-                "small chain" % (self.itensor_version,))
+    """The array bridge of the chain's backend, after the checks every
+    backend shares."""
     if getattr(self, "conserved_sector", None):
         raise ValueError("conserved-sector mode (%s): %s works on dense "
                 "sites only; clear the sector with set_conserved_sector()"
                 % (self.conserved_sector, where))
-    return session
+    from ..mpsalgebra import _is_julia
+    julia = [_is_julia(wf) for wf in wfs]
+    if any(julia):
+        if not all(julia) or self.itensor_version != "julia_live":
+            raise ValueError(where+": the wavefunctions belong to "
+                             "different backends")
+        return _JuliaStates(self)
+    session = getattr(self, "_session", None)
+    if (self.itensor_version == "julia_live" or session is None
+            or not hasattr(session, "mps_from_site_arrays")):
+        raise NotImplementedError(where+" needs itensor_version=3, "
+                "'python' or 'julia_live' (got itensor_version=%r); use "
+                "mode='ED' for a small chain" % (self.itensor_version,))
+    return _SessionStates(self, session)
 
 
 def _conj_flags(conj, n):
@@ -47,34 +116,6 @@ def _conj_flags(conj, n):
         raise ValueError("conj= needs one flag per wavefunction (got %d "
                          "flags for %d wavefunctions)" % (len(flags), n))
     return flags
-
-
-def _arrays(session, wf, conj):
-    arrs = [np.asarray(a) for a in session.mps_site_arrays(wf.cpp_handle)]
-    return [a.conj() for a in arrs] if conj else arrs
-
-
-def _to_mps(self, session, arrays):
-    from ..pyitensor import backend as bk
-    host = [np.ascontiguousarray(bk.to_host(a), dtype=complex)
-            for a in arrays]
-    handle = session.mps_from_site_arrays(host)
-    return mps.MPS(self, cpp_handle=handle).copy()
-
-
-def _compress(self, wf, maxm):
-    """An exact (in bond dimension) state compressed by SVD to the chain's
-    cutoff and at most maxm states per bond: the sum of the state with
-    zero, which every session truncates the way sum_mps does."""
-    session = self._session
-    session.set_sweep_params(int(maxm), self.nsweeps, self.cutoff, self.noise)
-    try:
-        zero = session.scale_mps(wf.cpp_handle, 0.0)
-        handle = session.sum_mps(wf.cpp_handle, zero)
-    finally:
-        session.set_sweep_params(self.maxm, self.nsweeps, self.cutoff,
-                                 self.noise)
-    return mps.MPS(self, cpp_handle=handle).copy()
 
 
 def hadamard_product(self, *wfs, conj=False, method="rsi", maxm=None,
@@ -109,16 +150,16 @@ def hadamard_product(self, *wfs, conj=False, method="rsi", maxm=None,
             w = np.conjugate(wf.v) if c else wf.v
             v = w if v is None else v*w
         return State(v, wfs[0].MBO)
-    session = _check_session(self, wfs, "hadamard_product")
+    states = _check_session(self, wfs, "hadamard_product")
     if maxm is None: maxm = self.maxm
-    tts = [_arrays(session, wf, c) for wf, c in zip(wfs, flags)]
+    tts = [states.arrays(wf, c) for wf, c in zip(wfs, flags)]
     from ..pyitensor import rsi
     if method == "rsi":
-        return _to_mps(self, session, rsi.hadamard_arrays(tts, maxm,
+        return states.to_mps(rsi.hadamard_arrays(tts, maxm,
                 tol=tol, oversampling=oversampling, seed=seed))
     elif method == "direct":
-        exact = _to_mps(self, session, rsi.kronecker_arrays(tts))
-        return _compress(self, exact, maxm)
+        exact = states.to_mps(rsi.kronecker_arrays(tts))
+        return states.compress(exact, maxm)
     raise ValueError("hadamard_product: method must be 'rsi' or 'direct' "
                      "(got %r)" % (method,))
 
@@ -136,11 +177,11 @@ def elementwise_map(self, wf, func, maxm=None, tol=1e-12, oversampling=8,
     if wavefunction_mode(wf, mode=mode) == "ED":
         from ..edtk.edchain import State
         return State(np.asarray(func(wf.v), dtype=complex), wf.MBO)
-    session = _check_session(self, [wf], "elementwise_map")
+    states = _check_session(self, [wf], "elementwise_map")
     if maxm is None: maxm = self.maxm
     from ..pyitensor import rsi
-    return _to_mps(self, session, rsi.hadamard_arrays(
-            [_arrays(session, wf, False)], maxm, tol=tol,
+    return states.to_mps(rsi.hadamard_arrays(
+            [states.arrays(wf, False)], maxm, tol=tol,
             oversampling=oversampling, seed=seed, func=func))
 
 

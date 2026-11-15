@@ -1,15 +1,26 @@
 """Elementwise (Hadamard) products of MPS by recursive sketched
 interpolation (arXiv:2602.17974, pyitensor/rsi.py), the public
 hadamard_product/elementwise_map/get_participation_entropy built on it, on
-itensor_version=3 and "python"."""
+itensor_version=3, "python" and "julia_live"."""
 import numpy as np
 import pytest
 
 from dmrgpy import spinchain
 from dmrgpy.pyitensor import rsi
 from dmrgpy import cppext
+from _helpers import julia_live_param
 
-BACKENDS = ["python"] + ([3] if cppext.available(3) else [])
+BACKENDS = (["python"] + ([3] if cppext.available(3) else [])
+            + [julia_live_param()])
+
+
+def _dense(sc, wf):
+    """The dense amplitudes of an MPS of any backend, from its site arrays"""
+    if hasattr(wf, "jlmps"):
+        from dmrgpy.mpsjulialive.juliasession import Main
+        return rsi.dense_vector([np.asarray(a) for a in
+                                 Main.mps_site_arrays(wf.jlmps)])
+    return rsi.dense_vector(sc._session.mps_site_arrays(wf.cpp_handle))
 
 
 def _random_tt(rng, n, d, chi):
@@ -71,13 +82,12 @@ def test_probability_of_a_ground_state(backend):
     dense product with the bond dimension and sums to one."""
     sc = _heisenberg(10, backend)
     wf = sc.get_gs()
-    s = sc._session
-    psi = rsi.dense_vector(s.mps_site_arrays(wf.cpp_handle))
+    psi = _dense(sc, wf)
     pex = np.abs(psi)**2
     errs = []
     for maxm in (6, 12, 64):
         p = sc.hadamard_product(wf, wf, conj=(True, False), maxm=maxm)
-        pv = rsi.dense_vector(s.mps_site_arrays(p.cpp_handle))
+        pv = _dense(sc, p)
         errs.append(np.linalg.norm(pv-pex)/np.linalg.norm(pex))
     # it converges with the bond dimension, to rounding once maxm holds p
     assert errs[0] > 10*errs[1]
@@ -86,7 +96,7 @@ def test_probability_of_a_ground_state(backend):
     assert pv.sum().real == pytest.approx(1.0, abs=1e-10)
     pd = sc.hadamard_product(wf, wf, conj=(True, False), method="direct",
                              maxm=64)
-    pdv = rsi.dense_vector(s.mps_site_arrays(pd.cpp_handle))
+    pdv = _dense(sc, pd)
     assert np.linalg.norm(pdv-pex) < 1e-4*np.linalg.norm(pex)
 
 
@@ -103,9 +113,9 @@ def test_participation_entropy_against_ED(backend):
 def test_elementwise_map_and_ED_mode(backend):
     sc = _heisenberg(8, backend)
     wf = sc.get_gs()
-    psi = rsi.dense_vector(sc._session.mps_site_arrays(wf.cpp_handle))
+    psi = _dense(sc, wf)
     g = sc.elementwise_map(wf, lambda x: x**2, maxm=64)
-    gv = rsi.dense_vector(sc._session.mps_site_arrays(g.cpp_handle))
+    gv = _dense(sc, g)
     assert np.linalg.norm(gv-psi**2) < 1e-10*np.linalg.norm(psi**2)
     we = sc.get_gs(mode="ED")
     pe = sc.hadamard_product(we, we, conj=(True, False))

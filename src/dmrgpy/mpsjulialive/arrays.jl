@@ -52,3 +52,42 @@ function mps_mpo_mps(a,M,b)
 	# <a|M|b>, a conjugated
 	return inner(a',M,b)
 end
+
+
+# The inverse of mps_site_arrays: an MPS on the site indices `sites` from
+# arrays of shape (left link, site, right link), length-1 axes at the open
+# ends, as pyitensor/rsi.py returns them (mpsalgebratk/hadamard.py). New
+# link indices are made for every bond. Dense sites only, as the export.
+function mps_from_site_arrays(arrays,sites)
+	n = length(sites)
+	length(arrays) == n || error("mps_from_site_arrays: $(length(arrays)) "*
+		"arrays for $n sites")
+	links = [Index(size(arrays[i],3),"Link,l=$i") for i=1:n-1]
+	psi = MPS(n)
+	for i=1:n
+		A = ComplexF64.(Array(arrays[i]))
+		size(A,2) == dim(sites[i]) || error("mps_from_site_arrays: site "*
+			"$i has dimension $(dim(sites[i])), the array $(size(A,2))")
+		inds_i = Index[]
+		shape = Int[]
+		if i > 1
+			size(A,1) == dim(links[i-1]) || error("mps_from_site_arrays: "*
+				"bond $(i-1) does not match")
+			push!(inds_i,links[i-1]); push!(shape,size(A,1))
+		end
+		push!(inds_i,sites[i]); push!(shape,size(A,2))
+		if i < n
+			push!(inds_i,links[i]); push!(shape,size(A,3))
+		end
+		psi[i] = ITensor(reshape(A,shape...),inds_i...)
+	end
+	return psi
+end
+
+
+# psi compressed by SVD to at most maxdim states per bond and the
+# truncation cutoff, for the exact Kronecker product of
+# mpsalgebratk/hadamard.py's method="direct"
+function compress_mps(psi,maxdim,cutoff)
+	return truncate(psi;maxdim=maxdim,cutoff=cutoff)
+end

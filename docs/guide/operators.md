@@ -107,7 +107,7 @@ tolerance, as it can for an $A$ with eigenvalues of both signs.
 `sc.inverse_nsweeps` is the largest number of sweeps (default 10).
 
 The elementwise products are taken in the computational basis $s$ of the
-sites. On `itensor_version=3` and `"python"` they use recursive sketched
+sites. On `itensor_version=3`, `"python"` and `"julia_live"` they use recursive sketched
 interpolation (arXiv:2602.17974), with `maxm=` the bond dimension of the
 result; `method="direct"` is the exact product compressed by SVD, more
 accurate and more expensive. `elementwise_map` is the extension of the
