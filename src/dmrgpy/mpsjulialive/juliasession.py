@@ -77,6 +77,7 @@ def initialize():
     files += ["fourpoint.jl"] # four-point tensor, environment-reuse walk
     files += ["cbe.jl"] # one-site DMRG with controlled bond expansion;
                          # uses only ITensors/ITensorMPS
+    files += ["clik.jl"] # CLIK-MPS seeded starts and expansion; uses only ITensors/ITensorMPS
     # ITensorNHDMRG.jl is a copy in this folder (ITensorNHDMRG/UPSTREAM.md),
     # since its compat entry refuses ITensorMPS 0.4. It is included as a
     # file, so that its own include() calls resolve next to it, and before

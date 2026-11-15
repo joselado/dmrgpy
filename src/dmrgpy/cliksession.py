@@ -1,4 +1,5 @@
-"""CLIK-MPS (arXiv:2509.07709) on a compiled session, itensor_version=3.
+"""CLIK-MPS (arXiv:2509.07709) on a compiled session, itensor_version=3,
+and on itensor_version="julia_live" through mpsjulialive/clik.py.
 
 The algorithm, its parameters, its measured defaults and the floor of its
 residuals are in pyitensor/clik.py, which is the reference: this module
@@ -17,6 +18,11 @@ it stalls at its iteration cap and the next SVD meets a NaN. The random
 starts are Gaussian MPS from a generator seeded with `seed`
 (clik_random_starts), so a run is reproducible on v3 but its starts are
 not those of "python", and its unconverged levels differ by draw.
+
+The driver below reads every MPS and MPO operation off an operations
+object: Session here for v3, mpsjulialive/clik.py's Session for
+julia_live, which runs the same driver on the Julia functions of that
+folder.
 """
 
 import numpy as np
@@ -78,6 +84,19 @@ class Session:
 
     def apply(self, A, psi):
         return self.s.apply_pure_operator(A, psi)
+
+    def random_starts(self, m, seed):
+        return self.s.clik_random_starts(m, seed)
+
+    def product_state(self, vecs):
+        return self.s.product_mps([list(np.asarray(v, dtype=complex))
+                                   for v in vecs])
+
+    def identity_mps(self):
+        return self.s.doubled_identity_mps()
+
+    def sector_identity_mps(self, q):
+        return self.s.sector_identity_mps(q)
 
 
 def _step(ops, psi, G, z, niter, substeps=1):
@@ -251,34 +270,34 @@ def is_left_zero_mode(ops, G, d, rtol=1e-10):
 def krylov_spectrum(chain, Gop, hermitian, nk=20, dt=0.5, alpha=None,
                     gram_tol=1e-12, seed=0, start_maxdim=10, niter=50,
                     starts=None, exact_residuals=False, traceless=False,
-                    sector_charge=None, substeps=1):
+                    sector_charge=None, substeps=1, ops=None):
     """clik.krylov_spectrum, together with pyitensor Chain.krylov_spectrum's
     choice of the deflation vector, for the MultiOperator Gop on the v3
     chain `chain`. `hermitian` is whether Gop is Hermitian (the caller
     proves it on the MultiOperator). `starts` is a pair of lists of local
-    vectors, one per site. Returns a KrylovSpectrum."""
+    vectors, one per site. `ops` replaces the v3 Session, as
+    mpsjulialive/clik.py's does on julia_live. Returns a KrylovSpectrum."""
     if nk < 1:
         raise ValueError("krylov_spectrum: nk must be at least 1, got %r" % (nk,))
     if dt <= 0:
         raise ValueError("krylov_spectrum: dt must be positive, got %r" % (dt,))
-    ops = Session(chain, hermitian)
-    s = chain._session
+    if ops is None:
+        ops = Session(chain, hermitian)
     G = ops.mpo(Gop)
     deflate = None
     sector = False
     if traceless:
-        deflate = s.doubled_identity_mps()
+        deflate = ops.identity_mps()
         if sector_charge is not None:
-            d = s.sector_identity_mps(int(sector_charge))
+            d = ops.sector_identity_mps(int(sector_charge))
             if is_left_zero_mode(ops, G, d):
                 deflate = d
                 sector = True
     if starts is None:
         m0 = max(1, min(int(ops.maxm), int(start_maxdim)))
-        psi_p, psi_u = s.clik_random_starts(m0, int(seed))
+        psi_p, psi_u = ops.random_starts(m0, int(seed))
     else:
-        psi_p, psi_u = (s.product_mps([list(np.asarray(v, dtype=complex))
-                                       for v in vecs]) for vecs in starts)
+        psi_p, psi_u = (ops.product_state(vecs) for vecs in starts)
     if deflate is not None:
         psi_u = _deflated(ops, psi_u, deflate)
     km = KrylovMatrices(ops, G, hermitian)

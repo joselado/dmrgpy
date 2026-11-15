@@ -48,6 +48,7 @@ or is simply absent) · — not meaningful for this backend/method combo.
 | Controlled bond expansion ground state (`dmrg_method="CBE"`) | ✅ | ✅ | ✅ | One-site DMRG with the shrewd-selection expansion: `pyitensor/cbe.py`, `mpscpp3/cbe.h`, `mpsjulialive/cbe.jl`. Not in a conserved sector on v3 and Julia. On Julia it is about 7x slower than two-site `dmrg()` at 24 sites. |
 | Excited states, overlap-penalty method | ✅ | ✅ | ✅ | Julia has its own implementation (`mpsjulialive/excited.py`), not a shared code path. |
 | Excited states, non-Hermitian (Arnoldi/IRAM, `arpacktk`) | ✅ | ✅ | ✅ | Backend-agnostic — built only on generic `MultiOperator * MPS` application, so it rides on whichever backend supplies that. |
+| Krylov spectrum, CLIK-MPS (`get_krylov_spectrum`, arXiv:2509.07709) | ✅ | ✅ | 🟡 | `pyitensor/clik.py` is the reference; v3 and Julia run the same driver (`cliksession.py`) on their own MPS operations, Julia on `mpsjulialive/clik.py` and `clik.jl` since 2026-11-15. Julia takes random starts only: product starts and the traceless branch of a Lindbladian raise there, and `Lindblad_Chain` puts its doubled chain on `"python"`. The random starts differ between backends, so the unconverged levels do too (`tests/test_krylov_spectrum.py`). |
 | Generalized eigenvalue DMRG (Lagrange-multiplier trick, Hermitian) | ✅ | ✅ | ✅ | Julia via `mpsjulialive/generalized.jl`'s `get_gs_generalized` (same algorithm against ITensorMPS.jl's own `dmrg()`/`Sweeps`/`add()`). `groundstate.gs_energy_generalized` still raises for `itensor_version=2`. No ED fallback either (there is no ED implementation of this method at all). |
 | Non-Hermitian DMRG (biorthogonal, complex energies) | ✅ | ✅ | ✅ | Julia is the one backend that isn't a port of ITensorNHDMRG.jl — it runs the package itself (`mpsjulialive/nhdmrg.jl`), from an unchanged copy of its `src/` in `mpsjulialive/ITensorNHDMRG/` since 2026-11-15, because its compat entry refuses ITensorMPS 0.4, with two corrections on top: its left vector solves the *transpose* equation (needs a conjugation), and its left solve isn't anchored to the right solve's eigenvalue, so a conjugate pair tied for the smallest real part needs an `exp(i*theta)*H` tie-break (anchored on the untied run's own eigenvalue, since the rotation can otherwise re-target a different one). Both are invisible on a complex-*symmetric* H — see `tests/test_nh_dmrg.py::nh_asymmetric_hopping_chain`. |
 | Non-Hermitian generalized eigenproblem | ✅ | ✅ | ✅ | Same story as above, one level up (`gs_energy_generalized_nhdmrg`; `mpsjulialive/generalized.jl`'s `get_gs_generalized_nhdmrg` wraps the same outer loop around real ITensorNHDMRG.jl sweeps). v2 still excluded. |
@@ -151,12 +152,12 @@ model-specific rows:
      excitation ansatz, spectral weights, the finite windows and the iMPS
      algebra still raise on julia_live, and its VUMPS covers `n_uc<=2`
      with nearest-cell couplings only.
-   - **Deferred:** `get_krylov_spectrum` (CLIK), `Lindblad_Chain`, the
+   - **Deferred:** `Lindblad_Chain` (and with it the product starts and
+     the traceless branch of `get_krylov_spectrum`), the
      Holzner KPM energy truncation (`kpm_energy_truncate`), YSR
-     (`ysr.py`), and the rest of the
-     infinite-chain stack: iDMRG, the excitation ansatz, spectral
-     weights, window dynamics and the iMPS algebra
-     (`infinitechain.py` rejects `julia_live` at construction).
+     (`ysr.py`), the STM spectrum by NRG with a DMRG head, and the rest
+     of the infinite-chain stack: iDMRG, the excitation ansatz, spectral
+     weights, window dynamics and the iMPS algebra.
      iDMRG in particular is a large port, worth it only for a concrete
      use case that needs Julia on an infinite system.
    - **Site-type limits:** `dmmode="full"` and `ctmode="full"` cover

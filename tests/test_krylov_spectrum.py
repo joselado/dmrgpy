@@ -16,12 +16,15 @@ from dmrgpy import spinchain
 from dmrgpy.pyitensor import clik
 from dmrgpy.pyitensor.mpsalgebra import applyMPO, inner, randomMPS, sum_many
 
+from _helpers import julia_live_param, setup_backend
 from test_nh_dmrg import (nh_asymmetric_hopping_chain, nh_fermion_chain,
                           nh_pt_spin_chain)
 
 
-def _heisenberg(n=6):
+def _heisenberg(n=6, version="python"):
     sc = spinchain.Spin_Chain([2] * n, itensor_version="python")
+    if version != "python":
+        setup_backend(sc, version)
     h = sum(sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
             + sc.Sz[i] * sc.Sz[i + 1] for i in range(n - 1))
     sc.set_hamiltonian(h)
@@ -118,3 +121,69 @@ def test_same_spectrum_on_the_jax_backend():
     finally:
         bk.set_backend("numpy")
     assert np.max(np.abs(ev_np[:4] - ev_jax[:4])) < 1e-8
+
+
+# julia_live runs cliksession.py's driver on mpsjulialive/clik.py's
+# operations. Its random starts are other draws than those of "python",
+# as v3's are, so the tolerances are those of tests/test_clik_v3.py and
+# only converged levels are compared across backends. Every julia_live
+# run is one spectrum, reused by all of its asserts, since each new Julia
+# call costs a compile the first time.
+
+@pytest.mark.parametrize("version", [julia_live_param()])
+def test_julia_live_hermitian_levels_against_ed_and_python(version):
+    sc, _ = _heisenberg(version=version)
+    ev, res, obs = sc.get_krylov_spectrum(exact_residuals=True)
+    eve, _, obs_ed = sc.get_krylov_spectrum(mode="ED")
+    E, Ee = (-ev).real, (-eve).real
+    assert np.all(E - Ee[:len(E)] >= -1e-9)
+    assert abs(E[0] - Ee[0]) < 1e-8
+    assert abs(E[1] - Ee[1]) < 1e-6
+    O = sc.Sz[0] * sc.Sz[1]
+    assert abs(obs(O, 0) - obs_ed(O, 0)) < 1e-5
+    # the exact residual, as on v3: small for the converged ground state,
+    # large for the last, unconverged, mode
+    assert res[0] < 1e-4
+    assert np.all(np.isfinite(res))
+    assert res[-1] > res[0]
+    # the same converged levels as "python", within the sum of the two
+    # ED tolerances
+    sp, _ = _heisenberg()
+    Ep = (-sp.get_krylov_spectrum()[0]).real
+    assert abs(E[0] - Ep[0]) < 2e-8
+    assert abs(E[1] - Ep[1]) < 2e-6
+
+
+@pytest.mark.parametrize("version", [julia_live_param()])
+def test_julia_live_non_hermitian_lowest_levels_against_ed(version):
+    """The asymmetric fermion chain: Arnoldi TDVP steps, the dagger of G
+    for the rows of G_ij, and the alpha probe. 1.3e-3 is the v3 tolerance,
+    twice its worst level over seeds 0 to 4."""
+    sc, _ = nh_asymmetric_hopping_chain(6, version)
+    assert not sc.is_hermitian(sc.hamiltonian)
+    ev, _, _ = sc.get_krylov_spectrum()
+    eve, _, _ = sc.get_krylov_spectrum(mode="ED")
+    for lam in eve[:4]:
+        assert np.min(np.abs(ev[:12] - lam)) < 1.3e-3
+
+
+@pytest.mark.parametrize("version", [julia_live_param()])
+def test_julia_live_random_starts_are_reproducible(version):
+    """The starts come from a seeded generator, so the same seed gives the
+    same run; what julia_live does not run is refused."""
+    from dmrgpy.krylovspectrum import krylov_spectrum_dmrg
+    from dmrgpy.mpsjulialive import clik as jclik
+    sc, h = _heisenberg(version=version)
+    ops = jclik.Session(sc)
+
+    def fidelity(x, y):
+        return abs(ops.inner(x, y)) / (ops.norm(x) * ops.norm(y))
+    a = ops.random_starts(4, 0)
+    b = ops.random_starts(4, 0)
+    c = ops.random_starts(4, 1)
+    assert abs(fidelity(a[0], b[0]) - 1) < 1e-12
+    assert abs(fidelity(a[1], b[1]) - 1) < 1e-12
+    assert fidelity(a[0], a[1]) < 0.99
+    assert fidelity(a[0], c[0]) < 0.99
+    with pytest.raises(NotImplementedError):
+        krylov_spectrum_dmrg(sc, -1 * h, traceless=True)

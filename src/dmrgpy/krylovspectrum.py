@@ -4,7 +4,8 @@ states (the eigensolver of arXiv:2509.07709, CLIK-MPS).
 The generator G defaults to -H, so the eigenvalues come back as -E, lowest
 energy first; for a non-Hermitian H they are complex. The algorithm, its
 parameters and the floor of its residuals are in pyitensor/clik.py; on itensor_version=3 the same
-algorithm runs through cliksession.py.
+algorithm runs through cliksession.py, and on "julia_live" through
+cliksession.py's driver with mpsjulialive/clik.py's operations.
 """
 
 import numpy as np
@@ -31,8 +32,8 @@ def get_krylov_spectrum(self, G=None, nk=20, dt=0.5, alpha=None,
     nk snapshots per branch, imaginary-time step dt, contour angle alpha of
     the second branch (None: estimated), gram_tol the relative deflation
     threshold, seed for the random starts. DMRG runs on
-    itensor_version="python" and 3; mode="ED" diagonalizes G densely and
-    returns every eigenvalue, in the same order."""
+    itensor_version="python", 3 and "julia_live"; mode="ED" diagonalizes
+    G densely and returns every eigenvalue, in the same order."""
     from . import groundstate
     if G is None:
         groundstate.require_hamiltonian(self)
@@ -55,6 +56,8 @@ def operator_handle(self, O):
     """The session's MPO of the MultiOperator O, for ks.expectation."""
     if self.itensor_version == "python":
         return self._session._mpo(O.to_terms())
+    if self.itensor_version == "julia_live":
+        return self.toMPO(O).jlmpo
     return self.toMPO(O).cpp_handle
 
 
@@ -71,16 +74,35 @@ def krylov_spectrum_dmrg(self, G, nk=20, dt=0.5, alpha=None, gram_tol=1e-12,
     (Lindblad_Chain reads traces off it). `starts`, `traceless`,
     `sector_charge` and `substeps`: see pyitensor Chain.krylov_spectrum
     and clik.krylov_spectrum. On itensor_version=3 it is cliksession.py's
-    port, whose KrylovSpectrum reads its matrix elements on the session."""
-    if self.itensor_version not in ("python", 3):
+    port, whose KrylovSpectrum reads its matrix elements on the session,
+    and on "julia_live" the same port on mpsjulialive/clik.py's
+    operations, with random starts only."""
+    if self.itensor_version not in ("python", 3, "julia_live"):
         raise NotImplementedError(
-            "get_krylov_spectrum runs on itensor_version=\"python\" and 3 "
-            "only (got " + repr(self.itensor_version) + "); use mode=\"ED\" "
-            "for a small chain or setup_python() to switch this one")
+            "get_krylov_spectrum runs on itensor_version=\"python\", 3 and "
+            "\"julia_live\" only (got " + repr(self.itensor_version) + "); "
+            "use mode=\"ED\" for a small chain or setup_python() to switch "
+            "this one")
     if self.conserved_sector:
         raise NotImplementedError(
             "get_krylov_spectrum does not support a conserved sector yet: "
             "its random starts are not confined to it")
+    if self.itensor_version == "julia_live":
+        # only Lindblad_Chain passes these, and it puts the doubled chain
+        # of a julia_live chain on "python" (lindblad.py)
+        if starts is not None or traceless or sector_charge is not None:
+            raise NotImplementedError(
+                "get_krylov_spectrum on julia_live has random starts only: "
+                "product starts and the traceless branch of a Lindbladian "
+                "run on itensor_version=\"python\" and 3")
+        from . import cliksession
+        from .mpsjulialive import clik
+        # before the operations read maxm: the probe sets it to 8 and back
+        hermitian = self.is_hermitian(G)
+        return cliksession.krylov_spectrum(
+                self, G, hermitian, nk=nk, dt=dt, alpha=alpha,
+                gram_tol=gram_tol, seed=seed, exact_residuals=exact_residuals,
+                substeps=substeps, ops=clik.Session(self, hermitian))
     # decided before the sweep parameters go to the session: the witness
     # probe of is_hermitian() runs at a bond dimension of at most 8 and
     # leaves the session there, which put the whole v3 evolution at 8
