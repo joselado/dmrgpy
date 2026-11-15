@@ -266,7 +266,7 @@ function metts_vev(H, sites, opmpos, T, nsamples, nwarmup, dbeta_half_step,
 		phi = metts_evolve(cps, H, beta_half, nsteps, cutoff, maxdim, implicit)
 		if it > nwarmup
 			for k in 1:nops
-				push!(samples[k], inner(phi, opmpos[k], phi))
+				push!(samples[k], inner(phi', opmpos[k], phi))
 			end
 		end
 		basis = basis_ops[((it - 1) % nbasis) + 1]
