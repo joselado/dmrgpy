@@ -1908,3 +1908,19 @@ converged value in 67 s, where BiCGSTAB returned $3\times10^{9}$ after
 with the sweeps, a target next to a triplet gave an eigenvalue that is
 not a level of the chain. `inverse_solver="bicgstab"` gives the numbers of
 before, and every other backend is unchanged.
+
+## The 2026-11-15 Krylov order of `TDVP_GSE` on `julia_live`
+
+`tdvp_gse_krylov_order` is the dimension of the Krylov space
+$\{\psi, H\psi, \dots, H^{k-1}\psi\}$ of the global subspace expansion, so
+at the default $k=3$ the expansion adds $H\psi$ and $H^2\psi$, as
+`pyitensor/gse.py` and v3's `addBasis` do. On `julia_live`, `tdvp.jl`'s
+`gse_expand` handed $k$ itself to ITensorMPS's
+`expand(...; alg="global_krylov", krylovdim)`, which counts the added
+vectors, so it added $H^3\psi$ too. It now hands $k-1$. On a quench of an
+8-site Heisenberg chain from the Néel state (`maxm=12`, `dt=0.05`, 40
+steps, expansion at every step) $\langle S^z_0\rangle(t)$ on `julia_live`
+moved from $3.3\times10^{-10}$ to $1.7\times10^{-7}$ off ED, and from
+$1.7\times10^{-7}$ to $1.9\times10^{-9}$ off `"python"`. A larger
+`tdvp_gse_krylov_order` gives back the extra vector. Every other backend
+is unchanged.

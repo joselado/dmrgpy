@@ -80,7 +80,7 @@ function evolve_and_measure_tdvp(Hmpo,Aop,wf,nt,dt,cutoff,maxdim;herm=nothing)
 		# lines up with timedependent.py's ts=[0,dt,...,(nt-1)*dt] grid --
 		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
 		# the C++/pyitensor/ED copies of this loop.
-		push!(correlator,inner(psi,Aop,psi))
+		push!(correlator,inner(psi',Aop,psi))
 		psi = tdvp_step(Hmpo,psi,dt,cutoff,maxdim;herm=herm)
 		# norm(), not inner(psi,psi): tdvp_step's own orthogonalize!(psi,1)
 		# leaves psi with a well-defined orthogonality center, so norm()
@@ -168,7 +168,14 @@ function gse_expand(H, psi, krylov_order, gse_cutoff, maxdim)
 	# environment bookkeeping inside expand()/apply() can't handle either.
 	psi = noprime(copy(psi), "Link")
 	orthogonalize!(psi, 1)
-	return expand(psi, H; alg = "global_krylov", krylovdim = krylov_order,
+	# krylov_order is the dimension of the Krylov space {psi, H psi, ...,
+	# H^(order-1) psi}, as in pyitensor/gse.py and v3's addBasis, so
+	# order-1 vectors are added; expand's krylovdim counts the added
+	# vectors H psi ... H^krylovdim psi. Until 2026-11-15 it was handed the
+	# order itself, one vector more than the other backends at the same
+	# setting.
+	krylov_order <= 1 && return psi
+	return expand(psi, H; alg = "global_krylov", krylovdim = krylov_order - 1,
 		cutoff = gse_cutoff,
 		apply_kwargs = (; maxdim = min(maxlinkdim(psi) + 1, maxdim)))
 end
@@ -199,7 +206,7 @@ function evolve_and_measure_tdvp_gse(Hmpo, Aop, wf, nt, dt, cutoff, maxdim,
 		# lines up with timedependent.py's ts=[0,dt,...,(nt-1)*dt] grid --
 		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
 		# the C++/pyitensor/ED copies of this loop.
-		push!(correlator, inner(psi, Aop, psi))
+		push!(correlator, inner(psi', Aop, psi))
 		if it <= gse_sweeps
 			psi = gse_expand(Hmpo, psi, krylov_order, gse_cutoff, maxdim)
 		end
