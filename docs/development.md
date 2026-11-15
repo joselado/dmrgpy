@@ -3634,9 +3634,18 @@ random MPS goes from 1.06 s to 0.39 s at `maxdim=60` and from 4.03 s to
 1.44 s at 60, the states agreeing to 3e-14 in 2-norm; the KPM correlator
 of a 20-site Heisenberg chain at `kpmmaxm=40` goes from 27.0 s to 15.1 s,
 the spectra agreeing to 1.7e-8 of the peak. Two limits keep it opt-in: the
-eigenvalues of the density matrix are squared singular values, so at
-`cutoff=0` singular values below about 1e-8 of the largest are not
-resolved (the exact residual of `implicit.py` needs them), and a cut
+eigenvalues of the density matrix are squared singular values and carry a
+roundoff of about eps ||K||^2 ||x||^2, so singular values below about
+1e-8 of ||K|| ||x|| are not resolved. That is not of the product's own
+largest singular value: when K|x> is small by cancellation, as
+`(H-<H>)|psi>` of `vev.energy_variance` on a converged state, directions
+of real weight come out as negative eigenvalues and are dropped, and the
+variance comes out low. Measured on the ground state of an 8-site
+Heisenberg chain at `maxm=64`, which the MPS holds exactly:
+`gs_energy_fluctuation()` is 2.05e-12 by the exact route and 4.5e-13 by
+the density-matrix one, while at 10 and 20 sites, with variances of 6e-6
+and 4e-5, the two agree to every printed digit. The exact residual of
+`implicit.py` (cutoff 0) would floor the same way. And a cut
 inside a degenerate Schmidt multiplet, the rule for SU(2) states, can pick
 a different member than the SVD sweep, which moves a number at the
 truncation level. `pyitensor.mpsalgebra.APPLY_METHOD = "densitymatrix"`
