@@ -3377,6 +3377,32 @@ Notable, deliberate implementation details (not bugs to "fix"):
   `nh_krylov_schur`), not a restart on the single selected one. Both
   were needed to reach an eigenpair when four eigenvalues share the
   smallest real part (2026-11-15 audit, finding 3).
+- `gs_energy()`/`get_gs()` on a non-Hermitian `H` with `mode="DMRG"` do
+  not call NH-DMRG first: `groundstate.py`'s non-Hermitian branch, after
+  its `wf0=` and injected-state cases, dispatches on
+  `Many_Body_Chain.nh_gs_method` (a setting, in `sites.SETTINGS` and in
+  `method_key`, so a stored answer of one route is never returned for the
+  other). The default `"imaginary_time"` is `nhlevels.py`: implicit
+  log-grid steps (`Chain.implicit_step_with`, the steps of
+  `imaginarytime.py` under a given MPO, on v3 and `"python"`) with `H`
+  itself, the shift at the running Re<H>, a Rayleigh-Ritz in the span of
+  the last 24 states with a residual per Ritz pair from the Gram matrices,
+  the selected Ritz vector as one weighted sum (`Chain.sum_mps_weighted`),
+  and the left state from the same steps under `H^\dagger` started at the
+  conjugate of the right one. The pair goes through `nhdmrg()`'s own
+  certificate (`nhdmrg._certificate`) and is stored by
+  `nhdmrg.store_nh_pair`, the storage NH-DMRG uses; a failed certificate
+  or a raised route falls back to `gs_energy_nhdmrg` with the same
+  keywords. v2, `julia_live` (its own branch, ITensorNHDMRG.jl), a
+  conserved sector and v3 below 3 sites stay on NH-DMRG. The grid is in
+  units of the largest coefficient off the identity, so an offset does not
+  shrink it. The cost is two evolutions of 136 implicit steps plus 48 MPO
+  applications for the Gram matrices: on easy chains 6 to 10 times an
+  NH-DMRG solve (10-site PT chain, `maxm=30`: 16 s against 2 s on
+  `"python"`), in exchange for reaching the levels where NH-DMRG stalls
+  (every distinct level of smallest real part of that chain up to 16
+  sites). `Many_Body_Chain.get_nh_levels()` exposes the Ritz pairs
+  themselves. `tests/test_nh_levels.py`.
 - A few pre-existing bugs in the original (pre-refactor) file-based
   backend are deliberately reproduced rather than silently fixed —
   see the call-site comments in `chain_session.h` for both versions.

@@ -147,28 +147,57 @@ $$H|\psi_R\rangle=E|\psi_R\rangle,\qquad
 H^\dagger|\psi_L\rangle=E^*|\psi_L\rangle,\qquad
 \langle\psi_L|\psi_R\rangle=1.$$
 
-`gs_energy()` detects a non-Hermitian $H$ and uses non-Hermitian DMRG
-(NH-DMRG). Here `fc` is a fermionic chain with a non-Hermitian Hamiltonian,
-for example a staggered imaginary potential $i\gamma(-1)^in_i$:
+`gs_energy()` detects a non-Hermitian $H$. With `mode="DMRG"` it evolves a
+random state in imaginary time with $H$ itself,
+$|\psi(\tau)\rangle\propto e^{-\tau H}|\psi(0)\rangle$, normalized at every
+step. The levels of smallest real part grow fastest, so the state ends in
+their span. Several levels often share that real part, for example a
+complex-conjugate pair in a PT-symmetric chain. Then the state keeps
+rotating between them, so the energies are read from a small
+diagonalization of $H$ in the span of the last states of the evolution.
+The left state comes from the same evolution with $H^\dagger$. Here `fc`
+is a fermionic chain with a non-Hermitian Hamiltonian, for example a
+staggered imaginary potential $i\gamma(-1)^in_i$:
 
 ```python
-e, psil, psir = fc.nhdmrg()     # E, left and right eigenvectors
-e = fc.gs_energy()              # the same E; stores psir as the ground state
+e = fc.gs_energy()              # E; stores the right state as the ground state
+es, res = fc.get_nh_levels()    # the levels of smallest real part, with residuals
+e, psil, psir = fc.nhdmrg()     # non-Hermitian DMRG: E, left and right states
 ```
+
+`get_nh_levels()` returns every level it finds, sorted by real part, with
+its relative residual. When the spectrum is degenerate in the real part,
+the first entries are all the levels that share it, which a single
+eigenpair cannot show. `vectors=True` also returns their right states. A
+level in a symmetry sector the random start has no weight in does not
+appear. `nhdmrg()` is non-Hermitian DMRG (NH-DMRG), which returns one
+left and right pair.
 
 The energy is not a variational bound, so the result is checked with the
 residuals $\lVert H|\psi_R\rangle-E|\psi_R\rangle\rVert$ and
 $\lVert H^\dagger|\psi_L\rangle-E^*|\psi_L\rangle\rVert$. The keywords are:
 
 - `tol`: the largest relative residual accepted (default `1e-4`).
-- `ntries`: how many times to restart from a random state when the residual
-  is too large (default 5).
+- `ntries`: how many times NH-DMRG restarts from a random state when the
+  residual is too large (default 5).
+- `fc.nh_gs_method` (default `"imaginary_time"`): `"nhdmrg"` makes
+  `gs_energy()` use NH-DMRG. NH-DMRG is faster where it converges, and the
+  imaginary-time route uses it when its own result fails the residual
+  check.
+
+!!! note "Backends"
+    The imaginary-time route and `get_nh_levels()` run on
+    `itensor_version=3` and `"python"`, without a conserved sector. On the
+    other backends `gs_energy()` uses NH-DMRG, which works on
+    `itensor_version=2`, `3`, `"python"` and `"julia_live"`.
+
+See `examples/non_hermitian/nh_levels_imaginary_time`, where the four
+levels of smallest real part of a PT-symmetric XX chain come out together.
 
 Excited states of a non-Hermitian $H$ come from `get_excited_states(n)` and
 `get_excited(n)`, which use an Arnoldi method on matrix product states. It
 is less accurate than NH-DMRG, so check it against `mode="ED"` on a small
-chain (`examples/non_hermitian/nhdmrg_VS_ED_VS_arnoldi`). NH-DMRG works on
-`itensor_version=2`, `3`, `"python"` and `"julia_live"`.
+chain (`examples/non_hermitian/nhdmrg_VS_ED_VS_arnoldi`).
 
 ![Skin effect of the interacting Hatano-Nelson chain](img/excited-states_nonhermitian.png#only-light)
 ![Skin effect of the interacting Hatano-Nelson chain](img/excited-states_nonhermitian-dark.png#only-dark)

@@ -177,11 +177,12 @@ class Many_Body_Chain():
           # other backend raises). Only the ground-state solve reads
           # it; the excited-state, generalized and non-Hermitian solves
           # raise under "CBE" (groundstate.require_two_site).
-      self.nh_gs_method = "nhdmrg" # how gs_energy()/get_gs() solve a
-          # non-Hermitian H on DMRG: "nhdmrg" (NH-DMRG, nhdmrg.py) or
-          # "imaginary_time" (implicit imaginary-time steps with H and a
-          # Rayleigh-Ritz on the last states, nhlevels.py; v3 and "python"
-          # without a sector, NH-DMRG elsewhere and as its fallback)
+      self.nh_gs_method = "imaginary_time" # how gs_energy()/get_gs()
+          # solve a non-Hermitian H on DMRG: "imaginary_time" (implicit
+          # imaginary-time steps with H and a Rayleigh-Ritz on the last
+          # states, nhlevels.py; v3 and "python" without a sector, with
+          # NH-DMRG elsewhere and as its fallback) or "nhdmrg" (NH-DMRG
+          # alone, nhdmrg.py). mode="ED" is untouched.
       self.cbe_delta = 0.1 # "CBE" and tevol_method="TDVP_CBE": each bond is
           # expanded to (1+cbe_delta)*maxm before a one-site update and
           # trimmed back to maxm after it (the paper's delta)

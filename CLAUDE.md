@@ -579,6 +579,15 @@ Do not undo one without reading its finding first.
   on the 10-site PT-symmetric XX chain every attempt stopped at a
   non-eigenpair, Re E up to 0.03 below the spectrum
   (`test_audit_2026_11_15_nh.py`).
+- **A non-Hermitian `gs_energy()` on DMRG is imaginary time first.**
+  `nh_gs_method` (a setting, in `method_key`) defaults to
+  `"imaginary_time"`: `nhlevels.py` on v3 and `"python"` without a
+  sector, its pair checked by `nhdmrg()`'s own certificate and stored by
+  `nhdmrg.store_nh_pair`, with `gs_energy_nhdmrg` as the fallback for a
+  failed check and for every other backend; `mode="ED"` is untouched. Its
+  grid is in units of the largest coefficient off the identity, since an
+  offset as the unit leaves nothing projected. `get_nh_levels()` returns
+  the accepted Ritz pairs (`test_nh_levels.py`).
 - **The DMRG `vev` has no `**kwargs`**: an unknown keyword raises, and
   `T>0` raises naming `mode="ED"` and `metts_vev()`
   (`test_audit_2026_10_23.py`).

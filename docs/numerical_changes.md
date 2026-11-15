@@ -2045,3 +2045,21 @@ attempt starts from a fresh random state, so which member of a set with
 one real part comes back can change from run to run. `restarts` now
 counts thick restarts, so the default `restarts=2` is three Krylov
 builds. `julia_live` is unchanged.
+
+## The 2026-11-15 non-Hermitian ground state by imaginary time
+
+`gs_energy()` and `get_gs()` on a non-Hermitian Hamiltonian with
+`mode="DMRG"` on `itensor_version=3` and `"python"` now solve by
+imaginary time (`nh_gs_method="imaginary_time"`, `nhlevels.py`) and use
+NH-DMRG only when that pair fails the residual check, or on a backend
+without the route (v2, `julia_live`, a conserved sector). Where NH-DMRG
+converged the eigenvalue is the same, within the residual check
+($10^{-14}$ to $10^{-7}$ against ED on the `tests/test_nh_dmrg.py`
+models and the 10-site PT-symmetric XX chain). The stored right and left
+states are now Ritz vectors: on a degenerate eigenvalue they can be a
+different vector of the same eigenspace, and where several levels share
+the smallest real part, the member that comes back can differ from
+NH-DMRG's. The level of smallest real part is taken as it comes, the
+smallest real part of the accepted Ritz values. `nh_gs_method="nhdmrg"`
+gives the NH-DMRG route of before.
+

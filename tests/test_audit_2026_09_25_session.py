@@ -246,21 +246,26 @@ def test_nh_correlator_after_gs_energy_generalized_reads_the_generalized_state(
     assert abs(np.real(_expect(wg, sc.Sz[0]))) > 0.1
 
 
+@pytest.mark.parametrize("method", ["nhdmrg", "imaginary_time"])
 @pytest.mark.parametrize("version", BACKENDS)
-def test_first_nh_correlator_does_not_resolve_a_solved_chain(version,
+def test_first_nh_correlator_does_not_resolve_a_solved_chain(version, method,
                                                              monkeypatch):
     """After a plain NH-DMRG solve the first correlator solved NH-DMRG a
     second time, since the solve had not put H on the session; it now
-    reads the solve's own pair."""
-    from dmrgpy import nhdmrg
+    reads the solve's own pair. The same holds for the imaginary-time
+    route of nh_gs_method (nhlevels.py), whose solver is ground_pair."""
+    from dmrgpy import nhdmrg, nhlevels
     calls = []
-    real = nhdmrg.nhdmrg
+    module, name = ((nhdmrg, "nhdmrg") if method == "nhdmrg"
+                    else (nhlevels, "ground_pair"))
+    real = getattr(module, name)
     def counted(*args, **kwargs):
         calls.append(1)
         return real(*args, **kwargs)
-    monkeypatch.setattr(nhdmrg, "nhdmrg", counted)
+    monkeypatch.setattr(module, name, counted)
     np.random.seed(9)
     sc = _nh_chain(version)
+    sc.nh_gs_method = method
     _quiet(sc.gs_energy)
     assert len(calls) == 1
     wf, left = sc.wf0, sc.nh_left_wf
