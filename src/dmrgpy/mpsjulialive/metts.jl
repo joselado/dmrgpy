@@ -338,7 +338,7 @@ function metts_dynamical_correlator(H, sites, Aop, Bop, T, nt, dt, nsamples,
 			v = apply_op(Bop, phi, tdvp_maxdim, tdvp_cutoff)
 			w = phi
 			for k in 1:nt
-				push!(samples[k], inner(w, Aop, v))
+				push!(samples[k], inner(w', Aop, v))
 				if k < nt
 					v = tdvp_step(H, v, dt, tdvp_cutoff, tdvp_maxdim)
 					w = tdvp_step(H, w, dt, tdvp_cutoff, tdvp_maxdim)

@@ -333,7 +333,7 @@ function evolve_and_measure_tebd(ls, sites, Aop, wf, nt, dt, cutoff, maxdim)
 		# lines up with timedependent.py's ts=[0,dt,...,(nt-1)*dt] grid --
 		# see evolution_dmrg_DC()'s own comment there. Kept in lockstep with
 		# the C++/pyitensor/ED copies of this loop.
-		push!(correlator, inner(psi, Aop, psi))
+		push!(correlator, inner(psi', Aop, psi))
 		psi = tebd_step!(psi, gates, cutoff, maxdim)
 		psi = psi * (norm0 / norm(psi))
 	end
