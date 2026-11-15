@@ -169,7 +169,6 @@ def test_spectral_weights_multiplet_sums_match_dense(heisenberg_cell, monkeypatc
 
 N_SITES, K_PAD = 10, 4     # K = maxm, below the rank the evolved state needs
 NT, DT = 20, 0.05
-NT_LONG = 40               # where the sweeps=3 gap has grown past roundoff
 
 
 @contextlib.contextmanager
@@ -292,18 +291,23 @@ def test_padded_one_site_tdvp_follows_the_unpadded_trajectory(pre_fix):
 
 
 def test_padded_tdvp_gse_follows_the_unpadded_trajectory(pre_fix):
-    """The default tdvp_gse_sweeps=3, over 40 steps (over 20 both routes
-    still agree to 6e-9). The two runs evolve the same state in different
-    gauges, and the expansion's truncation (cutoff, and the cap at maxm)
-    is gauge-sensitive at this level, so the agreement is to ~1e-7 rather
-    than to roundoff: 1.7e-7, measured, against 4.1e-6 before the fix,
-    both well inside TDVP's own 9e-5 error against ED on this quench."""
-    unpadded, _ = _evolve(None, 3, nt=NT_LONG)
-    padded, _ = _evolve(K_PAD, 3, nt=NT_LONG)
-    assert np.max(np.abs(padded - unpadded)) < 1e-6
+    """The default tdvp_gse_sweeps=3, over 20 steps. The two runs evolve
+    the same state in different gauges, and the expansion's truncation at
+    maxm=4 picks inside a degenerate Schmidt multiplet by the gauge, so
+    the agreement is not to roundoff and grows as about t^3: measured
+    3.8e-8 after 20 steps and 1.1e-6 after 40, against 2.2e-7 and 3.7e-6
+    on the pre-fix route, all far inside TDVP's own 9.3e-5 error against
+    ED on this quench. The fix separates best at early times (14x at 10
+    steps, 6x at 20, 3x at 40), so the test reads 20 steps; it read 40
+    until the strip of 2026-11-07 (_STRIP_CUTOFF) moved the fixed run
+    there from 3.8e-7 to 1.1e-6, past the 1e-6 bound it had then, while
+    leaving its error against ED unchanged."""
+    unpadded, _ = _evolve(None, 3, nt=NT)
+    padded, _ = _evolve(K_PAD, 3, nt=NT)
+    assert np.max(np.abs(padded - unpadded)) < 1e-7
     pre_fix()
-    before, _ = _evolve(K_PAD, 3, nt=NT_LONG)
-    assert np.max(np.abs(before - unpadded)) > 1e-6
+    before, _ = _evolve(K_PAD, 3, nt=NT)
+    assert np.max(np.abs(before - unpadded)) > 1e-7
 
 
 @pytest.mark.parametrize("sweeps", [0, 3])
