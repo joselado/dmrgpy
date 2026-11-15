@@ -14,9 +14,11 @@ to do, is not the same thing and is not bounded by cutoff/maxdim at all;
 see _apply_chain's docstring.) That's an intentional simplification (see autompo.py's
 module docstring for the same reasoning applied to MPO construction):
 dmrgpy only ever observes final numerical results bounded by
-Cutoff/MaxDim, never internal bond dimensions. The one opt-in exception
-is applyMPO(method="densitymatrix"), which truncates while it builds but
-keeps the same basis at every bond (see _apply_densitymatrix).
+Cutoff/MaxDim, never internal bond dimensions. The two opt-in exceptions
+are applyMPO(method="densitymatrix") and sum_many/sum(method=
+"densitymatrix") for MPS, which truncate while they build but keep the
+same basis at every bond (see _apply_densitymatrix and
+_sum_densitymatrix).
 
 ITensor v3 itself has both inner() (throws on complex operands) and
 innerC() (always works) because IQTensor/ITensor's real-vs-complex type
@@ -388,7 +390,173 @@ def _bond_dims(chain):
     return {k: _link_at(chain, k, k + 1).dim for k in range(1, n)}
 
 
-def sum_many(chains, cutoff=0.0, maxdim=None):
+# Which algorithm sum_many and sum use when the caller names none, read at
+# call time: "exact" (the direct sum, then one truncating sweep) or
+# "densitymatrix" (_sum_densitymatrix, for MPS only).
+SUM_METHOD = "exact"
+
+_SUM_METHODS = ("exact", "densitymatrix")
+
+
+def _sum_densitymatrix(chains, cutoff=0.0, maxdim=None):
+    """The sum of K MPS on the same site indices by the density-matrix
+    algorithm, after ITensorMPS.jl's +(psi...; alg="densitymatrix")
+    (abstractmps.jl, MIT). The sum is never formed at bond dimension
+    sum_a chi_a: the basis kept at every bond comes from a reduced density
+    matrix, and every input is projected on it.
+
+    First the exact right environments F_ab of <psi_b|psi_a> over sites
+    j+1..n, for every pair (a, b). Then a sweep from the left end: at site
+    j each input has a carry L_a, its sites 1..j projected on the basis
+    kept on the left of j, with legs (left bond, s_j, its own link). The
+    reduced density matrix of the projected sum on (left bond, s_j) is
+
+        rho = sum_ab L_a F_ab L_b^dag,
+
+    and its leading eigenvectors, kept by svd.eigh_truncate's usual
+    cutoff/maxdim rule (the eigenvalues are the squared singular values,
+    so the rule is the same as the SVD's), become the new left-orthogonal
+    site tensor U. Each carry moves one site right, U^dag L_a psi_a[j+1],
+    and the last site is the sum of the carries. The result has center n
+    and the norm of the projected sum, not normalized, as the exact route.
+
+    Two choices depart from ITensorMPS.jl, and both make this the same
+    truncation as the exact route of sum_many. First, ITensorMPS.jl
+    diagonalizes sum_a rho_a, the density matrices of the inputs one by
+    one, with no cross terms <psi_b|psi_a>. That is exact without
+    truncation, but under truncation it keeps the basis of the mixture of
+    the inputs and not the Schmidt basis of their sum, and the two are far
+    apart when the inputs cancel. Here the cross terms are kept, so the
+    eigenvectors are the left Schmidt vectors of the sum, projected on the
+    left. Second, ITensorMPS.jl sweeps from the right end. Here the sweep
+    goes from the left, in the order in which the exact route truncates its
+    bonds (a lossless position(1), then a truncating position(n)), since a
+    sweep in the other order projects on other bases and keeps a different
+    state, so the two routes would not agree to roundoff under
+    truncation. So the two methods give the same state, up to
+    roundoff and to the choice inside a degenerate multiplet at a cut.
+
+    The kept dimension at a bond is capped by the sum of the input link
+    dimensions there, the largest rank the sum can have. Inside that cap
+    cutoff=0 also keeps null directions of rho whose eigenvalue came out
+    as positive roundoff, so the bonds can come out larger than the exact
+    route's; the state is the same, and a cutoff of about 1e-14 or more
+    removes them.
+
+    Precision floor: rho carries a roundoff of about eps times the squared
+    norms of the inputs, eps sum_ab ||psi_a|| ||psi_b||, so singular values
+    below about 1e-8 of the largest input norm are not resolved. This is
+    not of the scale of the sum itself when the inputs nearly cancel. It
+    is the same limit as in _apply_densitymatrix.
+
+    Cost: a site costs about O(K^2 d chi^3) for the environments and the
+    carries, plus one eigh of size d chi_out, against SVDs of the direct
+    sum at bond dimension K chi, about O(d K^3 chi^3), for the exact
+    route. The price is memory, K^2 (n-1) environments of chi^2 entries.
+
+    The inputs are not modified and need no canonical form, since the
+    environments are exact in any gauge. Every step is an ITensor
+    contraction or an eigh, so this runs on the JAX backend as it is; only
+    the spectrum of rho, O(chi), comes to the host. set_pad_bonds is not
+    honoured: the bonds come out at the kept dimension."""
+    chains = list(chains)
+    nchain = len(chains)
+    n = chains[0].length()
+    for c in chains[1:]:
+        if c.length() != n:
+            raise ValueError("_sum_densitymatrix: mismatched chain length {} vs {}"
+                             .format(n, c.length()))
+    for c in chains:
+        if any(_link_at(c, k, k + 1) is None for k in range(1, n)):
+            raise ValueError("_sum_densitymatrix: every interior bond of every "
+                             "input needs a link")
+    # Fresh links for every input. Two inputs often share their links (a
+    # state and a scaled copy of it), and a link shared between two inputs
+    # would be contracted as if it were a physical leg.
+    xs = [_fresh_link_copy(c) for c in chains]
+    phys = []
+    for j in range(n):
+        p = tuple(ind for ind in xs[0][j].inds if ind.hastags("Site"))
+        for x in xs[1:]:
+            if set(ind for ind in x[j].inds if ind.hastags("Site")) != set(p):
+                raise ValueError("_sum_densitymatrix: different site indices at "
+                                 "site {}".format(j + 1))
+        phys.append(p)
+    if n == 1:
+        T = xs[0][0]
+        for x in xs[1:]:
+            T = T + x[0]
+        out = MPS([T])
+        out.center = 1
+        return out
+
+    # 0-based: xl[a][j] is the link of input a between sites j and j+1.
+    xl = [[commonIndex(x[j], x[j + 1]) for j in range(n - 1)] for x in xs]
+    # The bra layer: every link replaced by a fresh copy, the site legs
+    # kept, so that bra and ket contract through the site legs only.
+    bra = {}
+    for row in xl:
+        for l in row:
+            bra[l] = l.sim()
+    xc = [[_t_dag(_relabel(T, bra)) for T in x] for x in xs]
+
+    # F[j][a][b]: sites j..n-1 of <psi_b|psi_a>, legs (xl[a][j-1], bra of xl[b][j-1]).
+    F = [None] * n
+    F[n - 1] = [[xs[a][n - 1] * xc[b][n - 1] for b in range(nchain)]
+                for a in range(nchain)]
+    for j in range(n - 2, 0, -1):
+        F[j] = [[(xs[a][j] * F[j + 1][a][b]) * xc[b][j] for b in range(nchain)]
+                for a in range(nchain)]
+
+    tensors = [None] * n
+    L = [x[0] for x in xs]  # carries, legs (left bond, s_j, xl[a][j])
+    left = None             # kept bond on the left of site j
+    for j in range(n - 1):
+        rows = ([left] if left is not None else []) + list(phys[j])
+        cols = [ind.sim() for ind in rows]
+        rho = None
+        for b in range(nchain):
+            # T_b = sum_a L_a F_ab, legs (rows, bra of xl[b][j]).
+            Tb = None
+            for a in range(nchain):
+                t = L[a] * F[j + 1][a][b]
+                Tb = t if Tb is None else Tb + t
+            # The bra carry: L_b conjugated, rows renamed to cols and its
+            # link to the bra copy that F carries.
+            ren = dict(zip(rows, cols))
+            ren[xl[b][j]] = bra[xl[b][j]]
+            r = Tb * _t_dag(_relabel(L[b], ren))  # (rows, cols)
+            rho = r if rho is None else rho + r
+        dims = tuple(ind.dim for ind in rows)
+        D = int(np.prod(dims))
+        mat = rho.transpose_to(rows + cols).reshape(D, D)
+        mat = 0.5 * (mat + mat.conj().T)
+        cap = 0
+        for a in range(nchain):
+            cap += xl[a][j].dim
+        if maxdim:
+            cap = min(cap, int(maxdim))
+        U, keep = eigh_truncate(mat, cutoff, cap)
+        # rho = Phi Phi^dag with Phi the projected sum as a (rows, rest)
+        # matrix, so the sum is approximated by U U^dag Phi: the site
+        # tensor is U as it is, on (rows, new bond), and each carry takes
+        # U^dag from the left.
+        bnew = Index(keep, tags="Link,l={}".format(j + 1))
+        A = ITensor(tuple(rows) + (bnew,), U.reshape(dims + (keep,)))
+        tensors[j] = A
+        Ad = _t_dag(A)
+        L = [(Ad * L[a]) * xs[a][j + 1] for a in range(nchain)]
+        left = bnew
+    last = L[0]
+    for t in L[1:]:
+        last = last + t
+    tensors[n - 1] = last
+    out = MPS(tensors)
+    out.center = n
+    return out
+
+
+def sum_many(chains, cutoff=0.0, maxdim=None, method=None):
     """N-way direct sum of MPS (or MPO) chains: the same exact block-
     diagonal concatenation sum() does for two operands, generalized to K
     via one K-way placement per site instead of K-1 pairwise merges each
@@ -412,12 +580,27 @@ def sum_many(chains, cutoff=0.0, maxdim=None):
     concatenating terms at all (it assembles the finite-state machine
     directly now -- see its module docstring). sum_many() remains in use
     for genuine K-way sums elsewhere, e.g. sector.py's in-sector start
-    state and charge-penalty operator."""
+    state and charge-penalty operator.
+
+    `method` picks the algorithm: "exact" is the direct sum above, then
+    the truncating sweep; "densitymatrix" is _sum_densitymatrix, the same
+    truncation without forming the sum at full bond dimension. It exists
+    for MPS only, so a sum of MPO takes the exact route whatever the
+    method. None takes the module default SUM_METHOD, which is "exact";
+    any other name raises. A single chain comes back as a copy, not
+    truncated, by either method."""
+    if method is None:
+        method = SUM_METHOD
+    if method not in _SUM_METHODS:
+        raise ValueError("sum_many: unknown method %r (have: exact, densitymatrix)"
+                         % (method,))
     chains = list(chains)
     if not chains:
         raise ValueError("sum_many: no chains given")
     if len(chains) == 1:
         return chains[0].copy()
+    if method == "densitymatrix" and all(isinstance(c, MPS) for c in chains):
+        return _sum_densitymatrix(chains, cutoff=cutoff, maxdim=maxdim)
     n = chains[0].length()
     for c in chains[1:]:
         if c.length() != n:
@@ -493,13 +676,14 @@ def sum_many(chains, cutoff=0.0, maxdim=None):
     return result
 
 
-def sum(A, B, cutoff=0.0, maxdim=None):
+def sum(A, B, cutoff=0.0, maxdim=None, method=None):
     """Direct sum of two MPS (or two MPO): the exact, standard MPS/MPO
     addition construction (concatenation at the boundaries, block-diagonal
     in the link spaces at interior sites), followed by one truncating
     left-to-right SVD sweep down to cutoff/maxdim. A thin 2-operand
-    wrapper around sum_many()."""
-    return sum_many([A, B], cutoff=cutoff, maxdim=maxdim)
+    wrapper around sum_many(), which says what `method` does; None takes
+    the module default SUM_METHOD."""
+    return sum_many([A, B], cutoff=cutoff, maxdim=maxdim, method=method)
 
 
 def _apply_chain(K, X, out_cls, cutoff=0.0, maxdim=None):
