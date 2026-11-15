@@ -4268,8 +4268,9 @@ Julia build's PyCall to be linked against a matching libpython (the same
 class of ABI landmine documented in §2 for the C++ extension) and needs a
 `compiled_modules=False` workaround for slow/broken precompilation.
 `juliacall` avoids both, and self-provisions Julia plus the required
-packages (`ITensors`, `ITensorMPS`, `ITensorNHDMRG`, pinned in
-`src/dmrgpy/juliapkg.json`) into its own managed project the first time
+packages (`ITensors`, `ITensorMPS` 0.4, `KrylovKit`, `VectorInterface`,
+pinned in `src/dmrgpy/juliapkg.json`) into its own managed project the
+first time
 `mpsjulialive` is imported — no manual Julia download step. One porting
 detail worth knowing: unlike PyJulia, `juliacall` does *not* implicitly
 convert a Python `list` of `str` into a Julia `Vector{String}` (it wraps
@@ -5169,8 +5170,10 @@ TDZ above:
   `generalized.jl::get_gs_generalized_nhdmrg` are the non-Hermitian plain
   and generalized solvers. Unlike the other three backends, the local
   sweep here is *not* a dmrgpy port of ITensorNHDMRG.jl — it is
-  ITensorNHDMRG.jl (already a declared dependency in `juliapkg.json`, and
-  already used by `get_gs.jl::get_gs_nhdmrg` for plain non-Hermitian
+  ITensorNHDMRG.jl (an unchanged copy of its `src/` in
+  `mpsjulialive/ITensorNHDMRG/`, loaded by `juliasession.py` before the
+  other Julia files, since its compat entry refuses ITensorMPS 0.4; it is
+  also used by `get_gs.jl::get_gs_nhdmrg` for plain non-Hermitian
   ground-state *energies*, which discards the left vector). The retry
   loop and two-sided eigen-residual certificate in `nhdmrg.py` are built
   purely on generic `MultiOperator`×MPS algebra, so they are shared

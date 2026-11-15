@@ -87,9 +87,12 @@ exclude = ["dmrgpy.mpscpp2", "dmrgpy.mpscpp2.*", "dmrgpy.mpscpp3", "dmrgpy.mpscp
 [tool.setuptools.package-data]
 # juliapkg.json is not documentation -- juliacall/juliapkg reads it at
 # import time to resolve and precompile the Julia side (ITensors,
-# ITensorMPS, ITensorNHDMRG) into its managed project. Without it in the
-# wheel, `pip install dmrgpy[julia]` installs a julia_live backend that
-# finds no ITensors.jl at all.
+# ITensorMPS, KrylovKit, VectorInterface) into its managed project.
+# Without it in the wheel, `pip install dmrgpy[julia]` installs a
+# julia_live backend that finds no ITensors.jl at all. The copy of
+# ITensorNHDMRG.jl under mpsjulialive/ITensorNHDMRG/ is loaded from the
+# installed package, so its files ship too.
 dmrgpy = ["juliapkg.json", "mpsjulia/*.jl", "mpsjulia/compiler/*.jl"]
-"dmrgpy.mpsjulialive" = ["*.jl"]
+"dmrgpy.mpsjulialive" = ["*.jl", "ITensorNHDMRG/*.jl",
+                         "ITensorNHDMRG/LICENSE", "ITensorNHDMRG/UPSTREAM.md"]
 "dmrgpy.algebra" = ["fortran/algebra/*.f90"]

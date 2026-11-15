@@ -1,6 +1,6 @@
 
 # Non-Hermitian DMRG on the live Julia backend, via the real
-# ITensorNHDMRG.jl package (declared in ../juliapkg.json) rather than one
+# ITensorNHDMRG.jl package (a copy in ITensorNHDMRG/) rather than one
 # of this codebase's own ports of it. get_gs.jl's get_gs_nhdmrg already
 # calls it for plain non-Hermitian ground-state energies, with no
 # tie-break, and groundstate.py keeps conj(wfl) of that solve as the left
@@ -112,7 +112,7 @@
 
 using ITensors
 using ITensorMPS
-using ITensorNHDMRG
+using .ITensorNHDMRG # mpsjulialive/ITensorNHDMRG, see juliasession.py
 
 
 # The bilinear (unconjugated) overlap wfl^T*wfr, which is what

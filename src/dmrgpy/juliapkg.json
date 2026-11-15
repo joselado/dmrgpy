@@ -3,20 +3,19 @@
     "packages": {
         "ITensors": {
             "uuid": "9136182c-28ba-11e9-034c-db9fb085ebd5",
-            "version": "0.9"
+            "version": "0.9.32"
         },
         "ITensorMPS": {
             "uuid": "0d1a4710-d33b-49a5-8f18-73bdf49b47e2",
-            "version": "0.3"
-        },
-        "ITensorNHDMRG": {
-            "uuid": "8eead381-b44f-4c25-a327-91918c5e5257",
-            "url": "https://github.com/tipfom/ITensorNHDMRG.jl",
-            "rev": "main"
+            "version": "0.4.2"
         },
         "KrylovKit": {
             "uuid": "0b1a1467-8014-51b9-945f-bf0ae24f4b77",
             "version": "0.10"
+        },
+        "VectorInterface": {
+            "uuid": "409d34a3-91d5-4945-b6ec-7529ddf182d8",
+            "version": "0.6"
         }
     }
 }

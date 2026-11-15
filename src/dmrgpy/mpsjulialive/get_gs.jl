@@ -1,7 +1,7 @@
 
 using ITensorMPS
 using ITensors
-using ITensorNHDMRG
+using .ITensorNHDMRG # mpsjulialive/ITensorNHDMRG, see juliasession.py
 
 
 # Shared by every mpsjulialive/*.jl DMRG-family entry point (get_gs_dmrg/

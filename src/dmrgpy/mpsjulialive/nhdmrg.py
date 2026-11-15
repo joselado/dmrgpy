@@ -10,7 +10,7 @@ they are shared rather than reimplemented here.
 
 Unlike the other three backends, the local non-Hermitian sweep itself is
 not dmrgpy's own port of ITensorNHDMRG.jl -- it *is* ITensorNHDMRG.jl
-(declared in ../juliapkg.json, already used by get_gs.jl's
+(an unchanged copy in ITensorNHDMRG/, see its UPSTREAM.md; used by get_gs.jl's
 get_gs_nhdmrg for plain non-Hermitian ground states). So the two
 algorithm knobs the ported backends expose, krylovdim and restarts, do
 not map one-to-one: see nhdmrg_attempt's own note.

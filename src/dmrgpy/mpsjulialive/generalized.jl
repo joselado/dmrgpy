@@ -31,7 +31,7 @@
 
 using ITensors
 using ITensorMPS
-using ITensorNHDMRG
+using .ITensorNHDMRG # mpsjulialive/ITensorNHDMRG, see juliasession.py
 
 
 # H and A are ordinary Hamiltonian-like MPOs of modest bond dimension, so

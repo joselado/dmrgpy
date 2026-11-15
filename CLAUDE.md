@@ -149,12 +149,20 @@ Things in here that are load-bearing and easy to break:
   pulled in.
 - **`src/dmrgpy/juliapkg.json` must stay in `package-data`.** juliacall/
   juliapkg reads it at import time to resolve and precompile ITensors,
-  ITensorMPS, ITensorNHDMRG and KrylovKit (used directly by
-  `mpsjulialive/vumps.jl` and `cbe.jl`); if it is missing from the wheel,
+  ITensorMPS 0.4, KrylovKit (used directly by `mpsjulialive/vumps.jl` and
+  `cbe.jl`) and VectorInterface; if it is missing from the wheel,
   `pip install dmrgpy[julia]` yields a Julia backend with no ITensors.jl.
   `.gitignore`'s unanchored `julia*` pattern would also swallow it, hence
   the explicit `!src/dmrgpy/juliapkg.json` un-ignore. Do not remove either
   one.
+- **ITensorNHDMRG.jl is a copy, not a dependency.** Its compat entry
+  refuses ITensorMPS 0.4, so its `src/` lives unchanged in
+  `src/dmrgpy/mpsjulialive/ITensorNHDMRG/` (LICENSE and commit hash in
+  `UPSTREAM.md`), `juliasession.py` includes it as a module before any
+  other Julia file, and `get_gs.jl`/`nhdmrg.jl` load it with
+  `using .ITensorNHDMRG`. Its files are in `package-data`; its
+  VectorInterface dependency is in `juliapkg.json`. The folder name must
+  not start with `julia`, because of the same `.gitignore` pattern.
 - **The classifiers say `OS Independent`**: the pip-installed package (ED
   and `itensor_version="python"` backends) works on Windows. Nothing in the
   Python layer shells out any more (`sites.py::initialize()` used to run

@@ -2,8 +2,9 @@
 #
 # Uses juliacall/PythonCall.jl rather than PyJulia: no libpython-matching
 # precondition, no compiled_modules=False startup workaround, and the
-# required Julia packages (ITensors, ITensorMPS, ITensorNHDMRG) are
-# declared in ../juliapkg.json and auto-installed/precompiled into a
+# required Julia packages (ITensors, ITensorMPS, KrylovKit,
+# VectorInterface) are declared in ../juliapkg.json and
+# auto-installed/precompiled into a
 # juliacall-managed project the first time this module is imported --
 # reusing whatever Julia install juliapkg finds (or provisioning its own
 # via juliaup if none is found).
@@ -76,6 +77,11 @@ def initialize():
     files += ["fourpoint.jl"] # four-point tensor, environment-reuse walk
     files += ["cbe.jl"] # one-site DMRG with controlled bond expansion;
                          # uses only ITensors/ITensorMPS
+    # ITensorNHDMRG.jl is a copy in this folder (ITensorNHDMRG/UPSTREAM.md),
+    # since its compat entry refuses ITensorMPS 0.4. It is included as a
+    # file, so that its own include() calls resolve next to it, and before
+    # get_gs.jl and nhdmrg.jl, which load it with using .ITensorNHDMRG.
+    Main.include(os.path.join(path,"ITensorNHDMRG","ITensorNHDMRG.jl"))
     for name in files: # loop over files
         Main.seval(open(path+"/"+name).read()) # execute this file
 
