@@ -5570,20 +5570,42 @@ backends. Only the KPM moments are its own
 tensors through `arrays.jl` (see section 4.8). The NH-KPM recursion is
 `nhkpm.jl`, a line-by-line port of the coupled forward/adjoint Chebyshev
 recursion on the Julia MPOs of `(z-H)/E_max` and its dagger, on the
-`nh_left_wf` pair. At the time of writing, `get_dynamical_correlator`
-still refuses `CVM_explicit`, `CVMimag`, the non-Hermitian `CVM` and the
-non-Hermitian `KPM` on `julia_live` in a block ahead of the ground-state
-solve, although `applyinverse` and `nhkpm.jl` exist; removing that block
-is what opens those routes. `kpm_energy_truncate` raises naming the
+`nh_left_wf` pair. `CVM_explicit`, `CVMimag` and the non-Hermitian `CVM`
+go through the `applyinverse` of `bicgstab.jl`, and the non-Hermitian
+`KPM` through `nhkpm.jl`. `kpm_energy_truncate` raises naming the
 backends that have it.
 
-**Load order.** `juliasession.py::initialize()` evaluates the `.jl`
+**Site arrays, CLIK and implicit steps.** Three features reuse an
+algorithm of the other backends instead of a Julia one of their own.
+`arrays.jl` exports the site tensors of an MPS or an MPO as arrays, for
+`TASK`, and its `mps_from_site_arrays` builds an MPS back on the chain's
+Julia site indices with fresh links, so the Hadamard products of
+`mpsalgebratk/hadamard.py` run the array kernel of `pyitensor/rsi.py`
+here too. `get_krylov_spectrum` runs the driver of `cliksession.py` on
+the operations object of `mpsjulialive/clik.py`, built on the functions
+of this folder plus `clik.jl`'s seeded starts and global subspace
+expansion; it takes random starts only. `implicit.jl` is a port of
+`pyitensor/implicit.py`, the two-site Galerkin sweep behind
+`evolve_imaginary_time`, `anneal_method="implicit"`, METTS with
+`itime="implicit"` (`metts.jl`'s `metts_evolve`) and the opt-in
+`inverse_solver="sweep"`. Its environments are written on ITensors, not
+on ITensorMPS's internal `ReducedLinearProblem`, the local system is
+solved by KrylovKit's GMRES, and the split is an SVD
+(`which_decomp="svd"`, since `factorize` would take an eigendecomposition
+above a cutoff of 1e-12). The defaults of `julia_live` stay where they
+were: BiCGSTAB for `applyinverse`, TDVP for METTS, Taylor for the
+purification.
+
+**Load order.** `juliasession.py::initialize()` first includes the copy
+of ITensorNHDMRG.jl (`ITensorNHDMRG/ITensorNHDMRG.jl`, as a file, so that
+its own `include` calls resolve next to it), and then evaluates the `.jl`
 files in this order: `sites_custom.jl`, `sites.jl`, `get_gs.jl`,
 `read_operator.jl`, `mpsalgebra.jl`, `kpm.jl`, `tdvp.jl`, `metts.jl`,
 `tebd.jl`, `excited.jl`, `nhdmrg.jl`, `generalized.jl`,
 `densitymatrix.jl`, `entropy.jl`, `fermion_ops.jl`, `mpo_ops.jl`,
 `bicgstab.jl`, `nhkpm.jl`, `arrays.jl`, `correlations.jl`, `gs_extra.jl`,
-`sites_qn.jl`. The comment next to each entry says which file it has to
+`sites_qn.jl`, `vumps.jl`, `ddmrg.jl`, `fourpoint.jl`, `cbe.jl`,
+`clik.jl`, `implicit.jl`. The comment next to each entry says which file it has to
 follow, for example `sites_custom.jl` ahead of `sites.jl` and `bicgstab.jl`
 and `nhkpm.jl` after `mpsalgebra.jl`, whose `apply_op`/`summps` they
 call. A new `.jl` file is appended to that list.
