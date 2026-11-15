@@ -391,8 +391,12 @@ def sector_mps(sites, sector, m, seed=0, cutoff=0.0):
     for plan in unique:
         psi = sector_product_mps(sites, plan)
         states.append(psi * complex(rng.randn(), rng.randn()))
+    # exact: the density-matrix route keeps eigenvectors of roundoff-level
+    # eigenvalues of rho, which can mix charges, and noise-free sector DMRG
+    # relies on a start state that carries the charge exactly (SECTOR
+    # excited states left their sector, <(Q-q)^2> = 4, on that route)
     psi = states[0] if len(states) == 1 else sum_many(states, cutoff=cutoff,
-                                                      maxdim=m)
+                                                      maxdim=m, method="exact")
     psi.position(psi.length())
     psi.normalize()
     return psi

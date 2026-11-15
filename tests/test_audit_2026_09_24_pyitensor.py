@@ -35,6 +35,7 @@ from dmrgpy.pyitensor import chain as chainmod
 from dmrgpy.pyitensor import gse as gsemod
 from dmrgpy.pyitensor import idmrg_excitations as ie
 from dmrgpy.pyitensor.mpsalgebra import _link_at
+from dmrgpy.pyitensor import mpsalgebra as mamod
 from dmrgpy.pyitensor.svd import Spectrum
 from dmrgpy.pyitensor.svd import svd as _real_svd
 
@@ -198,7 +199,14 @@ def _svd_reporting_the_padded_rank(*args, **kwargs):
 @pytest.fixture
 def pre_fix(monkeypatch):
     """Rebuild the pre-fix one-site route: no suspension, no strip, and the
-    padded bond dimension taken as the rank in the expansion."""
+    padded bond dimension taken as the rank in the expansion.
+
+    The tests that take this fixture run on the exact MPO application and
+    MPS sum, where set_pad_bonds acts and the exemption lives; the
+    density-matrix routes, the default since 2026-11-15, do not pad at
+    all, so the pre-fix route could not be rebuilt on them."""
+    monkeypatch.setattr(mamod, "APPLY_METHOD", "exact")
+    monkeypatch.setattr(mamod, "SUM_METHOD", "exact")
     def apply():
         monkeypatch.setattr(chainmod, "_bk", _BackendWithoutExemption())
         monkeypatch.setattr(chainmod, "_strip_bond_padding", lambda psi: psi)
