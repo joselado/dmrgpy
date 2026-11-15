@@ -609,9 +609,11 @@ sector solves going wrong between 56 and 80 sites at `maxm=128`, and
 PT-symmetric XX chain, several eigenvalues with one real part, one
 NH-DMRG attempt in three still stalls at 12 sites and the attempts stall
 at 14 (ITensorNHDMRG.jl does worse), while the imaginary-time route,
-now `get_nh_levels()` and the default of `gs_energy()`, finds every
-distinct level of smallest real part up to 16 sites (its stored pair
-needs maxm=64 there, at maxm=30 neither route passes the certificate);
+now `get_nh_levels()` and the default of `gs_energy()`, finds the
+distinct levels of smallest real part up to 16 sites (9 of 9 there on
+`"python"`, 8 of 9 on v3 at maxm=30; its stored pair passes the
+certificate at maxm=64, at maxm=30 neither route does and the better
+pair is kept with a warning);
 the `kpm_energy_truncate` window problem outside its worst regime
 (`docs/known_issue_kpm_energy_truncation_window.md`); the sliver just below
 `kpm_scale=1/2` where the elastic line is distorted while the moments are

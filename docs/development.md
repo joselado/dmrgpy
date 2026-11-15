@@ -3402,9 +3402,11 @@ Notable, deliberate implementation details (not bugs to "fix"):
   NH-DMRG solve (10-site PT chain, `maxm=30`: 16 s against 2 s on
   `"python"`), in exchange for reaching the levels where NH-DMRG stalls
   (every distinct level of smallest real part of that chain up to 16
-  sites; the stored pair, a Ritz vector compressed to `maxm`, holds all
-  16 tied levels there and passes the certificate at `maxm=64`, not at
-  30). `Many_Body_Chain.get_nh_levels()` exposes the Ritz pairs
+  sites, 9 of 9 on `"python"` and 8 of 9 on v3 at `maxm=30`; the stored
+  pair, a Ritz vector compressed to `maxm`, has to hold all 16 tied
+  levels there and passes the certificate at `maxm=64` on both backends,
+  not at 30, where the better of it and NH-DMRG's pair is kept with a
+  warning). `Many_Body_Chain.get_nh_levels()` exposes the Ritz pairs
   themselves. `tests/test_nh_levels.py`.
 - A few pre-existing bugs in the original (pre-refactor) file-based
   backend are deliberately reproduced rather than silently fixed —
