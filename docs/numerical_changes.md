@@ -1984,3 +1984,15 @@ there. `get_four_correlation_tensor` on native spinful sites of
 `four_correlation_tensor_spinful`) instead of `"explicit"`: 0.35 s against
 0.49 s at 3 sites, the two equal to $10^{-10}$. `itime="tdvp"` and
 `ctmode="explicit"` give the numbers of before.
+
+## The 2026-11-15 correlation matrix of `itensor_version=3`
+
+`get_correlation_matrix` on a v3 chain of spinless fermion sites without
+`operators=` now takes `dmmode="full"` outside a sector too, and
+`"full"` is now one environment walk per row in C++
+(`Chain::correlation_matrix_sweep`, the algorithm of ITensorMPS.jl's
+`correlation_matrix`) instead of one AutoMPO per pair. The walk equals the
+per-pair loop to $5\times10^{-15}$ on 64 sites; the default moves from
+`"fast"` by its truncation, $4\times10^{-9}$ to $6\times10^{-8}$ on 16 to
+64 sites. On 64 sites it takes 0.37 s against 19 s for `"fast"` and 30 s
+for the per-pair loop. `dmmode="fast"` gives the numbers of before.

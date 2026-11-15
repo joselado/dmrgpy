@@ -270,7 +270,13 @@ def cpp_correlation_matrix(wf):
         from ..mpsjulialive.juliasession import Main
         return np.array(Main.correlation_matrix_cdc(wf.jlmps),
                 dtype=np.complex128)
-    return self._session.correlation_matrix(wf.cpp_handle)
+    session = self._session
+    if self.itensor_version==3 and hasattr(session,"correlation_matrix_sweep"):
+        # one environment walk per row instead of one AutoMPO per pair,
+        # equal to 5e-15 and 81x faster at 64 sites (29.8 s against 0.37 s);
+        # session.correlation_matrix stays the per-pair reference
+        return session.correlation_matrix_sweep(wf.cpp_handle)
+    return session.correlation_matrix(wf.cpp_handle)
 
 
 def _default_dmmode(self,wf,basis):
@@ -308,15 +314,16 @@ def _default_dmmode(self,wf,basis):
     if not getattr(self,"conserved_sector",None):
         # no sector: the one-sweep session matrix of "python"
         # (pyitensor/chain.py's correlation_matrix_sweep, exact, 17x faster
-        # than "fast" at 32 sites; the author's pick of 2026-11-15), and the
-        # cheapest route, "fast", everywhere else
+        # than "fast" at 32 sites; the author's pick of 2026-11-15) and of
+        # v3 (Chain::correlation_matrix_sweep, 0.37 s against 19 s for
+        # "fast" at 64 sites), and "fast" everywhere else
         mbo = getattr(wf,"MBO",None)
         sites = getattr(self,"sites",None)
         spinless = sites is not None and len(sites)>0 and \
                 all(str(c)=="0" for c in sites) # Cdag/C on every site
         if basis!="Nambu" and spinless and \
                 getattr(wf,"cpp_handle",None) is not None and \
-                getattr(mbo,"itensor_version",None)=="python" and \
+                getattr(mbo,"itensor_version",None) in ("python",3) and \
                 hasattr(getattr(mbo,"_session",None),"correlation_matrix_sweep"):
             return "full"
         # julia_live: ITensorMPS's correlation_matrix (correlations.jl), one

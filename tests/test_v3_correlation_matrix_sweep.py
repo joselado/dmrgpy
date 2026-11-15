@@ -92,3 +92,20 @@ def test_spin_sites_are_refused():
     sc.gs_energy()
     with pytest.raises(ValueError, match="spinless fermion"):
         sc._session.correlation_matrix_sweep(sc.wf0.cpp_handle)
+
+
+@pytest.mark.parametrize("sector", [None, dict(Nf=3)])
+def test_default_takes_the_sweep(sector):
+    """get_correlation_matrix() on v3 spinless sites takes dmmode="full",
+    now the one sweep, with or without a sector: equal to the per-pair
+    AutoMPO loop, and to "fast" outside a sector."""
+    from dmrgpy.entropytk import correlationentropy as ce
+    fc = _spinless(8, phase=0.7, sector=sector)
+    wf = fc.get_gs()
+    assert ce._default_dmmode(fc, wf, "electron") == "full"
+    got = np.asarray(fc.get_correlation_matrix())
+    ref = np.asarray(fc._session.correlation_matrix(wf.cpp_handle))
+    assert np.max(np.abs(got-ref)) < 1e-12
+    if sector is None:
+        fast = np.asarray(fc.get_correlation_matrix(dmmode="fast"))
+        assert np.max(np.abs(got-fast)) < 1e-6
