@@ -4,6 +4,7 @@ from .algebra import algebra
 from . import effectivehamiltonian
 from . import pychainwrapper
 from . import multioperator
+from . import correlator
 from .kondospectrumtk.kondomethod import KondoSpectrumMixin
 
 class Coupling():
@@ -121,9 +122,15 @@ class Spin_Chain(KondoSpectrumMixin,Many_Body_Chain):
     def get_magnetization(self,**kwargs):
         """Return the magnetization on each site, and save it to
         MAGNETIZATION.OUT"""
-        mx = [self.vev(self.Sx[i],**kwargs) for i in range(self.ns)]
-        my = [self.vev(self.Sy[i],**kwargs) for i in range(self.ns)]
-        mz = [self.vev(self.Sz[i],**kwargs) for i in range(self.ns)]
+        n = self.ns
+        m = correlator.sweep_vevs(self,self.Sx[:n]+self.Sy[:n]+self.Sz[:n],
+                **kwargs) # one sweep on "python", None elsewhere
+        if m is not None:
+            mx,my,mz = list(m[:n]),list(m[n:2*n]),list(m[2*n:])
+        else:
+            mx = [self.vev(self.Sx[i],**kwargs) for i in range(self.ns)]
+            my = [self.vev(self.Sy[i],**kwargs) for i in range(self.ns)]
+            mz = [self.vev(self.Sz[i],**kwargs) for i in range(self.ns)]
         np.savetxt("MAGNETIZATION.OUT",np.array([mx,my,mz]).T)
         return np.array([mx,my,mz]).real
     def get_full_SS_correlator(self,**kwargs):

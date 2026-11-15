@@ -166,13 +166,29 @@ def kondo_cloud(self, imp=None, lead=None, a=0.9, connected=False,
     szd = vev(self.Sz[imp])
     sz2 = vev(self.Sz[imp]*self.Sz[imp])
     mu = sz2 - szd**2
+    # One sweep on "python" when every term sits on one or two sites (the
+    # native chain, and the connected form on both), else one vev each.
+    from . import correlator
+    m = len(lead)
     if connected:
         norm = mu
-        corr = np.array([vev(self.Sz[imp]*self.Sz[i]) - szd*vev(self.Sz[i])
-                         for i in lead])
+        both = correlator.sweep_vevs(self, [self.Sz[imp]*self.Sz[i]
+                for i in lead] + [self.Sz[i] for i in lead], mode=mode)
+        if both is None:
+            corr = np.array([vev(self.Sz[imp]*self.Sz[i]) - szd*vev(self.Sz[i])
+                             for i in lead])
+        else:
+            both = np.real(both)
+            corr = both[:m] - szd*both[m:]
     else:
-        norm = vev(_dot(self, imp, imp))
-        corr = np.array([vev(_dot(self, imp, i)) for i in lead])
+        dots = correlator.sweep_vevs(self, [_dot(self, imp, i)
+                for i in [imp] + lead], mode=mode)
+        if dots is None:
+            norm = vev(_dot(self, imp, imp))
+            corr = np.array([vev(_dot(self, imp, i)) for i in lead])
+        else:
+            dots = np.real(dots)
+            norm, corr = dots[0], dots[1:]
     if norm <= 0.0:
         raise ValueError("the impurity carries no moment, <S_d^2> = 0, so "
                          "Sigma(x) is not defined")

@@ -4,6 +4,7 @@ from .pyfermion import mbfermion
 from .algebra import algebra
 from .manybodychain import Many_Body_Chain
 from .pyboson import boson
+from . import correlator
 
 
 # The only boson site mpscpp2 (ITensor v2) knows is ITensor's own
@@ -78,12 +79,17 @@ class Bosonic_Chain(Many_Body_Chain):
         return Many_Body_Chain.initialize(self,**kwargs)
     def get_density(self,**kwargs):
         """Return the average boson occupation in each site"""
-        out = [self.vev(self.N[i],**kwargs) for i in range(self.ns)]
+        out = correlator.sweep_vevs(self,self.N[:self.ns],**kwargs) # "python"
+        if out is None:
+            out = [self.vev(self.N[i],**kwargs) for i in range(self.ns)]
         return np.array(out).real
     def get_density_fluctuation(self,**kwargs):
         """Return the occupation-number fluctuations <N^2>-<N>^2 in each site"""
         d = self.get_density(**kwargs) # get the density
-        d2 = np.array([self.vev(self.N[i]*self.N[i],**kwargs) for i in range(self.ns)])
+        d2 = correlator.sweep_vevs(self,[self.N[i]*self.N[i]
+                for i in range(self.ns)],**kwargs) # one sweep on "python"
+        if d2 is None:
+            d2 = np.array([self.vev(self.N[i]*self.N[i],**kwargs) for i in range(self.ns)])
         return d2.real-d**2
     def get_sector_charge_operators(self):
         """A bosonic chain conserves the total boson number"""

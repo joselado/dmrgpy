@@ -1567,6 +1567,9 @@ class Many_Body_Chain():
       elif type(self)==fermionchain.Fermionic_Chain:
           ops = [self.Cdag[i]*self.C[j] for (i,j) in pairs]
       else: raise NotImplementedError("get_correlator: not implemented for %s" % type(self).__name__)
+      from . import correlator
+      out = correlator.sweep_vevs(self,ops,**kwargs) # one sweep on "python"
+      if out is not None: return out
       return np.array([self.vev(o,**kwargs) for o in ops])
   # Many_Body_Chain.evolution() used to live here. It called
   # timedependent.evolution(), which does not exist and (per git history)

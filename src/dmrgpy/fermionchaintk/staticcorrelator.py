@@ -29,7 +29,9 @@ def get_correlator_spinless(self,name="cdc",mode="DMRG",**kwargs):
 
 def get_density_spinless(self,**kwargs):
     """Return the electronic density"""
-    out = [self.vev(self.N[i],**kwargs) for i in range(self.ns)]
+    out = correlator.sweep_vevs(self,self.N[:self.ns],**kwargs) # "python"
+    if out is None:
+        out = [self.vev(self.N[i],**kwargs) for i in range(self.ns)]
     return np.array(out).real
 
 
@@ -42,7 +44,10 @@ def get_density_spinless(self,**kwargs):
 def get_density_fluctuation_spinless(self,**kwargs):
     """Return the electronic density"""
     d = self.get_density_spinless(**kwargs) # get the density
-    d2 = np.array([self.vev(self.N[i]*self.N[i],**kwargs) for i in range(self.ns)])
+    d2 = correlator.sweep_vevs(self,[self.N[i]*self.N[i]
+            for i in range(self.ns)],**kwargs) # one sweep on "python"
+    if d2 is None:
+        d2 = np.array([self.vev(self.N[i]*self.N[i],**kwargs) for i in range(self.ns)])
     return d2-d**2 # return density fluctuations
 
 

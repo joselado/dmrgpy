@@ -28,6 +28,7 @@ from .metts import metts_thermal_average as _metts_thermal_average
 from .metts import metts_dynamical_correlator as _metts_dynamical_correlator
 from . import sector as sectortk
 from .sites import SiteX, site_qn_names
+from .sites.base import is_fermionic
 from .svd import svd
 from .sweeps import Sweeps
 from .mpscontainer import _link_at, MPS
@@ -251,6 +252,26 @@ def _max_link_dim(psi):
         if link is not None and link.dim > out:
             out = link.dim
     return out
+
+
+def _op_names(name):
+    """A one-site operator of the sweeps (Chain.sweep_measure) as a tuple
+    of names. A string is one name; a tuple or list of names is their
+    product on one site in the written order, as AutoMPO multiplies
+    ("N","N") or ("Cdagup","Cdn")."""
+    if isinstance(name, str):
+        return (name,)
+    names = tuple(name)
+    if not names or not all(isinstance(x, str) for x in names):
+        raise TypeError("a one-site operator is a name or a tuple of "
+                        "names, got %r" % (name,))
+    return names
+
+
+def _odd(names):
+    """Whether a product of names is odd under fermion parity, by
+    is_fermionic, the rule AutoMPO threads its Jordan-Wigner string by."""
+    return sum(1 for x in names if is_fermionic(x)) % 2 == 1
 
 
 class Chain:
@@ -1531,26 +1552,198 @@ class Chain:
                                   nsweeps=int(nsweeps))
         return x, history
 
-    def correlation_matrix_sweep(self, wf):
-        """<Cdag_i C_j> for every pair by one environment walk per i, the
-        algorithm of ITensorMPS.jl's correlation_matrix: with the
-        orthogonality centre on site i, the environment carries Cdag_i,
-        then an F on every site it crosses (the Jordan-Wigner string of
-        four_correlation_tensor_sweep, no F on the two end sites), and
-        each j closes it with C_j and the identity of the right-orthogonal
-        tail. About n^2/2 one-site folds against the n^2/2 MPO builds and
-        full contractions of correlation_matrix, the reference it is
-        checked against. Not renormalized: <wf|O|wf>, as there. Every step
-        is an ITensor contraction, so it runs on the JAX backend; only the
-        scalars come to the host."""
-        n = self.sites.length()
-        out = np.zeros((n, n), dtype=complex)
-        psi = wf.copy()  # position() changes the gauge in place
+    # -- one-sweep measurements ------------------------------------------
+    #
+    # The algorithm of ITensorMPS.jl's expect and correlation_matrix(psi,
+    # A, B) (ITensorMPS.jl 0.4.2, src/mps.jl): move the orthogonality
+    # centre along the chain once, measure a one-site operator on the
+    # centre tensor alone, and walk an environment to the right of each
+    # site i for the pairs (i, j). Nothing builds an MPO, so a profile
+    # costs n position moves instead of n MPO builds and n contractions of
+    # the whole chain. The Jordan-Wigner convention is that of the
+    # per-term path, AutoMPO's (autompo.HTerm.add and resolve), so every
+    # entry is the inner(wf, MPO, wf) of expect_per_site and
+    # correlation_per_pair, the references these are checked against.
 
-        def fold(E, bra, site, names):
+    def _sweep_matrix(self, names, site, string=False):
+        """Host matrix, in the (in, out) storage of sites/base.py, of the
+        product names[0]*names[1]*... on one site, times F on the right
+        (F acts first) when `string` is set: the "A * F" AutoMPO puts on
+        the left end of a fermionic pair."""
+        st = self.sites.site_type(site)
+        mat = st.matrix(names[0])
+        for x in names[1:]:
+            mat = st.matrix(x) @ mat  # storage of a product is reversed
+        if string:
+            mat = st.matrix("F") @ mat
+        return mat
+
+    def _sweep_adjoint(self, names_a, names_b, site):
+        """Whether B = A^dagger as site matrices at this site. When it
+        holds at sites i and j, <A_i B_j> = conj(<A_j B_i>) exactly."""
+        ma = self._sweep_matrix(names_a, site)
+        mb = self._sweep_matrix(names_b, site)
+        scale = max(1.0, float(np.max(np.abs(ma))))
+        return bool(np.allclose(mb, ma.conj().T, rtol=0.0, atol=1e-14*scale))
+
+    def _sector_key(self, factors):
+        codes = self.sites.site_codes()
+        return tuple((x, codes[s - 1]) for x, s in factors)
+
+    def conserves_sector(self, factors):
+        """True when the product term `factors` ([(name, 1-based site),
+        ...]) conserves the chain's sector by sector.sector_terms, the
+        check of the per-term path. Always True outside a sector."""
+        if not self.sector:
+            return True
+        try:
+            self._check_sweep_sector([factors])
+        except ValueError:
+            return False
+        return True
+
+    def _check_sweep_sector(self, terms):
+        """Raise the ValueError of the per-term path (_ampo) for the first
+        product term that does not conserve the sector. Whether a term
+        passes depends only on its names and the site types, so one term
+        per distinct (name, site type) sequence is checked."""
+        if not self.sector:
+            return
+        done = set()
+        for factors in terms:
+            key = self._sector_key(factors)
+            if key in done:
+                continue
+            sectortk.sector_terms(self.sites, self.sector,
+                                  [(1.0, list(factors))])
+            done.add(key)
+
+    def sweep_measure(self, wf, ones=(), twos=()):
+        """Several one-site profiles and two-point entries of one state in
+        one sweep of its orthogonality centre.
+
+        `ones` is a list of (name, sites): <wf|O_s|wf> for each 0-based
+        site s. `twos` is a list of (nameA, nameB, pairs): <wf|A_i B_j|wf>
+        for each 0-based pair (i, j), any order. A name is a string or a
+        tuple of names multiplied on one site. Returns (list of arrays for
+        ones, list of arrays for twos), in the order given. Not
+        renormalized: these are the raw inner(wf, MPO, wf).
+
+        Conventions, all those of AutoMPO. A one-site product is the
+        product in the written order; on the diagonal i = j of a pair it
+        is A then B. For two fermion-odd names (is_fermionic) a pair with
+        i < j is (A F)_i F...F B_j, the F of site i acting first, and a
+        pair with i > j is -(B F)_j F...F A_i, the sign of exchanging two
+        odd operators. Two even names get no string. An odd one-site
+        operator, or a pair of one odd and one even name, needs a string
+        to the end of the chain and raises ValueError: take those from
+        the per-term vev. When B = A^dagger on both sites, the entry i > j
+        is conj(<A_j B_i>), from the same walk as the upper entry;
+        otherwise it gets its own walk. In a sector every term is checked
+        as the per-term path checks it, and an operator that breaks the
+        sector raises the same ValueError.
+
+        The one-site entries come from the centre tensor alone,
+        O(chi^2 d^2) each after the move; the walk of one left site and
+        one left operator serves every pair that starts there, one fold of
+        O(chi^3 d) per site it crosses. Every step is an ITensor
+        contraction, so it runs on the JAX backend; the site matrices are
+        built on the host and only the scalars come back."""
+        self._check_wf_sites(wf, "sweep_measure")
+        n = self.sites.length()
+        ones = [(_op_names(a), [int(s) for s in sites]) for a, sites in ones]
+        twos = [(_op_names(a), _op_names(b), [(int(i), int(j)) for i, j in pairs])
+                for a, b, pairs in twos]
+
+        def in_chain(s):
+            if not 0 <= s < n:
+                raise IndexError("sweep_measure: site %d outside the chain's "
+                                 "sites 0..%d" % (s, n - 1))
+        for names, sites in ones:
+            if _odd(names):
+                raise ValueError(
+                    "sweep_measure: %s is odd under fermion parity, so its "
+                    "Jordan-Wigner string runs to the end of the chain; "
+                    "take it from the per-term vev" % ("*".join(names),))
+            for s in sites:
+                in_chain(s)
+        for na, nb, pairs in twos:
+            if _odd(na) != _odd(nb):
+                raise ValueError(
+                    "sweep_measure: the pair %s, %s mixes a fermion-odd and "
+                    "an even operator, whose string runs to the end of the "
+                    "chain; take it from the per-term vev"
+                    % ("*".join(na), "*".join(nb)))
+            for i, j in pairs:
+                in_chain(i)
+                in_chain(j)
+        if self.sector:
+            self._check_sweep_sector(
+                [[(x, s + 1) for x in names]
+                 for names, sites in ones for s in sites]
+                + [[(x, i + 1) for x in na] + [(x, j + 1) for x in nb]
+                   for na, nb, pairs in twos for i, j in pairs])
+
+        # The plan. A slot is (output array, index, how): how is 0 for the
+        # value, 1 for minus it, 2 for its conjugate.
+        out1 = [np.zeros(len(sites), dtype=complex) for _, sites in ones]
+        out2 = [np.zeros(len(pairs), dtype=complex) for _, _, pairs in twos]
+        local = {}  # 1-based site -> [(names, slot)], centre tensor alone
+        diag = {}   # 1-based site -> [(names, slot)], pairs with i = j
+        walks = {}  # (left site, left names) -> {right site: {right names: [slot]}}
+        for (names, sites), arr in zip(ones, out1):
+            for k, s in enumerate(sites):
+                local.setdefault(s + 1, []).append((names, (arr, k, 0)))
+        for (na, nb, pairs), arr in zip(twos, out2):
+            # how of a lower entry with its own walk: minus when both are odd
+            low = 1 if _odd(na) else 0
+            adjoint = {}
+
+            def adj(site):
+                code = self.sites.site_codes()[site - 1]
+                if code not in adjoint:
+                    adjoint[code] = self._sweep_adjoint(na, nb, site)
+                return adjoint[code]
+            for k, (i, j) in enumerate(pairs):
+                a, b = i + 1, j + 1
+                if a == b:
+                    diag.setdefault(a, []).append((na + nb, (arr, k, 0)))
+                    continue
+                if a < b:
+                    key, right, how = (a, na), nb, 0
+                elif adj(a) and adj(b):
+                    key, right, how, a, b = (b, na), nb, 2, b, a
+                else:
+                    key, right, how, a, b = (b, nb), na, low, b, a
+                walks.setdefault(key, {}).setdefault(b, {}).setdefault(
+                    right, []).append((arr, k, how))
+
+        def put(slot, val):
+            arr, k, how = slot
+            arr[k] = val if how == 0 else (-val if how == 1 else np.conj(val))
+
+        psi = wf.copy()  # position() changes the gauge in place
+        if psi.center is None:
+            # _shift_left's SVD is exact from any gauge (see _strip_sweep),
+            # so a sweep to site 1 makes every other site right-orthogonal
+            psi.center = n
+            psi.position(1)
+        opcache = {}
+
+        def op(names, site, string=False):
+            key = (names, site, string)
+            T = opcache.get(key)
+            if T is None:
+                s = self.sites.si(site)
+                T = ITensor((s, s.prime(1)),
+                            self._sweep_matrix(names, site, string))
+                opcache[key] = T
+            return T
+
+        def fold(E, bra, site, O):
             T = psi.A(site)
-            for name in names:  # applied in turn, the last one outermost
-                T = noPrime(T * self.sites.op(name, site), "Site")
+            if O is not None:
+                T = noPrime(T * O, "Site")
             pieces = [p for p in (E, T, dag(bra[site - 1])) if p is not None]
             return contract_many(pieces)
 
@@ -1560,23 +1753,108 @@ class Chain:
                               commonIndex(bra[site - 1], bra[site]))
             return complex(E.scalar())
 
-        for a in range(1, n + 1):
+        by_start = {}
+        for (a, left), targets in walks.items():
+            by_start.setdefault(a, []).append((left, targets))
+        for a in sorted(set(local) | set(diag) | set(by_start)):
             psi.position(a)
+            T = psi.A(a)
+            for names, slot in local.get(a, ()):
+                # left and right of the centre are identities, so the
+                # centre tensor carries the whole expectation value
+                put(slot, complex((dag(T) * noPrime(T * op(names, a),
+                                                    "Site")).scalar()))
+            if a not in diag and a not in by_start:
+                continue
             bra = _fresh_link_copy(psi)
             lbase = None
             if a > 1:
                 lbase = delta(commonIndex(psi.A(a - 1), psi.A(a)),
                               commonIndex(bra[a - 2], bra[a - 1]))
-            out[a - 1, a - 1] = close(fold(lbase, bra, a, ("C", "Cdag")),
-                                      bra, a)
-            run = fold(lbase, bra, a, ("Cdag",))
-            for b in range(a + 1, n + 1):
-                if b > a + 1:
-                    run = fold(run, bra, b - 1, ("F",))
-                val = close(fold(run, bra, b, ("C",)), bra, b)
-                out[a - 1, b - 1] = val
-                out[b - 1, a - 1] = np.conj(val)
-        return out
+            for names, slot in diag.get(a, ()):
+                put(slot, close(fold(lbase, bra, a, op(names, a)), bra, a))
+            for left, targets in by_start.get(a, ()):
+                string = _odd(left)
+                run = fold(lbase, bra, a, op(left, a, string))
+                pos = a  # run holds the sites a..pos
+                for b in sorted(targets):
+                    while pos < b - 1:
+                        pos += 1
+                        run = fold(run, bra, pos,
+                                   op(("F",), pos) if string else None)
+                    for right, slots in targets[b].items():
+                        val = close(fold(run, bra, b, op(right, b)), bra, b)
+                        for slot in slots:
+                            put(slot, val)
+        return out1, out2
+
+    def expect_sweep(self, wf, name, sites=None):
+        """<wf|O_s|wf> on every 0-based site s of `sites` (all sites by
+        default) in one sweep, the algorithm of ITensorMPS.jl's expect.
+        `name` is a name or a tuple of names multiplied on one site. Not
+        renormalized. See sweep_measure for the conventions;
+        expect_per_site is the reference."""
+        if sites is None:
+            sites = range(self.sites.length())
+        return self.sweep_measure(wf, ones=[(name, sites)])[0][0]
+
+    def correlation_sweep(self, wf, nameA, nameB, pairs=None):
+        """<wf|A_i B_j|wf> in one sweep, the algorithm of ITensorMPS.jl's
+        correlation_matrix(psi, A, B): the full (n, n) matrix, or the
+        entries of the 0-based `pairs` as a vector. Not renormalized. See
+        sweep_measure for the conventions; correlation_per_pair is the
+        reference."""
+        if pairs is not None:
+            return self.sweep_measure(wf, twos=[(nameA, nameB, pairs)])[1][0]
+        n = self.sites.length()
+        every = [(i, j) for i in range(n) for j in range(n)]
+        vals = self.sweep_measure(wf, twos=[(nameA, nameB, every)])[1][0]
+        return vals.reshape(n, n)
+
+    def expect_per_site(self, wf, name, sites=None):
+        """<wf|O_s|wf> one MPO per site, the per-term path expect_sweep is
+        checked against: AutoMPO, sector check and string included, and a
+        fermion-odd name too."""
+        names = _op_names(name)
+        if sites is None:
+            sites = range(self.sites.length())
+        out = []
+        for s in sites:
+            A = self._mpo([(1.0, [(x, int(s) + 1) for x in names])])
+            out.append(inner(wf, A, wf))
+        return np.array(out, dtype=complex)
+
+    def correlation_per_pair(self, wf, nameA, nameB, pairs=None):
+        """<wf|A_i B_j|wf> one MPO per entry, every entry computed, the
+        reference correlation_sweep is checked against. The full (n, n)
+        matrix, or the entries of the 0-based `pairs`."""
+        na, nb = _op_names(nameA), _op_names(nameB)
+        n = self.sites.length()
+        full = pairs is None
+        if full:
+            pairs = [(i, j) for i in range(n) for j in range(n)]
+        out = []
+        for i, j in pairs:
+            A = self._mpo([(1.0, [(x, int(i) + 1) for x in na]
+                            + [(x, int(j) + 1) for x in nb])])
+            out.append(inner(wf, A, wf))
+        out = np.array(out, dtype=complex)
+        return out.reshape(n, n) if full else out
+
+    def correlation_matrix_sweep(self, wf):
+        """<Cdag_i C_j> for every pair by one environment walk per i, the
+        algorithm of ITensorMPS.jl's correlation_matrix, as
+        correlation_sweep(wf, "Cdag", "C"): with the orthogonality centre
+        on site i, the environment carries Cdag_i (Cdag F is Cdag on a
+        spinless site), then an F on every site it crosses, and each j
+        closes it with C_j and the identity of the right-orthogonal tail;
+        the lower triangle is the conjugate, since C = Cdag^dagger. About
+        n^2/2 one-site folds against the n^2/2 MPO builds and full
+        contractions of correlation_matrix_per_pair, the reference it is
+        checked against. Not renormalized: <wf|O|wf>, as there. Every step
+        is an ITensor contraction, so it runs on the JAX backend; only the
+        scalars come to the host."""
+        return self.correlation_sweep(wf, "Cdag", "C")
 
     def correlation_matrix(self, wf):
         """<Cdag_i C_j> for every pair, by correlation_matrix_sweep."""
