@@ -337,3 +337,35 @@ def test_ed_backend_rejects_a_non_explicit_ctmode_clearly():
     wf.get_four_correlation_tensor(ctmode="explicit")   # must not raise
     with pytest.raises(ValueError):
         wf.get_four_correlation_tensor(ctmode="sweep")
+
+
+from _helpers import julia_live_param  # noqa: E402
+
+
+@pytest.mark.parametrize("backend", [julia_live_param()])
+def test_full_matches_explicit_on_native_spinful_julia_live(backend):
+    """ctmode="full" on julia_live native spinful sites (gs_extra.jl's
+    four_correlation_tensor_spinful, one OpSum per tuple over the 2n flat
+    modes) against the exact per-tuple oracle, with and without the
+    conjugate-pair shortcut. Same-site opposite-flavour pairs are where
+    the flat-mode map or the up-before-down string could go wrong."""
+    from dmrgpy import fermionchain
+    for n in (2, 3):
+        fc = fermionchain.Spinful_Fermionic_Chain_Native(
+                n, itensor_version=backend)
+        h = 0
+        for i in range(n - 1):
+            h = h + (0.9 + 0.2j) * fc.Cdagup[i] * fc.Cup[i + 1]
+            h = h + (0.9 + 0.2j) * fc.Cdagdn[i] * fc.Cdn[i + 1]
+        for i in range(n):
+            h = h + 1.3 * (fc.Nup[i] - .5) * (fc.Ndn[i] - .5)
+        h = h + h.get_dagger() + 0.3 * fc.Nup[0] - 0.2 * fc.Ndn[n - 1]
+        fc.set_hamiltonian(h)
+        fc.maxm = 20
+        wf = fc.get_gs()
+        full = wf.get_four_correlation_tensor(ctmode="full")
+        explicit = wf.get_four_correlation_tensor(ctmode="explicit")
+        assert full.shape == (2 * n,) * 4
+        assert np.abs(full - explicit).max() < 1e-10, n
+        slow = wf.get_four_correlation_tensor(ctmode="full", accelerate=False)
+        assert np.abs(slow - full).max() < 1e-12, n

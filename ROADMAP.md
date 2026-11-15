@@ -80,7 +80,7 @@ or is simply absent) · — not meaningful for this backend/method combo.
 | Two-point static correlators | ✅ | ✅ | ✅ | |
 | All-pairs correlation matrix (native accelerated) | ✅ | ✅ | 🟡 | pyitensor's session `correlation_matrix` is one environment walk per site since 2026-11-15 (`correlation_matrix_sweep`, the algorithm of ITensorMPS.jl's `correlation_matrix`): equal to the per-pair MPO loop it replaced (`correlation_matrix_per_pair`) to 2e-15, 39x faster at 32 sites (0.21 s against 8.22 s) and 17x faster than `dmmode="fast"` (3.53 s), which stays the default outside a sector. Julia's `dmmode="full"` is ITensorMPS's `correlation_matrix(psi,"Cdag","C")` (`mpsjulialive/correlations.jl`), on chains of spinless fermions only; other site types use the generic per-pair loop. |
 | Four-point correlator, `ctmode="explicit"` (backend-agnostic loop) | ✅ | ✅ | ✅ | Always correct, always available, slowest — the universal fallback. |
-| Four-point correlator, `ctmode="full"` (native AutoMPO per-tuple, incl. spinful-native sites) | ✅ | ✅ | 🟡 | v2 also has this. Julia (`gs_extra.jl::four_correlation_tensor`, one exact MPO per tuple) is the default there on chains of spinless fermions only; other site types raise and use `ctmode="explicit"`. |
+| Four-point correlator, `ctmode="full"` (native AutoMPO per-tuple, incl. spinful-native sites) | ✅ | ✅ | 🟡 | v2 also has this. Julia (`gs_extra.jl::four_correlation_tensor`, one exact MPO per tuple) is the default there on chains of spinless fermions, and since 2026-11-15 takes native spinful sites too when asked (`four_correlation_tensor_spinful`, the 2n flat modes, as v3's), equal to `ctmode="explicit"` to 1e-10; other site types raise and use `ctmode="explicit"`. |
 | Four-point correlator, `ctmode="sweep"` (single-sweep, environment-reuse, ITensorCorrelators.jl-style) | ✅ | ✅ | ✅ | The fastest mode when it applies; no native-spinful-site counterpart yet even on v3/pyitensor. Julia: `mpsjulialive/fourpoint.jl`, spinless and interleaved spinful fermions, the default `ctmode` there. |
 | Bond entanglement entropy / reduced density matrix | ✅ | ✅ | ✅ | Backend-agnostic dispatch (`entanglement.py` has no `itensor_version` branching at all — every backend's session exposes the same primitive). |
 | Topological invariants (Berry phase, etc.) | ✅ | ✅ | ✅ | Built purely on `get_gs()` + MPS overlap — generic across every backend. |
@@ -160,8 +160,10 @@ model-specific rows:
      weights, window dynamics and the iMPS algebra.
      iDMRG in particular is a large port, worth it only for a concrete
      use case that needs Julia on an infinite system.
-   - **Site-type limits:** `dmmode="full"` and `ctmode="full"` cover
-     spinless fermions only. Conserved sectors cover every site type the
+   - **Site-type limits:** `dmmode="full"` covers spinless fermions only
+     (on v3 and pyitensor too, since `Cdag`/`C` are not defined on native
+     spinful sites), and `ctmode="full"` spinless and native spinful
+     fermions. Conserved sectors cover every site type the
      other backends grade; the Z_n parafermions have a sector on no
      backend, and S=3/2 and S=5/2 define no S+/S- in the shared sector
      bookkeeping (`pyitensor/sites/spin.py`), so an XY coupling on them

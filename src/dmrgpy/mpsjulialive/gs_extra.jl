@@ -55,3 +55,35 @@ function four_correlation_tensor(sites,psi,accelerate)
   end
   return out
 end
+
+
+# The same tensor on native spinful ("Electron") sites, over the 2n flat
+# modes of Spinful_Fermionic_Chain_Native (mode 2(i-1)+1 = up and 2(i-1)+2
+# = down on site i, 1-based here): the counterpart of v3's
+# Chain::four_correlation_tensor_spinful, one exact MPO per tuple built
+# from the flavour-resolved names Cdagup/Cup/Cdagdn/Cdn, whose
+# Jordan-Wigner strings OpSum threads itself, up before down on a site.
+function four_correlation_tensor_spinful(sites,psi,accelerate)
+  n = 2*length(sites)
+  cdag(m) = isodd(m) ? "Cdagup" : "Cdagdn"
+  c(m) = isodd(m) ? "Cup" : "Cdn"
+  site(m) = (m+1) ÷ 2
+  out = zeros(ComplexF64,n,n,n,n)
+  phi = gs_extra_clean(psi)
+  for i in 1:n, j in 1:n, k in 1:n, l in 1:n
+    current = (i,j,k,l)
+    partner = (l,k,j,i)
+    if accelerate && current > partner
+      continue
+    end
+    os = OpSum()
+    os += 1.0,cdag(i),site(i),c(j),site(j),cdag(k),site(k),c(l),site(l)
+    M = MPO(os,sites)
+    v = inner(phi',M,phi)
+    out[i,j,k,l] = v
+    if accelerate && current != partner
+      out[l,k,j,i] = conj(v)
+    end
+  end
+  return out
+end

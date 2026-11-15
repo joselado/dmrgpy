@@ -482,11 +482,16 @@ def get_four_correlation_tensor_cpp(wf,accelerate=True,**kwargs):
     from .. import fermionchain
     if getattr(self,"itensor_version",None)=="julia_live":
         # one exact MPO per tuple and inner(psi',M,psi), in Julia
-        # (mpsjulialive/gs_extra.jl), on spinless "Fermion" sites only
+        # (mpsjulialive/gs_extra.jl), on spinless "Fermion" sites, and on
+        # native spinful "Electron" sites over their 2n flat modes
+        from ..mpsjulialive.juliasession import Main as Mainjl
+        if type(self)==fermionchain.Spinful_Fermionic_Chain_Native:
+            return np.array(Mainjl.four_correlation_tensor_spinful(
+                    self.jlsites,wf.jlmps,bool(accelerate)),dtype=complex)
         if not _julia_spinless_fermions(self):
             raise NotImplementedError("ctmode=\"full\" on julia_live needs "
-                    "a chain of spinless fermions; use ctmode=\"explicit\"")
-        from ..mpsjulialive.juliasession import Main as Mainjl
+                    "a chain of spinless fermions or of native spinful "
+                    "sites; use ctmode=\"explicit\"")
         return np.array(Mainjl.four_correlation_tensor(self.jlsites,
                 wf.jlmps,bool(accelerate)),dtype=complex)
     if type(self)==fermionchain.Spinful_Fermionic_Chain_Native:
