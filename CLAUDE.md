@@ -599,7 +599,8 @@ sector solves going wrong between 56 and 80 sites at `maxm=128`, and
 PT-symmetric XX chain, several eigenvalues with one real part, one
 NH-DMRG attempt in three still stalls at 12 sites and the attempts stall
 at 14 (ITensorNHDMRG.jl does worse), while implicit imaginary-time steps
-with H plus a Rayleigh-Ritz on the late states reach it up to 16 sites;
+with H plus a Rayleigh-Ritz on the late states find every distinct level
+of smallest real part up to 16 sites (not wired into the API);
 the `kpm_energy_truncate` window problem outside its worst regime
 (`docs/known_issue_kpm_energy_truncation_window.md`); the sliver just below
 `kpm_scale=1/2` where the elastic line is distorted while the moments are

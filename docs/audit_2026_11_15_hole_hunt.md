@@ -14,8 +14,10 @@ in `excited.py`). Every repro below was executed and its output is spliced
 from disk; RuntimeWarning lines are removed from the outputs and nothing
 else is. Unlike a hunt, no finding has been handed to an independent
 reviewer yet: they were recorded on the author's request, to be addressed
-in a later session, so each one is `OPEN` and its cause is marked as
-measured or as a reading where it is one.
+in a later session, so each one was recorded `OPEN` and its cause is
+marked as measured or as a reading where it is one. Finding 3 has since
+been fixed at the size it was found at (its Status line), and its reading
+of the cause turned out wrong; the other three are still open.
 
 This file is the evidence, not a task list. Each finding keeps its repro
 and gains a `**Status**` line when it is acted on.
@@ -205,15 +207,37 @@ restarts, so the default `restarts=2` is three Krylov builds, 36
 matrix-vector products per solve against 40 before; with two builds one
 seed in three still stopped at 4.4e-3. The pair is scaled to
 <psil|psir> = 1 once at the end. v3's `arnoldi_smallest_real` is
-unchanged, since iDMRG uses it. Through `nhdmrg(ntries=1)` on the 10-site
-chain, `maxm=30`, 10 sweeps, cutoff 1e-10, three seeds, with the default
-noise and with `noise=0.1`: v2, v3 and `"python"` all return -2.566782 or
--2.566782 +- 0.264096i, both relative residuals 3.4e-6, and Re E within
-6e-11 of the exact -2.566782167 (the chain is free fermions after
-Jordan-Wigner). One attempt takes 1.5 s on `"python"` (about 3 s before),
-2.3 s on v2 and 4.2 s on v3. The `tests/test_nh_dmrg.py` models (the
-fermion chain and the asymmetric hopping chain) stay at 1e-14, with and
-without noise. Pinned by `tests/test_audit_2026_11_15_nh.py`.
+unchanged, since iDMRG uses it.
+
+NUMBERS CHANGE, on this chain: the repro above (`r2_nh.py`) gave
+-2.58848584+0.04292640j on `"python"` and -2.53892971-0.11404201j on v3
+at `maxm=128`, relative residuals 0.31 and 0.44 (its Observed block).
+Run again on `009d141`, it gives an eigenvalue on every row:
+
+```
+full ED, lowest real parts: [-2.566782+0.j       -2.566782+0.264096j -2.566782-0.j
+ -2.566782-0.264096j]
+maxm=128 python E=-2.56678217+0.26409560j  ||H r - E r||/||r||=3.38e-06  dist to spectrum=5.99e-11
+maxm=128 3      E=-2.56678217-0.26409560j  ||H r - E r||/||r||=3.38e-06  dist to spectrum=5.99e-11
+maxm= 30 python E=-2.56678217-0.26409560j  ||H r - E r||/||r||=3.38e-06  dist to spectrum=5.99e-11
+maxm= 30 3      E=-2.56678217+0.26409560j  ||H r - E r||/||r||=3.38e-06  dist to spectrum=5.99e-11
+```
+
+The residual 3.4e-6 is that of the cutoff 1e-10; at the chain's own
+defaults (`maxm=30`, 15 sweeps, cutoff 1e-12) one attempt gives 2.8e-6 and
+Re E within 3e-12 of the exact -2.566782167 on v2, v3 and `"python"`,
+three seeds each (the chain is free fermions after Jordan-Wigner). With
+`noise=0.1` the result is the same. A single attempt misses the checks of
+the new test in 0 of 20 draws on each of v2, v3 and `"python"`. One
+attempt takes 1.5 s on `"python"` (about 3 s before), 2.3 s on v2 and
+4.2 s on v3, at `maxm=30`. Where the old sweep converged the eigenvalue
+does not move: the `tests/test_nh_dmrg.py` models (the fermion chain and
+the asymmetric hopping chain) stay at 1e-14, with and without noise, and
+the ten examples in `examples/non_hermitian/` that reach NH-DMRG on v2,
+v3 or `"python"` run as before. The left state now comes back with
+<psil|psir> = 1 exactly. Pinned by `tests/test_audit_2026_11_15_nh.py`;
+the NH test files, the new file and the infinite-chain files pass (594
+tests, `julia_live` not run since no Julia code changed).
 
 Open, and recorded as a lead: larger chains. At 12 sites, `maxm=128`,
 cutoff 1e-10, 10 sweeps, one attempt per seed, the fixed sweep reaches
@@ -230,20 +254,143 @@ cases, so the number is not silent. A smaller lead: on 10 sites a smaller
 cutoff gives a larger residual, 1.1e-4 at 1e-14 against 3.4e-6 at 1e-10,
 on the reference too.
 
-A route that does reach these chains, measured but not part of the fix:
-implicit imaginary-time steps with the non-Hermitian H itself
-(`Chain.implicit_step`, the log grid of arXiv:2606.02930, shift at Re E0
-or at the running Re <H>), renormalized every step, followed by a
-Rayleigh-Ritz in the span of the last 8 to 24 states and a residual for
-every Ritz pair. A single evolved state does not settle, since it ends in
-the span of all levels with one real part and their phases rotate, but
-the Rayleigh-Ritz resolves them: from a random state on `"python"`,
-`maxm=64`, tau=200 to 400, every level of smallest real part comes out with
-a residual of 3e-5 to 2e-4 and Re within 5e-6 of the exact value, on 10,
-12, 14 and 16 sites (5 s, 11 s, 24 s, 108 s; on 16 sites 16 levels share
-the real part, and the one spurious Ritz value has residual 0.28). The
-public `evolve_imaginary_time` refuses a non-Hermitian H, so these runs
-call the session directly.
+A route that does reach these chains, measured but not part of the fix,
+tried on the author's suggestion: implicit imaginary-time steps with the
+non-Hermitian H itself (the session's `implicit_step`, the log grid of
+arXiv:2606.02930), renormalized every step, with the shift at the running
+Re <H>, which needs no knowledge of E0. With the shift at Re E0 the Cayley
+factor (1 - b z)/(1 + b z) of every z = E - s with Re z >= 0 stays in the
+unit disk, so the steps are A-stable for a non-Hermitian H too. A single
+evolved state does not settle: it ends in the span of every level of
+smallest real part, whose phases rotate at different rates, and its own
+Rayleigh quotient keeps moving (relative residual 0.14 on 10 sites at
+tau=200, in a first run with the shift at the exact Re E0). A Rayleigh-Ritz in the span of the last 24 states, with the
+residual of every Ritz pair from the Gram matrices, resolves them. From
+one random state on `"python"`, `maxm=64`, tau=400 (136 steps): every
+distinct level of smallest real part comes out with a residual below
+1e-3, 3 of 3 on 10, 12 and 14 sites and 9 of 9 on 16 sites (16 levels,
+real part shared), with Re within 1e-5 of the exact value; a level that
+is exactly degenerate with one in another Sz sector comes out once, not
+with its multiplicity, and no Ritz value below the spectrum passes the
+residual test. It took 9 s, 18 s, 54 s and 111 s. In the first runs, with the
+exact shift, 8 states instead of 24 on 16 sites gave Ritz values below
+the spectrum (-4.161, -4.153), so the residual test is what makes the
+readout safe. The public
+`evolve_imaginary_time` refuses a non-Hermitian H, so the script calls the
+session directly. No literature found uses this readout: a search of
+arXiv (imaginary-time MPS on non-Hermitian H, NH-DMRG on Re-degenerate
+spectra) found right-state-only imaginary-time TDVP (arXiv:2009.02614)
+and the suggestion, untested, to keep all states of a level crossing
+(arXiv:2112.12467, App. C).
+
+```bash
+MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 python3 <scratch>/r5_itime_rr.py <n> 24
+```
+```python
+# Implicit imaginary-time steps (log grid, arXiv:2606.02930) with the non-Hermitian H of the PT
+# chain itself, renormalized every step, shift at the running Re <H>, then a Rayleigh-Ritz in the
+# span of the last K states with the residual of every Ritz pair. The exact levels of smallest real
+# part are E0 + i (sum of a subset of the imaginary single-particle energies), 2^m of them.
+from common import np
+import warnings, time, sys, os, itertools
+warnings.simplefilter("ignore")
+import calctk
+from dmrgpy import imaginarytime as it
+from dmrgpy import mps as dmps
+from dmrgpy.groundstate import send_hamiltonian
+
+def free_fermions(n, g=0.3):
+    t = np.diag(1j * g * (-1.0) ** np.arange(n)) + 0.5 * (np.eye(n, k=1) + np.eye(n, k=-1))
+    e = np.linalg.eigvals(t)
+    e0 = e[e.real < -1e-12].sum().real  # the constant -i g/2 sum (-1)^i is 0 for even n
+    im = e[np.abs(e.real) < 1e-9].imag
+    levels = sorted(e0 + 1j * sum(c) for r in range(len(im) + 1) for c in itertools.combinations(im, r))
+    return e0, np.array(levels)
+
+n, K = int(sys.argv[1]), int(sys.argv[2])
+tau, nsteps, maxm = 400.0, 8, 64
+e0, levels = free_fermions(n)
+np.random.seed(1234)
+sc = calctk.make_nh_chain(n, "python", dict(maxm=maxm, nsweeps=10, cutoff=1e-10))
+h = sc.hamiltonian
+send_hamiltonian(sc)
+s = sc._session
+s.set_sweep_params(sc.maxm, sc.nsweeps, sc.cutoff, sc.noise)
+s.set_mpomaxm(max(sc.maxm, sc.mpomaxm))
+wf = sc.random_state()
+psi = (wf * (1.0 / np.sqrt(wf.dot(wf).real))).cpp_handle
+steps = it.log_grid(tau, 0.01, nsteps)
+t0 = time.perf_counter()
+snaps = []
+for k, dt in enumerate(steps):
+    psi = s.implicit_step(psi, it.step_factors(dt, 2), 0.0, True, 1, 1e-10, 10, 100)
+    if k >= len(steps) - K: snaps.append(dmps.MPS(sc, cpp_handle=psi).copy())
+t_evolve = time.perf_counter() - t0
+Hs = [h * b for b in snaps]
+S = np.array([[a.dot(b) for b in snaps] for a in snaps])
+M = np.array([[a.dot(hb) for hb in Hs] for a in snaps])
+Q = np.array([[ha.dot(hb) for hb in Hs] for ha in Hs])
+w, U = np.linalg.eigh(S)
+keep = w > 1e-10 * w.max()
+X = U[:, keep] / np.sqrt(w[keep])
+th, Y = np.linalg.eig(X.conj().T @ M @ X)
+C = X @ Y
+pairs = []
+for j in range(len(th)):
+    c, t = C[:, j], th[j]
+    nrm = (c.conj() @ S @ c).real
+    r2 = (c.conj() @ Q @ c - t * (c.conj() @ M.conj().T @ c)
+          - np.conj(t) * (c.conj() @ M @ c) + abs(t) ** 2 * nrm).real
+    pairs.append((t, np.sqrt(max(r2, 0.0) / nrm)))
+good = sorted([p for p in pairs if p[1] < 1e-3], key=lambda p: (p[0].real, p[0].imag))
+low = [p for p in good if p[0].real < e0 + 1e-3]
+print(f"N={n} K={K} tau={tau} steps={len(steps)} maxm={maxm}: exact Re E0={e0:.9f}, {len(levels)} levels share it, "
+      f"Im = {np.round(sorted(levels.imag), 4)}")
+print(f"  evolution {t_evolve:.0f} s, total {time.perf_counter()-t0:.0f} s; rank {keep.sum()}, "
+      f"{len(good)} Ritz pairs with residual < 1e-3, {len(low)} of them within 1e-3 of Re E0")
+for t, r in low:
+    d = np.min(np.abs(levels - t))
+    print(f"    theta={t:.7f}  Re-E0={t.real-e0:+.1e}  dist to nearest level={d:.1e}  res={r:.1e}")
+bad = [p for p in pairs if p[1] >= 1e-3 and p[0].real < e0 - 1e-4]
+print(f"  rejected Ritz values below Re E0: {len(bad)}" + "".join(f"  {t:.5f} (res {r:.1e})" for t, r in bad[:4]))
+```
+
+Observed (n = 10, 12, 14, 16):
+
+```
+N=10 K=24 tau=400.0 steps=136 maxm=64: exact Re E0=-2.566782167, 4 levels share it, Im = [-0.2641  0.      0.      0.2641]
+  evolution 8 s, total 9 s; rank 5, 3 Ritz pairs with residual < 1e-3, 3 of them within 1e-3 of Re E0
+    theta=-2.5667837+0.2640955j  Re-E0=-1.5e-06  dist to nearest level=1.5e-06  res=4.7e-05
+    theta=-2.5667834-0.2640958j  Re-E0=-1.2e-06  dist to nearest level=1.2e-06  res=1.2e-05
+    theta=-2.5667827+0.0000001j  Re-E0=-5.4e-07  dist to nearest level=5.6e-07  res=9.6e-06
+  rejected Ritz values below Re E0: 0
+N=12 K=24 tau=400.0 steps=136 maxm=64: exact Re E0=-3.113729770, 4 levels share it, Im = [-0.2747 -0.      0.      0.2747]
+  evolution 17 s, total 18 s; rank 5, 3 Ritz pairs with residual < 1e-3, 3 of them within 1e-3 of Re E0
+    theta=-3.1137310-0.2747199j  Re-E0=-1.2e-06  dist to nearest level=1.3e-06  res=3.9e-05
+    theta=-3.1137309+0.2747197j  Re-E0=-1.1e-06  dist to nearest level=1.1e-06  res=4.4e-05
+    theta=-3.1137308-0.0000000j  Re-E0=-1.0e-06  dist to nearest level=1.0e-06  res=1.8e-05
+  rejected Ritz values below Re E0: 0
+N=14 K=24 tau=400.0 steps=136 maxm=64: exact Re E0=-3.617440918, 4 levels share it, Im = [-0.2812  0.      0.      0.2812]
+  evolution 51 s, total 54 s; rank 9, 3 Ritz pairs with residual < 1e-3, 3 of them within 1e-3 of Re E0
+    theta=-3.6174372-0.0000013j  Re-E0=+3.7e-06  dist to nearest level=4.0e-06  res=8.0e-05
+    theta=-3.6174335+0.2811965j  Re-E0=+7.5e-06  dist to nearest level=8.5e-06  res=7.7e-05
+    theta=-3.6174311-0.2811929j  Re-E0=+9.8e-06  dist to nearest level=1.3e-05  res=4.9e-05
+  rejected Ritz values below Re E0: 0
+N=16 K=24 tau=400.0 steps=136 maxm=64: exact Re E0=-4.142203969, 16 levels share it, Im = [-0.4084 -0.2855 -0.2855 -0.1625 -0.1229 -0.1229 -0.     -0.      0.
+  0.      0.1229  0.1229  0.1625  0.2855  0.2855  0.4084]
+  evolution 106 s, total 111 s; rank 20, 10 Ritz pairs with residual < 1e-3, 10 of them within 1e-3 of Re E0
+    theta=-4.1422085-0.4083980j  Re-E0=-4.5e-06  dist to nearest level=2.3e-05  res=5.7e-04
+    theta=-4.1422073+0.1625407j  Re-E0=-3.3e-06  dist to nearest level=3.4e-06  res=9.3e-05
+    theta=-4.1422067+0.0000005j  Re-E0=-2.7e-06  dist to nearest level=2.7e-06  res=1.4e-04
+    theta=-4.1422063+0.4083768j  Re-E0=-2.3e-06  dist to nearest level=2.7e-06  res=5.9e-05
+    theta=-4.1422060-0.1625375j  Re-E0=-2.0e-06  dist to nearest level=4.5e-06  res=1.8e-04
+    theta=-4.1422059-0.2854585j  Re-E0=-1.9e-06  dist to nearest level=1.9e-06  res=6.5e-05
+    theta=-4.1422058+0.2854587j  Re-E0=-1.8e-06  dist to nearest level=1.8e-06  res=8.5e-05
+    theta=-4.1422058+0.1229176j  Re-E0=-1.8e-06  dist to nearest level=1.9e-06  res=6.8e-05
+    theta=-4.1422047-0.1229183j  Re-E0=-7.3e-07  dist to nearest level=1.6e-06  res=6.4e-05
+    theta=-4.1422039+0.0000006j  Re-E0=+2.0e-08  dist to nearest level=6.0e-07  res=8.8e-05
+  rejected Ritz values below Re E0: 0
+```
 
 **Where**: `src/dmrgpy/pyitensor/nhdmrg.py` (`_arnoldi_smallest_real`,
 `_select_ritz`, the fidelity truncation in `_nhdmrg_one_sweep`),

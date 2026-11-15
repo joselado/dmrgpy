@@ -1003,10 +1003,11 @@ class Chain
     // via MultiOperator.get_dagger(), rather than reconstructing
     // dag(swapPrime(H)) index-by-index here -- it reuses build_mpo
     // unchanged and sidesteps v3's prime-level conventions entirely.
-    // Starting both MPS from the *same* normalized state makes the pair
-    // trivially biorthonormal (<psil|psir>=1 exactly), replacing the
-    // reference's initial biorthogonalize! pass (a no-op for identical
-    // inputs); the two states then diverge from the first bond update on.
+    // Starting the sweep's two MPS from the *same* normalized state (the
+    // transposed left state wl = psir, see below) replaces the reference's
+    // initial biorthogonalize! pass (a no-op for identical inputs); the two
+    // states then diverge from the first bond update on, and
+    // nh_biorthonormalize makes <psil|psir> = 1 at the end.
     //
     // Inside the sweep the left state is the reference's own, the
     // TRANSPOSED left eigenvector wl (H^T|wl> = lambda|wl>; ProjNHMPO's
