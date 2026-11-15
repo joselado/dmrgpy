@@ -86,7 +86,13 @@ def get_correlation_matrix_zeroT(self,operators=None,
     # is resolved against what that wavefunction can actually do (see
     # _default_dmmode) rather than against which backend this chain was
     # built with
-    if dmmode is None: dmmode = _default_dmmode(self,wf,basis)
+    if dmmode is None:
+        dmmode = _default_dmmode(self,wf,basis)
+        # the session matrix is that of the chain's own C operators, so
+        # operators= of the caller keep the route that reads them
+        if dmmode=="full" and operators is not None and \
+                not getattr(self,"conserved_sector",None):
+            dmmode = "fast"
     if operators is None: # no operators provided
         if fermionchain.isfermion(self):
             if basis=="Nambu":
@@ -300,7 +306,20 @@ def _default_dmmode(self,wf,basis):
     Nambu form (see get_correlation_matrix_zeroT's own downgrade of an
     explicitly-requested one)."""
     if not getattr(self,"conserved_sector",None):
-        return "fast" # no sector: nothing stops the cheapest route
+        # no sector: the one-sweep session matrix of "python"
+        # (pyitensor/chain.py's correlation_matrix_sweep, exact, 17x faster
+        # than "fast" at 32 sites; the author's pick of 2026-11-15), and the
+        # cheapest route, "fast", everywhere else
+        mbo = getattr(wf,"MBO",None)
+        sites = getattr(self,"sites",None)
+        spinless = sites is not None and len(sites)>0 and \
+                all(str(c)=="0" for c in sites) # Cdag/C on every site
+        if basis!="Nambu" and spinless and \
+                getattr(wf,"cpp_handle",None) is not None and \
+                getattr(mbo,"itensor_version",None)=="python" and \
+                hasattr(getattr(mbo,"_session",None),"correlation_matrix_sweep"):
+            return "full"
+        return "fast"
     if basis!="Nambu" and _julia_spinless(wf):
         return "full" # julia_live, mpsjulialive/correlations.jl
     session = getattr(getattr(wf,"MBO",None),"_session",None)

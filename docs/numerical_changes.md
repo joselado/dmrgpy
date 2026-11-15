@@ -1940,3 +1940,14 @@ held exactly `gs_energy_fluctuation()` went from 2.05e-12 to 4.5e-13, and
 a residual at cutoff 0 floors near 1e-8 of ||K|| ||x||. Setting both names
 to `"exact"` gives the numbers of before. The full suite had not run on
 this change when it was made; 176 tests of the most exposed files passed.
+
+## The 2026-11-15 default `dmmode` of `get_correlation_matrix` on `"python"`
+
+Outside a conserved sector, `get_correlation_matrix()` on a `"python"`
+chain of spinless fermion sites (the interleaved spinful chain included)
+called with no `operators=` now takes `dmmode="full"`, the one-sweep
+session matrix, instead of `"fast"` (the author's pick). `"full"` is exact
+where `"fast"` truncates $C_j|\psi\rangle$: on a 10-site chain the two
+differ by $1.1\times10^{-11}$, and at 32 sites by $3\times10^{-8}$, in
+0.21 s against 3.53 s. `dmmode="fast"` gives the numbers of before; v3,
+`julia_live`, ED and native spinful chains are unchanged.
