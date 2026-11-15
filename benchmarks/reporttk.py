@@ -32,6 +32,14 @@ CALC_LABELS = {
     "entropy": "Entanglement entropy",
     "evolution": "Real-time evolution after a quench",
     "sector": "Ground state in the $S_z=0$ sector",
+    "spin1_gs": "Ground state of the $S=1$ Heisenberg chain",
+    "hubbard_gs": "Ground state of the Hubbard chain",
+    "corrmat": "Fermionic correlation matrix",
+    "metts": "Thermal energy by METTS",
+    "nh_gs": "Non-Hermitian ground state (NH-DMRG)",
+    "sector_dc": "Spectral function by sector (SECTOR)",
+    "task_dc": "Dynamical correlator (TASK)",
+    "fourpoint": "Fermionic four-point tensor",
     "idmrg_gs": "Infinite chain: iDMRG energy density",
     "idmrg_vev": "Infinite chain: iDMRG $\\langle S^z\\rangle$",
     "vumps_gs": "Infinite chain: VUMPS energy density",
@@ -40,7 +48,9 @@ CALC_LABELS = {
 
 # The order sections appear in, and the order the summary aggregates in.
 CALC_ORDER = ["gs", "static", "dynamic", "dynamic_td", "excited", "entropy",
-        "evolution", "sector", "idmrg_gs", "idmrg_vev", "vumps_gs", "vumps_vev"]
+        "evolution", "sector", "spin1_gs", "hubbard_gs", "corrmat", "metts",
+        "nh_gs", "sector_dc", "task_dc", "fourpoint",
+        "idmrg_gs", "idmrg_vev", "vumps_gs", "vumps_vev"]
 
 # Sweep axis of each calculation: chain length for the finite family,
 # bond dimension for the infinite one (an infinite chain has no length).
@@ -59,6 +69,9 @@ REF_HEADERS = {
     "gs": "ED energy", "static": None, "excited": "ED energy",
     "entropy": None, "evolution": None,
     "density": "exact density", "zero": "exact $\\langle S^z\\rangle$",
+    "spin1": "ED energy", "hubbard": "ED energy", "corrmat": None,
+    "metts": "ED thermal energy", "nh": "ED Re $E_0$", "sector_dc": None,
+    "task_dc": None, "fourpoint": "ED norm",
 }
 
 CALC_NOTES = {
@@ -89,10 +102,43 @@ CALC_NOTES = {
         "$S_z=0$ quantum-number sector "
         "(\\texttt{set\\_conserved\\_sector(Sz=0)}), which is where the "
         "Heisenberg ground state lives -- so the energy must match the "
-        "dense run and only the time differs. Only "
-        "\\texttt{itensor\\_version=3} and \\texttt{\"python\"} implement "
-        "quantum numbers at all; the other columns are blank by "
-        "construction rather than by failure.",
+        "dense run and only the time differs. "
+        "\\texttt{itensor\\_version=2} has no quantum numbers, so its "
+        "column is blank by construction rather than by failure.",
+    "spin1_gs":
+        "The $S=1$ Heisenberg chain $\\sum_i \\mathbf{S}_i\\cdot\\mathbf{S}_{i+1}$, "
+        "the Haldane chain, with a local dimension of 3.",
+    "hubbard_gs":
+        "Spinful Hubbard chain with hopping 1 and $U=4$, written as "
+        "$U(n_\\uparrow-1/2)(n_\\downarrow-1/2)$ so that the ground state is "
+        "at half filling; $N$ counts orbitals, so there are $2N$ fermionic "
+        "sites. The ED reference stops at $N=6$.",
+    "corrmat":
+        "$\\langle c^\\dagger_i c_j\\rangle$ for every pair on the ground "
+        "state of spinless fermions with first-neighbor hopping and "
+        "interaction, with each backend's default route; the ground state "
+        "is solved untimed.",
+    "nh_gs":
+        "PT-symmetric XX chain with a staggered imaginary field "
+        "$i\\,0.3\\,(-1)^i S^z_i$; the time is one \\texttt{nhdmrg()} call, "
+        "and the value is the real part of the targeted eigenvalue.",
+    "sector_dc":
+        "$\\langle S^-_0 S^+_0\\rangle(\\omega)$ as a Lehmann sum over the "
+        "lowest states of the $S_z=0$ and $S_z=1$ sectors "
+        "(\\texttt{submode=\"SECTOR\"}), on a fresh chain, compared with the "
+        "ED Lehmann density.",
+    "task_dc":
+        "$\\langle S^z_0 S^z_0\\rangle(\\omega)$ by the tangent-space Krylov "
+        "method (\\texttt{submode=\"TASK\"}) on the shared ground state.",
+    "fourpoint":
+        "$\\langle c^\\dagger_i c_j c^\\dagger_k c_l\\rangle$ for every tuple, "
+        "each backend's default route; the recorded value is the Frobenius "
+        "norm of the tensor.",
+    "metts":
+        "Thermal energy at $T=0.5$ by METTS, with the seed, the sample "
+        "counts and TDVP imaginary-time steps of 0.05 pinned on every "
+        "backend. The samples still differ between backends, so the "
+        "deviation from ED is a statistical error, not a bug.",
     "idmrg_vev":
         "$\\langle S^z\\rangle$ vanishes by symmetry on this model, so the "
         "accuracy column is simply the deviation from zero. It is worth "
@@ -517,9 +563,10 @@ def _params_block(params, backends, calc_sizes):
         r"\item Backends: " + ", ".join(tex_escape(l) for _, l, _ in backends),
         r"\item DMRG: maxm=%d, nsweeps=%d, cutoff=%.1e" % (
                 params["maxm"], params["nsweeps"], params["cutoff"]),
-        r"\item KPM: n=%d moments; spectral window [%.2f, %.2f] (%d points), "
-        r"shared with the real-time correlator (broadening $\delta=%.2f$)" % (
-                params["kpm_n"], emin, emax, npts, params["td_delta"]),
+        r"\item KPM: broadening $\delta=%.2f$; spectral window [%.2f, %.2f] "
+        r"(%d points), shared with the real-time correlator (broadening "
+        r"$\delta=%.2f$)" % (
+                params["kpm_delta"], emin, emax, npts, params["td_delta"]),
         r"\item Real-time evolution: %d steps of $dt=%.3f$" % (
                 params["nt"], params["dt"]),
         r"\item Infinite chain: maxiter=%d, etol=%.1e" % (

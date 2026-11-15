@@ -29,8 +29,10 @@ is fast because it is computing the wrong thing shows up as such.
 import numpy as np
 
 from dmrgpy import spinchain
+from dmrgpy import fermionchain
 from dmrgpy import infinitechain
 from dmrgpy import timedependent
+from dmrgpy.operatornames import name2MO
 
 
 # Bethe-ansatz ground-state energy per site of the uniform S=1/2
@@ -62,6 +64,64 @@ def make_chain(n, itensor_version, params):
     sc.set_hamiltonian(h)
     sc.maxm, sc.nsweeps, sc.cutoff = params["maxm"], params["nsweeps"], params["cutoff"]
     return sc
+
+
+def _pin_schedule(chain, params):
+    chain.maxm, chain.nsweeps, chain.cutoff = (params["maxm"], params["nsweeps"],
+                                               params["cutoff"])
+    return chain
+
+
+def make_spin1_chain(n, itensor_version, params):
+    """Uniform S=1 Heisenberg chain, sum_i S_i.S_{i+1}: the Haldane chain,
+    a local dimension of 3 instead of 2."""
+    sc = spinchain.Spin_Chain(["1" for _ in range(n)], itensor_version=itensor_version)
+    h = 0
+    for i in range(n - 1):
+        h = h + sc.SS(i, i + 1)
+    sc.set_hamiltonian(h)
+    return _pin_schedule(sc, params)
+
+
+def make_hubbard_chain(n, itensor_version, params, U=4.0):
+    """Spinful Hubbard chain of n orbitals (2n fermionic sites), hopping 1
+    and U(N_up-1/2)(N_dn-1/2), whose ground state is at half filling
+    without a chemical potential."""
+    fc = fermionchain.Spinful_Fermionic_Chain(n, itensor_version=itensor_version)
+    h = 0
+    for i in range(n - 1):
+        for C, Cd in ((fc.Cup, fc.Cdagup), (fc.Cdn, fc.Cdagdn)):
+            h = h - (Cd[i] * C[i + 1] + Cd[i + 1] * C[i])
+    for i in range(n):
+        h = h + U * (fc.Nup[i] - 0.5) * (fc.Ndn[i] - 0.5)
+    fc.set_hamiltonian(h)
+    return _pin_schedule(fc, params)
+
+
+def make_spinless_chain(n, itensor_version, params, V=1.0):
+    """Spinless fermions with first-neighbor hopping and interaction
+    V(N_i-1/2)(N_{i+1}-1/2), at half filling by particle-hole symmetry."""
+    fc = fermionchain.Fermionic_Chain(n, itensor_version=itensor_version)
+    h = 0
+    for i in range(n - 1):
+        h = h - (fc.Cdag[i] * fc.C[i + 1] + fc.Cdag[i + 1] * fc.C[i])
+        h = h + V * (fc.N[i] - 0.5) * (fc.N[i + 1] - 0.5)
+    fc.set_hamiltonian(h)
+    return _pin_schedule(fc, params)
+
+
+def make_nh_chain(n, itensor_version, params, g=0.3):
+    """PT-symmetric XX chain with a staggered imaginary field i g (-1)^i Sz_i,
+    a non-Hermitian Hamiltonian whose eigenvalue of smallest real part
+    NH-DMRG targets (the model of tests/test_nh_dmrg.py)."""
+    sc = spinchain.Spin_Chain(["1/2" for _ in range(n)], itensor_version=itensor_version)
+    h = 0
+    for i in range(n - 1):
+        h = h + sc.Sx[i] * sc.Sx[i + 1] + sc.Sy[i] * sc.Sy[i + 1]
+    for i in range(n):
+        h = h + 1j * g * (-1) ** i * sc.Sz[i]
+    sc.set_hamiltonian(h)
+    return _pin_schedule(sc, params)
 
 
 def make_infinite_chain(chi, itensor_version, gs_method, params):
@@ -124,7 +184,7 @@ def prep_static(sc, iv, n, params, rep):
 def prep_dynamic(sc, iv, n, params, rep):
     return lambda: sc.get_dynamical_correlator(
             mode="DMRG", submode="KPM", name=(sc.Sz[0], sc.Sz[0]),
-            n=params["kpm_n"], es=params["es"])[1].real
+            delta=params["kpm_delta"], es=params["es"])[1].real
 
 
 def prep_dynamic_td(sc, iv, n, params, rep):
@@ -169,6 +229,68 @@ def prep_sector(sc, iv, n, params, rep):
     own = make_chain(n, iv, params)
     own.set_conserved_sector(Sz=0)
     return lambda: own.gs_energy(mode="DMRG")
+
+
+def prep_spin1_gs(sc, iv, n, params, rep):
+    own = make_spin1_chain(n, iv, params)
+    return lambda: own.gs_energy(mode="DMRG")
+
+
+def prep_hubbard_gs(sc, iv, n, params, rep):
+    own = make_hubbard_chain(n, iv, params)
+    return lambda: own.gs_energy(mode="DMRG")
+
+
+def prep_corrmat(sc, iv, n, params, rep):
+    # <Cdag_i C_j> for every pair, with each backend's default route, on a
+    # ground state solved untimed here.
+    own = make_spinless_chain(n, iv, params)
+    own.gs_energy(mode="DMRG")
+    return lambda: np.real(np.asarray(own.get_correlation_matrix()))
+
+
+def prep_nh_gs(sc, iv, n, params, rep):
+    own = make_nh_chain(n, iv, params)
+    return lambda: float(np.real(own.nhdmrg()[0]))
+
+
+def prep_sector_dc(sc, iv, n, params, rep):
+    # Lehmann sum over the lowest states of the Sz=0 and Sz=+1 sectors
+    # (submode="SECTOR"), on a fresh chain: the sector solves are cached
+    # with the clone that made them, and a repeat must not reuse them.
+    own = make_chain(n, iv, params)
+    Sp, Sm = name2MO("Sp", own), name2MO("Sm", own)
+    return lambda: np.real(own.get_dynamical_correlator(
+            submode="SECTOR", name=(Sm[0], Sp[0]), nex=params["sector_nex"],
+            es=params["es"], delta=params["kpm_delta"], quiet=True)[1])
+
+
+def prep_task_dc(sc, iv, n, params, rep):
+    # Tangent-space Krylov correlator (submode="TASK") on the shared state.
+    return lambda: np.real(sc.get_dynamical_correlator(
+            submode="TASK", name=(sc.Sz[0], sc.Sz[0]), es=params["es"],
+            delta=params["kpm_delta"])[1])
+
+
+def prep_fourpoint(sc, iv, n, params, rep):
+    # <Cdag_i C_j Cdag_k C_l> for every tuple, each backend's default route,
+    # on a ground state solved untimed. The tensor has n^4 entries, so the
+    # recorded value is its Frobenius norm.
+    own = make_spinless_chain(n, iv, params)
+    wf = own.get_gs()
+    return lambda: float(np.linalg.norm(np.asarray(wf.get_four_correlation_tensor())))
+
+
+def prep_metts(sc, iv, n, params, rep):
+    # Thermal energy by METTS with everything that changes the work pinned:
+    # the seed, the sample counts and TDVP imaginary-time steps of 0.05
+    # (itime=None would pick another integrator at low T).
+    own = make_chain(n, iv, params)
+    H = own.hamiltonian
+    return lambda: float(np.real(own.metts_vev(
+            H, params["metts_T"], nsamples=params["metts_nsamples"],
+            nwarmup=params["metts_nwarmup"], dbeta_half_step=0.05,
+            seed=1234 + rep, itime="tdvp")[0]))
 
 
 # ---------------------------------------------------------------------
@@ -236,7 +358,27 @@ CALCS = [
     dict(key="evolution", group="finite", prep=prep_evolution, backends=None,
          ref="evolution", ref_kind="array"),
     dict(key="sector", group="finite", prep=prep_sector,
-         backends=("v3", "python"), ref="gs", ref_kind="scalar"),
+         backends=("v3", "python", "julia_live"), ref="gs", ref_kind="scalar"),
+    dict(key="spin1_gs", group="finite", prep=prep_spin1_gs, backends=None,
+         ref="spin1", ref_kind="scalar", ed_max=10),
+    dict(key="hubbard_gs", group="finite", prep=prep_hubbard_gs, backends=None,
+         ref="hubbard", ref_kind="scalar", ed_max=6),
+    dict(key="corrmat", group="finite", prep=prep_corrmat, backends=None,
+         ref="corrmat", ref_kind="array"),
+    dict(key="metts", group="finite", prep=prep_metts,
+         backends=("v3", "python", "julia_live"), ref="metts", ref_kind="scalar",
+         ed_max=10),
+    dict(key="nh_gs", group="finite", prep=prep_nh_gs,
+         backends=("v3", "python", "julia_live"), ref="nh", ref_kind="scalar",
+         ed_max=12),
+    dict(key="sector_dc", group="finite", prep=prep_sector_dc,
+         backends=("v3", "python", "julia_live"), ref="sector_dc", ref_kind="array",
+         ed_max=10),
+    dict(key="task_dc", group="finite", prep=prep_task_dc,
+         backends=("v3", "python", "julia_live"), ref="task_dc", ref_kind="array",
+         ed_max=10),
+    dict(key="fourpoint", group="finite", prep=prep_fourpoint, backends=None,
+         ref="fourpoint", ref_kind="scalar", ed_max=10),
     dict(key="idmrg_gs", group="infinite", method="idmrg", prep=prep_idmrg_gs,
          backends=("v3", "python"), ref="density", ref_kind="scalar"),
     dict(key="idmrg_vev", group="infinite", method="idmrg", prep=prep_idmrg_vev,
@@ -257,6 +399,14 @@ def spec(key):
         if c["key"] == key:
             return c
     raise KeyError(key)
+
+
+def ed_cap(key, default):
+    """Largest size of the exact-diagonalization reference of one
+    calculation: the run's --ed-max-n unless the entry's Hilbert space
+    grows faster than 2**N (spin 1, the Hubbard chain) or its reference
+    needs the whole spectrum (the thermal energy)."""
+    return min(default, spec(key).get("ed_max", default))
 
 
 def allows(key, backend_key):
@@ -321,6 +471,37 @@ def finite_references(n, params, calc_keys):
             out["evolution"] = timedependent.evolve_and_measure(
                     ed, operator=ed.Sz[0], nt=params["nt"], dt=params["dt"],
                     wf=wf, mode="ED")[1].real
+        if "spin1" in wanted:
+            out["spin1"] = make_spin1_chain(n, "python", params).gs_energy(mode="ED")
+        if "hubbard" in wanted:
+            out["hubbard"] = make_hubbard_chain(n, "python", params).gs_energy(mode="ED")
+        if "corrmat" in wanted:
+            ed = make_spinless_chain(n, "python", params)
+            ed.mode = "ED"
+            out["corrmat"] = np.real(np.asarray(
+                    ed.get_correlation_matrix(dmmode="explicit")))
+        if "metts" in wanted:
+            ed = make_chain(n, "python", params)
+            out["metts"] = float(np.real(ed.vev(ed.hamiltonian, T=params["metts_T"],
+                                                mode="ED")))
+        if "nh" in wanted:
+            es = make_nh_chain(n, "python", params).get_excited(mode="ED", n=2)
+            out["nh"] = float(min(np.real(es)))
+        if "sector_dc" in wanted or "task_dc" in wanted:
+            ed = make_chain(n, "python", params)
+            if "sector_dc" in wanted:
+                Sp, Sm = name2MO("Sp", ed), name2MO("Sm", ed)
+                out["sector_dc"] = np.real(ed.get_dynamical_correlator(
+                        mode="ED", submode="ED", name=(Sm[0], Sp[0]),
+                        es=params["es"], delta=params["kpm_delta"])[1])
+            if "task_dc" in wanted:
+                out["task_dc"] = np.real(ed.get_dynamical_correlator(
+                        mode="ED", submode="ED", name=(ed.Sz[0], ed.Sz[0]),
+                        es=params["es"], delta=params["kpm_delta"])[1])
+        if "fourpoint" in wanted:
+            ed = make_spinless_chain(n, "python", params)
+            out["fourpoint"] = float(np.linalg.norm(np.asarray(
+                    ed.get_gs(mode="ED").get_four_correlation_tensor())))
     except Exception as e:
         out["ok"], out["err"] = False, repr(e)
     return out

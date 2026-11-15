@@ -40,6 +40,7 @@ calculation type under <outdir>/.
 """
 import os
 import sys
+import math
 import time
 import json
 import shutil
@@ -133,6 +134,7 @@ def timed(make_thunk, repeats=1):
     infinitely fast. Preparation per repeat lets those calculations hand
     back a fresh chain instead."""
     value, err, ok, best = None, None, False, None
+    times = []
     for rep in range(max(1, repeats)):
         try:
             fn = make_thunk(rep)
@@ -140,23 +142,54 @@ def timed(make_thunk, repeats=1):
             if not ok:
                 err = repr(e)
             continue
-        t0 = time.time()
+        t0 = time.perf_counter()
         try:
             v = fn()
-            dt = time.time() - t0
+            dt = time.perf_counter() - t0
             value, ok, err = v, True, None
         except Exception as e:
-            dt = time.time() - t0
+            dt = time.perf_counter() - t0
             if not ok:
                 err = repr(e)
             continue
+        times.append(dt)
         best = dt if best is None else min(best, dt)
+    timed.last_times = times
     return value, best, ok, err
 
 
 def _fail_row(calc, key, n, err):
     return dict(calc=calc, backend=key, n=n, ok=False, err=err, time=None,
-                value=None)
+                times=[], value=None)
+
+
+def machine_info():
+    """What a timing depends on besides the code: the CPU model, the cores
+    this process may run on, the thread settings, and every BLAS loaded
+    into the process by then (numpy's, the C++ extension's, Julia's)."""
+    info = dict(host=os.uname().nodename, python=sys.version.split()[0])
+    try:
+        with open("/proc/cpuinfo") as f:
+            info["cpu"] = next((l.split(":", 1)[1].strip() for l in f
+                                if l.startswith("model name")), None)
+    except OSError:
+        info["cpu"] = None
+    try:
+        info["affinity"] = sorted(os.sched_getaffinity(0))
+    except AttributeError:
+        info["affinity"] = None
+    info["env"] = {k: os.environ.get(k) for k in (
+        "MKL_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+        "NUMBA_NUM_THREADS", "JULIA_NUM_THREADS", "SLURM_JOB_ID",
+        "SLURM_ARRAY_TASK_ID", "SLURM_JOB_PARTITION")}
+    try:
+        import threadpoolctl
+        info["blas"] = [dict(api=d.get("internal_api"), lib=d.get("filepath"),
+                             threads=d.get("num_threads"))
+                        for d in threadpoolctl.threadpool_info()]
+    except Exception as e:
+        info["blas"] = repr(e)
+    return info
 
 
 # ---------------------------------------------------------------------
@@ -168,7 +201,7 @@ def _fail_row(calc, key, n, err):
 # state of this (backend, N) -- as opposed to the ones that build their
 # own chain because they change the Hamiltonian (evolution) or the site
 # set (sector).
-_NEEDS_GS = ("static", "dynamic", "dynamic_td", "excited", "entropy")
+_NEEDS_GS = ("static", "dynamic", "dynamic_td", "excited", "entropy", "task_dc")
 
 
 def run_case_finite(key, iv, n, params, calcs):
@@ -198,7 +231,7 @@ def run_case_finite(key, iv, n, params, calcs):
         if calc == "gs":
             gs_ok = ok
         rows.append(dict(calc=calc, backend=key, n=n, ok=ok, err=err,
-                         time=t, value=value))
+                         time=t, times=list(timed.last_times), value=value))
     return rows
 
 
@@ -240,8 +273,90 @@ def run_case_infinite(key, iv, chi, params, calcs):
             if calc in _INFINITE_GS:
                 gs_ok = ok
             rows.append(dict(calc=calc, backend=key, n=chi, ok=ok, err=err,
-                             time=t, value=value))
+                             time=t, times=list(timed.last_times), value=value))
     return rows
+
+
+# ---------------------------------------------------------------------
+# Adaptive sweep: every backend climbs the size ladder until its next
+# point is predicted to pass the time cap.
+# ---------------------------------------------------------------------
+
+def _slope(points):
+    """Log-log slope of the last two (size, seconds) points, the exponent
+    used to predict the next size; 3 when there is no trustworthy pair
+    (fewer than two points, or times too short to measure a trend)."""
+    pts = [(x, t) for x, t in points if t is not None and t > 0]
+    if len(pts) < 2:
+        return 3.0
+    (x1, t1), (x2, t2) = pts[-2], pts[-1]
+    if t1 < 0.05 or t2 < 0.05 or x2 <= x1:
+        return 3.0
+    return min(5.0, max(1.0, math.log(t2 / t1) / math.log(x2 / x1)))
+
+
+def run_adaptive(args, backends, calcs, params, t_start):
+    """Climb args.ladder (finite family) and args.chi_ladder (infinite
+    family) one size at a time, every backend inside each size. After each
+    case a backend predicts its next case from the slope of its last two,
+    and leaves the ladder when the slowest timed call there would pass
+    --max-seconds or the whole case, untimed preparation included, would
+    pass --max-case-seconds. A calculation that raises leaves that
+    backend's list, and no case starts once --budget-seconds have passed.
+    Returns the rows and, per backend, why it stopped."""
+    results, stops = [], {}
+    budget_end = t_start + args.budget_seconds
+    for family, ladder, runner in (("finite", args.ladder, run_case_finite),
+                                   ("infinite", args.chi_ladder, run_case_infinite)):
+        fam = [c for c in calcs if calctk.spec(c)["group"] == family]
+        state = {}
+        for key, label, iv in backends:
+            todo = [c for c in fam if calctk.allows(c, key)]
+            if todo:
+                state[key] = dict(todo=todo, t=[], wall=[], stop=None)
+        for i, x in enumerate(ladder):
+            nxt = ladder[i + 1] if i + 1 < len(ladder) else None
+            for key, label, iv in backends:
+                s = state.get(key)
+                if s is None or s["stop"]:
+                    continue
+                if time.time() > budget_end:
+                    s["stop"] = "budget spent before %d" % x
+                    continue
+                axis = "N" if family == "finite" else "chi"
+                print(f"[{time.time()-t_start:7.1f}s] {label:22s} {axis}={x:4d} ...",
+                      end="", flush=True)
+                t0 = time.time()
+                rows = runner(key, iv, x, params, s["todo"])
+                wall = time.time() - t0
+                results.extend(rows)
+                print("  " + "  ".join(
+                    (f"{r['calc']}={r['time']:.3f}s" if r["ok"] else f"{r['calc']}=FAIL")
+                    for r in rows) + f"  (case {wall:.1f}s)", flush=True)
+                s["todo"] = [c for c in s["todo"]
+                             if any(r["calc"] == c and r["ok"] for r in rows)]
+                if not s["todo"]:
+                    s["stop"] = "failed at %d" % x
+                    continue
+                tmax = max(r["time"] for r in rows if r["ok"])
+                s["t"].append((x, tmax))
+                s["wall"].append((x, wall))
+                if nxt is None:
+                    s["stop"] = "end of the ladder"
+                    continue
+                pt = tmax * (nxt / x) ** _slope(s["t"])
+                pw = wall * (nxt / x) ** _slope(s["wall"])
+                if pt > args.max_seconds or pw > args.max_case_seconds:
+                    s["stop"] = ("stopped at %d: %d predicted at %.0f s timed, "
+                                 "%.0f s in all" % (x, nxt, pt, pw))
+                elif time.time() + pw > budget_end:
+                    s["stop"] = "stopped at %d: budget" % x
+            if all(s["stop"] for s in state.values()):
+                break
+        for key, s in state.items():
+            stops["%s/%s" % (family, key)] = s["stop"]
+            print(f"  {family:8s} {key:10s} {s['stop']}")
+    return results, stops
 
 
 # ---------------------------------------------------------------------
@@ -269,6 +384,59 @@ def parse_args():
             help="largest N run through the real-time quench evolution")
     ap.add_argument("--excited-max-n", type=int, default=22,
             help="largest N run through the excited-state calculation")
+    ap.add_argument("--spin1-max-n", type=int, default=30,
+            help="largest N run through the S=1 Heisenberg ground state")
+    ap.add_argument("--hubbard-max-n", type=int, default=18,
+            help="largest number of orbitals of the Hubbard ground state "
+                 "(twice as many fermionic sites)")
+    ap.add_argument("--corrmat-max-n", type=int, default=30,
+            help="largest N run through the fermionic correlation matrix")
+    ap.add_argument("--metts-max-n", type=int, default=14,
+            help="largest N run through the METTS thermal energy")
+    ap.add_argument("--metts-T", type=float, default=0.5,
+            help="temperature of the METTS thermal energy")
+    ap.add_argument("--metts-nsamples", type=int, default=10,
+            help="METTS samples kept for the average")
+    ap.add_argument("--metts-nwarmup", type=int, default=2,
+            help="METTS samples thrown away first")
+    ap.add_argument("--nh-max-n", type=int, default=30,
+            help="largest N run through the non-Hermitian ground state")
+    ap.add_argument("--sector-dc-max-n", type=int, default=14,
+            help="largest N run through the SECTOR spectral function")
+    ap.add_argument("--task-max-n", type=int, default=18,
+            help="largest N run through the TASK correlator")
+    ap.add_argument("--fourpoint-max-n", type=int, default=14,
+            help="largest N run through the four-point tensor")
+    ap.add_argument("--sector-nex", type=int, default=20,
+            help="states per sector of the SECTOR spectral function")
+    ap.add_argument("--adaptive", action="store_true",
+            help="ignore --sizes, --chis and the per-calculation caps, and "
+                 "let every backend climb --ladder/--chi-ladder until its "
+                 "next point is predicted to pass --max-seconds")
+    ap.add_argument("--ladder", type=int, nargs="+",
+            default=[6, 10, 14, 20, 28, 40, 56, 80, 112, 160, 224, 320, 448, 640],
+            help="chain lengths climbed by --adaptive")
+    ap.add_argument("--chi-ladder", type=int, nargs="+",
+            default=[16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512],
+            help="bond dimensions climbed by --adaptive")
+    ap.add_argument("--max-seconds", type=float, default=600.0,
+            help="--adaptive: a backend leaves the ladder when its slowest "
+                 "timed call at the next size is predicted above this")
+    ap.add_argument("--max-case-seconds", type=float, default=1200.0,
+            help="--adaptive: or when its whole next case, untimed ground "
+                 "state included, is predicted above this")
+    ap.add_argument("--budget-seconds", type=float, default=9000.0,
+            help="--adaptive: no case starts after this much wall time")
+    ap.add_argument("--warmup-n", type=int, default=None,
+            help="chain length of the untimed Julia warm-up (default: the "
+                 "smallest size)")
+    ap.add_argument("--strict-backends", action="store_true",
+            help="exit with status 2 if any backend named in --backends "
+                 "is not available, instead of skipping it")
+    ap.add_argument("--interleave", action="store_true",
+            help="loop over sizes outside and backends inside, so that "
+                 "a slow drift of the machine's load reaches every backend "
+                 "alike (the default runs one backend after the other)")
     ap.add_argument("--vumps-max-chi", type=int, default=24,
             help="largest bond dimension run through the VUMPS solver, "
                  "which grows out of proportion to everything else here")
@@ -289,7 +457,9 @@ def parse_args():
     ap.add_argument("--maxm", type=int, default=40)
     ap.add_argument("--nsweeps", type=int, default=8)
     ap.add_argument("--cutoff", type=float, default=1e-8)
-    ap.add_argument("--kpm-n", type=int, default=300, help="KPM moment count")
+    ap.add_argument("--kpm-delta", type=float, default=0.1,
+            help="broadening of the KPM dynamical correlator, which sets "
+                 "its number of moments (algebra/kpm.py's calibration)")
     ap.add_argument("--emin", type=float, default=-1.0,
             help="lower edge of the energy window of the spectral functions")
     ap.add_argument("--emax", type=float, default=6.0,
@@ -352,7 +522,11 @@ def _calc_sizes(args, calcs, sizes, chis):
     dominate the wall time of a default run)."""
     caps = {"dynamic": args.dyn_max_n, "dynamic_td": args.td_max_n,
             "evolution": args.evolution_max_n, "excited": args.excited_max_n,
-            "vumps_gs": args.vumps_max_chi, "vumps_vev": args.vumps_max_chi}
+            "vumps_gs": args.vumps_max_chi, "vumps_vev": args.vumps_max_chi,
+            "spin1_gs": args.spin1_max_n, "hubbard_gs": args.hubbard_max_n,
+            "corrmat": args.corrmat_max_n, "metts": args.metts_max_n,
+            "nh_gs": args.nh_max_n, "sector_dc": args.sector_dc_max_n,
+            "task_dc": args.task_max_n, "fourpoint": args.fourpoint_max_n}
     out = {}
     for calc in calcs:
         axis = chis if calctk.spec(calc)["group"] == "infinite" else sizes
@@ -368,16 +542,19 @@ def _references(calc_sizes, params, calcs, ed_max_n):
     refs = {c: {} for c in calcs if calctk.spec(c)["ref"] is not None}
     finite = [c for c in calcs if calctk.spec(c)["group"] == "finite"
               and calctk.spec(c)["ref"] is not None]
-    ed_sizes = sorted(set(n for c in finite for n in calc_sizes[c] if n <= ed_max_n))
+    ed_sizes = sorted(set(n for c in finite for n in calc_sizes[c]
+                          if n <= calctk.ed_cap(c, ed_max_n)))
     for n in ed_sizes:
-        ref = calctk.finite_references(n, params, finite)
+        here = [c for c in finite if n in calc_sizes[c]
+                and n <= calctk.ed_cap(c, ed_max_n)]
+        ref = calctk.finite_references(n, params, here)
         status = "ok" if ref["ok"] else "FAILED (%s)" % ref["err"]
         print(f"  N={n:3d}: {status}")
         if not ref["ok"]:
             continue
-        for calc in finite:
+        for calc in here:
             key = calctk.spec(calc)["ref"]
-            if key in ref and n in calc_sizes[calc]:
+            if key in ref:
                 refs[calc][n] = ref[key]
     for calc in calcs:
         s = calctk.spec(calc)
@@ -386,7 +563,8 @@ def _references(calc_sizes, params, calcs, ed_max_n):
         value = calctk.infinite_reference(s["ref"])
         for chi in calc_sizes[calc]:
             refs[calc][chi] = value
-    skipped = [n for c in finite for n in calc_sizes[c] if n > ed_max_n]
+    skipped = [n for c in finite for n in calc_sizes[c]
+               if n > calctk.ed_cap(c, ed_max_n)]
     if skipped:
         print(f"  N > {ed_max_n} skipped (2**N is infeasible for exact "
               f"diagonalization): " + ", ".join(str(n) for n in sorted(set(skipped))))
@@ -403,10 +581,12 @@ def main():
         return
 
     params = dict(maxm=args.maxm, nsweeps=args.nsweeps, cutoff=args.cutoff,
-            kpm_n=args.kpm_n,
+            kpm_delta=args.kpm_delta,
             es=np.linspace(args.emin, args.emax, args.npts),
             td_delta=args.td_delta, nt=args.nt, dt=args.dt,
             inf_maxiter=args.inf_maxiter, inf_etol=args.inf_etol,
+            metts_T=args.metts_T, metts_nsamples=args.metts_nsamples,
+            metts_nwarmup=args.metts_nwarmup, sector_nex=args.sector_nex,
             repeats=args.repeats)
 
     requested = args.backends if args.backends is not None else DEFAULT_BACKEND_KEYS
@@ -418,16 +598,27 @@ def main():
     requested_but_missing = set(requested) - {k for k, _, _ in backends}
     for key in sorted(requested_but_missing):
         print(f"(backend {key!r} was requested but is not available here -- skipping)")
+    if args.strict_backends and requested_but_missing:
+        print("--strict-backends: stopping, since a requested backend is missing")
+        sys.exit(2)
     if args.backends is None:
         print("(julia_live skipped by default -- pass '--backends ... julia_live' to include it)")
 
     calcs = args.calcs if args.calcs is not None else calctk.CALC_KEYS
     calcs = [c for c in calctk.CALC_KEYS if c in calcs]  # canonical order
-    sizes = sorted(set(args.sizes))
-    chis = sorted(set(args.chis))
-    calc_sizes = _calc_sizes(args, calcs, sizes, chis)
+    if args.adaptive:
+        sizes, chis = sorted(set(args.ladder)), sorted(set(args.chi_ladder))
+        calc_sizes = {c: (chis if calctk.spec(c)["group"] == "infinite" else sizes)
+                      for c in calcs}
+    else:
+        sizes = sorted(set(args.sizes))
+        chis = sorted(set(args.chis))
+        calc_sizes = _calc_sizes(args, calcs, sizes, chis)
 
     print("Backends:  " + ", ".join(f"{label} ({key})" for key, label, _ in backends))
+    if args.adaptive:
+        print(f"Adaptive: next point capped at {args.max_seconds:.0f} s timed, "
+              f"{args.max_case_seconds:.0f} s per case, budget {args.budget_seconds:.0f} s")
     for calc in calcs:
         s = calctk.spec(calc)
         axis = "chi" if s["group"] == "infinite" else "N"
@@ -451,13 +642,14 @@ def main():
         warm = [c for c in calcs if calctk.spec(c)["group"] == "finite"
                 and calctk.allows(c, "julia_live")]
         try:
-            run_case_finite("julia_live", "julia_live", min(sizes), params, warm)
+            run_case_finite("julia_live", "julia_live", args.warmup_n or min(sizes),
+                            params, warm)
         except Exception as e:
             print(f"  (warm-up run raised {e!r} -- continuing anyway)")
         print()
 
-    results = []
-    t_start = time.time()
+    # Every (backend, size) case of the sweep, in the order it runs.
+    cases = []
     for key, label, iv in backends:
         finite = [c for c in calcs if calctk.spec(c)["group"] == "finite"
                   and calctk.allows(c, key)]
@@ -465,28 +657,36 @@ def main():
                     and calctk.allows(c, key)]
         for n in sizes:
             todo = [c for c in finite if n in calc_sizes[c]]
-            if not todo:
-                continue
-            print(f"[{time.time()-t_start:7.1f}s] {label:22s} N={n:3d} ...",
-                  end="", flush=True)
-            rows = run_case_finite(key, iv, n, params, todo)
-            results.extend(rows)
-            print("  " + "  ".join(
-                (f"{r['calc']}={r['time']:.3f}s" if r["ok"] else f"{r['calc']}=FAIL")
-                for r in rows))
+            if todo:
+                cases.append((0, n, key, label, iv, todo))
         for chi in chis:
             todo = [c for c in infinite if chi in calc_sizes[c]]
-            if not todo:
-                continue
-            print(f"[{time.time()-t_start:7.1f}s] {label:22s} chi={chi:3d} ...",
-                  end="", flush=True)
-            rows = run_case_infinite(key, iv, chi, params, todo)
-            results.extend(rows)
-            print("  " + "  ".join(
-                (f"{r['calc']}={r['time']:.3f}s" if r["ok"] else f"{r['calc']}=FAIL")
-                for r in rows))
+            if todo:
+                cases.append((1, chi, key, label, iv, todo))
+    if args.interleave:
+        order = {k: i for i, (k, _, _) in enumerate(backends)}
+        cases.sort(key=lambda c: (c[0], c[1], order[c[2]]))
 
-    print(f"\nTotal sweep time: {time.time()-t_start:.1f}s")
+    results, stops = [], None
+    t_start = time.time()
+    if args.adaptive:
+        cases = []
+        results, stops = run_adaptive(args, backends, calcs, params, t_start)
+        calc_sizes = {c: sorted(set(r["n"] for r in results if r["calc"] == c))
+                      for c in calcs}
+    for family, x, key, label, iv, todo in cases:
+        axis = "N" if family == 0 else "chi"
+        print(f"[{time.time()-t_start:7.1f}s] {label:22s} {axis}={x:3d} ...",
+              end="", flush=True)
+        run = run_case_finite if family == 0 else run_case_infinite
+        rows = run(key, iv, x, params, todo)
+        results.extend(rows)
+        print("  " + "  ".join(
+            (f"{r['calc']}={r['time']:.3f}s" if r["ok"] else f"{r['calc']}=FAIL")
+            for r in rows))
+
+    sweep_s = time.time() - t_start
+    print(f"\nTotal sweep time: {sweep_s:.1f}s")
 
     print("\nComputing reference values for the accuracy cross-check "
           f"(exact diagonalization for N <= {args.ed_max_n})...")
@@ -500,7 +700,13 @@ def main():
         json.dump(reporttk.to_jsonable(dict(
             results=results, refs=refs, params=params,
             backends=[(k, l) for k, l, _ in backends],
-            calc_sizes=calc_sizes, ref_kinds=ref_kinds)), f, indent=2)
+            calc_sizes=calc_sizes, ref_kinds=ref_kinds,
+            machine=machine_info(), interleave=args.interleave,
+            adaptive=args.adaptive, stops=stops,
+            limits=dict(max_seconds=args.max_seconds,
+                        max_case_seconds=args.max_case_seconds,
+                        budget_seconds=args.budget_seconds),
+            sweep_seconds=sweep_s)), f, indent=2)
     print(f"Wrote {os.path.join(outdir, 'results.json')}")
 
     tex_path = reporttk.write_report(results, refs, params, backends,
