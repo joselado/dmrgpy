@@ -1951,3 +1951,20 @@ where `"fast"` truncates $C_j|\psi\rangle$: on a 10-site chain the two
 differ by $1.1\times10^{-11}$, and at 32 sites by $3\times10^{-8}$, in
 0.21 s against 3.53 s. `dmmode="fast"` gives the numbers of before; v3,
 `julia_live`, ED and native spinful chains are unchanged.
+
+## The 2026-11-15 defaults of `julia_live`: sweep solves and the one-sweep correlation matrix
+
+`applyinverse` on `julia_live` without a conserved sector now solves by
+two-site sweeps when its operator is not proven Hermitian
+(`inverse_solver=None`), as `"python"` does; a Hermitian operator and a
+sector keep BiCGSTAB. On a 14-site Heisenberg resolvent $z-H$ with
+$\mathrm{Im}\,z=0.1$ the Julia BiCGSTAB diverged (relative residual
+$10^{63}$ after 320 s) and the sweeps reached $9\times10^{-4}$ in 11 s; on
+6 sites the two agree to every printed digit. `submode="CVM_explicit"`,
+`CVMimag` and the non-Hermitian `CVM` on `julia_live` take the sweeps
+since. `get_correlation_matrix` on a `julia_live` chain of spinless
+fermion sites without `operators=` now takes `dmmode="full"`,
+ITensorMPS's `correlation_matrix`, instead of `"fast"`: 0.09 s against
+14 s at 32 sites, the two differing by $5\times10^{-9}$, the truncation of
+`"fast"`. `inverse_solver="bicgstab"` and `dmmode="fast"` give the
+numbers of before.

@@ -302,9 +302,9 @@ def resolve_inverse_solver(self,A=None):
     """The solver applyinverse() takes on DMRG for the operator A:
     inverse_solver as set ("sweep" exists on itensor_version="python" and
     "julia_live"), or for None (the default) "sweep" on
-    itensor_version="python" without a conserved sector when A is not
+    itensor_version="python" and "julia_live" without a conserved sector when A is not
     proven Hermitian (MultiOperator.is_hermitian(), the symbolic one-sided
-    proof), and "bicgstab" everywhere else, julia_live included.
+    proof), and "bicgstab" everywhere else.
 
     The reason for the Hermitian test: for a resolvent z - H with Im z != 0,
     the case of CVM_explicit and of the analytic continuation, every local
@@ -317,7 +317,10 @@ def resolve_inverse_solver(self,A=None):
     chain, where BiCGSTAB from the same start found the level."""
     solver = getattr(self,"inverse_solver",None)
     if solver is None:
-        if self.itensor_version!="python" or \
+        # julia_live too since 2026-11-15: on a 14-site resolvent
+        # z-H (Im z = 0.1) its BiCGSTAB diverged (residual 1e63 in 320 s)
+        # where the sweeps reached 9e-4 in 11 s
+        if self.itensor_version not in ("python","julia_live") or \
                 getattr(self,"conserved_sector",None):
             return "bicgstab"
         hermitian = A is not None and hasattr(A,"is_hermitian") and \

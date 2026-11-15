@@ -319,6 +319,10 @@ def _default_dmmode(self,wf,basis):
                 getattr(mbo,"itensor_version",None)=="python" and \
                 hasattr(getattr(mbo,"_session",None),"correlation_matrix_sweep"):
             return "full"
+        # julia_live: ITensorMPS's correlation_matrix (correlations.jl), one
+        # sweep, 0.09 s against 14 s for "fast" at 32 sites
+        if basis!="Nambu" and _julia_spinless(wf):
+            return "full"
         return "fast"
     if basis!="Nambu" and _julia_spinless(wf):
         return "full" # julia_live, mpsjulialive/correlations.jl

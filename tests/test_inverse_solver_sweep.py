@@ -141,14 +141,17 @@ def test_julia_live_resolvent_matches_ed(version):
 
 @JL
 def test_julia_live_default_solver_is_bicgstab(version):
-    """inverse_solver=None stays BiCGSTAB on julia_live for every operator,
-    as on v3; "sweep" is taken only when asked, and refused in a conserved
-    sector"""
+    """inverse_solver=None on julia_live follows "python" since 2026-11-15:
+    the sweeps for an operator not proven Hermitian (a resolvent off the
+    real axis), BiCGSTAB for a Hermitian one and in a conserved sector,
+    where "sweep" asked for explicitly is refused"""
     from dmrgpy import mpsalgebra
     sc, h = _chain(n=4, solver=None, version=version)
     res, shift = (1.0 + 0.1j) - h, h - 0.3
-    assert mpsalgebra.resolve_inverse_solver(sc, res) == "bicgstab"
+    assert mpsalgebra.resolve_inverse_solver(sc, res) == "sweep"
     assert mpsalgebra.resolve_inverse_solver(sc, shift) == "bicgstab"
+    sc.inverse_solver = "bicgstab"
+    assert mpsalgebra.resolve_inverse_solver(sc, res) == "bicgstab"
     sc.inverse_solver = "sweep"
     assert mpsalgebra.resolve_inverse_solver(sc, res) == "sweep"
     sc.set_conserved_sector(Sz=0)
