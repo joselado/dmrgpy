@@ -579,7 +579,12 @@ Do not undo one without reading its finding first.
   design.
 
 Left open and recorded as such, in the records' "Left open" and "New leads"
-sections: the `kpm_energy_truncate` window problem outside its worst regime
+sections: the four findings of `docs/audit_2026_11_15_hole_hunt.md`, from
+the 2026-11-15 backend benchmark and not yet fixed (the `"python"` and
+`"julia_live"` Sz=0 sector solves going wrong between 56 and 80 sites at
+`maxm=128`, v3 and `"python"` NH-DMRG stuck off any eigenpair when four
+eigenvalues share the smallest real part, and `"python"`'s `randomMPS`
+overflowing from about 300 sites at `maxm=128`); the `kpm_energy_truncate` window problem outside its worst regime
 (`docs/known_issue_kpm_energy_truncation_window.md`); the sliver just below
 `kpm_scale=1/2` where the elastic line is distorted while the moments are
 still under the bound; the truncated CVM regime (warned, about 2x the cost,
