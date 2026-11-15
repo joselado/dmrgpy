@@ -14,7 +14,9 @@ to do, is not the same thing and is not bounded by cutoff/maxdim at all;
 see _apply_chain's docstring.) That's an intentional simplification (see autompo.py's
 module docstring for the same reasoning applied to MPO construction):
 dmrgpy only ever observes final numerical results bounded by
-Cutoff/MaxDim, never internal bond dimensions.
+Cutoff/MaxDim, never internal bond dimensions. The one opt-in exception
+is applyMPO(method="densitymatrix"), which truncates while it builds but
+keeps the same basis at every bond (see _apply_densitymatrix).
 
 ITensor v3 itself has both inner() (throws on complex operands) and
 innerC() (always works) because IQTensor/ITensor's real-vs-complex type
@@ -31,8 +33,9 @@ from . import backend as bk
 
 from .index import Index
 from .mpscontainer import MPO, MPS, _link_at
-from .svd import qr_split, svd
+from .svd import eigh_truncate, qr_split, svd
 from .tensor import ITensor, commonIndex, contract_many
+from .tensor import dag as _t_dag
 from .tensor import prime as _t_prime
 
 
@@ -636,21 +639,169 @@ def _apply_chain(K, X, out_cls, cutoff=0.0, maxdim=None):
     return result
 
 
-def applyMPO(K, x, x0=None, cutoff=0.0, maxdim=None):
+def _relabel(T, mapping):
+    """T with every index that is a key of `mapping` replaced by its
+    value, same data. Index equality includes the prime level, so a map
+    keyed on an unprimed leg leaves its primed partner alone."""
+    return ITensor(tuple(mapping.get(ind, ind) for ind in T.inds), T.array)
+
+
+def _apply_densitymatrix(K, x, cutoff=0.0, maxdim=None):
+    """K (MPO) applied to x (MPS) by the density-matrix algorithm of
+    Stoudenmire and White, New J. Phys. 12, 055026 (2010), the default of
+    ITensorMPS.jl's apply(A, psi; alg="densitymatrix"), whose mpo.jl this
+    follows. Same output convention as applyMPO: the physical legs of the
+    result are K's primed out legs.
+
+    First the exact left environments E_j of <x|K^dag K|x> over sites
+    1..j. Then a sweep from the right end: at site j the carry R (the
+    product on sites j..n, already projected on the basis kept to the
+    right of j) and E_{j-1} give the reduced density matrix rho of the
+    product on (s'_j, right bond). Its leading eigenvectors, kept by
+    svd.eigh_truncate's usual cutoff/maxdim rule (the eigenvalues are the
+    squared singular values, so the rule is the same), become the new
+    right-orthogonal site tensor, and R moves one site left. Site 1 takes
+    the remainder: the result has center 1 and the norm of the projected
+    product, not normalized.
+
+    These eigenvectors are the right Schmidt vectors of the same partially
+    projected product that _apply_chain's truncating SVD sweep keeps at
+    the same bond. So the two methods give the same state, up to roundoff
+    and to the choice inside a degenerate multiplet at a cut; this is not
+    the zip-up of _apply_chain's docstring. What changes is the cost: the
+    product never exists at bond dimension chi_K*chi_x, and a site costs
+    about O(d chi_x^3 chi_K^2) against O(d (chi_K chi_x)^3), a factor of
+    about chi_K less. The price is memory, n-1 environments of
+    chi_x^2 chi_K^2 entries, and precision: rho's eigenvalues are known
+    to about eps times the largest, so singular values below about 1e-8 of
+    the largest are not resolved. At cutoff=0 a product with such a tail
+    comes out good to about 1e-8 relative in 2-norm, not to roundoff; any
+    cutoff of 1e-15 or more drops that tail in both methods.
+
+    The kept dimension at a bond is also capped by dim(x link)*dim(K link)
+    on its left, the largest rank the product can have there. Inside that
+    cap cutoff=0 still keeps the null directions of rho whose eigenvalue
+    came out as positive roundoff, so near site 1, where the cap can exceed
+    the Hilbert-space bound, the bonds can come out larger than the exact
+    route's; the state is the same, and a cutoff of about 1e-14 or more
+    removes them. K and x are not
+    modified and need no canonical form, since the environments are exact
+    in any gauge. Every step is an ITensor contraction or an eigh, so this
+    runs on the JAX backend as it is; only rho's spectrum, O(chi), comes to
+    the host. set_pad_bonds is not honoured: the bonds come out at the kept
+    dimension, so under jit the shapes follow it."""
+    n = K.length()
+    if x.length() != n:
+        raise ValueError("_apply_densitymatrix: MPO has %d sites, MPS has %d"
+                         % (n, x.length()))
+    Ks = [K.A(i) for i in range(1, n + 1)]
+    xs = [x.A(i) for i in range(1, n + 1)]
+    if n == 1:
+        out = MPS([Ks[0] * xs[0]])
+        out.center = 1
+        return out
+
+    # 0-based lists: kl[j], xl[j] are the links between sites j and j+1.
+    kl = [commonIndex(Ks[j], Ks[j + 1]) for j in range(n - 1)]
+    xl = [commonIndex(xs[j], xs[j + 1]) for j in range(n - 1)]
+    if any(l is None for l in kl + xl):
+        raise ValueError("_apply_densitymatrix: every interior bond of K and "
+                         "x needs a link")
+    if set(kl) & set(xl):
+        # A link shared by K and x would be contracted by K*x as if it
+        # were a physical leg. Chains built separately never share one.
+        Ks = _fresh_link_copy(K)
+        kl = [commonIndex(Ks[j], Ks[j + 1]) for j in range(n - 1)]
+    s_in = [commonIndex(Ks[j], xs[j], "Site") for j in range(n)]
+    if any(s is None for s in s_in):
+        raise ValueError("_apply_densitymatrix: K and x share no site index "
+                         "at some site")
+    s_out = [next(ind for ind in Ks[j].inds
+                  if ind.hastags("Site") and ind != s_in[j])
+             for j in range(n)]
+
+    # The bra layer of <x|K^dag K|x>: every link and every in-leg replaced
+    # by a fresh copy. K's out leg s'_j is not in the map (it differs from
+    # s_in[j] by its prime level), so the bra K still contracts with the
+    # ket K through it.
+    bra = {ind: ind.sim() for ind in kl + xl + s_in}
+
+    # E[j]: sites 0..j, indices (xl[j], kl[j], bra kl[j], bra xl[j]).
+    E = []
+    env = None
+    for j in range(n - 1):
+        Kc = _t_dag(_relabel(Ks[j], bra))
+        xc = _t_dag(_relabel(xs[j], bra))
+        env = xs[j] if env is None else env * xs[j]
+        env = ((env * Ks[j]) * Kc) * xc
+        E.append(env)
+
+    tensors = [None] * n
+    R = xs[n - 1] * Ks[n - 1]  # (xl[n-2], s'_{n-1}, kl[n-2])
+    b = None                   # output bond on the right of site j
+    for j in range(n - 1, 0, -1):
+        # R: (xl[j-1], kl[j-1], s'_j, b). Its bra copy Rc is R conjugated
+        # with every index renamed, rather than a second contraction chain.
+        rows = [s_out[j]] + ([b] if b is not None else [])
+        cols = [ind.sim() for ind in rows]
+        ren = {xl[j - 1]: bra[xl[j - 1]], kl[j - 1]: bra[kl[j - 1]]}
+        ren.update(zip(rows, cols))
+        Rc = _t_dag(_relabel(R, ren))
+        rho = (E[j - 1] * R) * Rc  # (rows, cols)
+        dims = tuple(ind.dim for ind in rows)
+        D = int(np.prod(dims))
+        mat = rho.transpose_to(rows + cols).reshape(D, D)
+        mat = 0.5 * (mat + mat.conj().T)
+        cap = xl[j - 1].dim * kl[j - 1].dim
+        if maxdim:
+            cap = min(cap, int(maxdim))
+        U, keep = eigh_truncate(mat, cutoff, cap)
+        # rho = Phi Phi^dag with Phi = R as a (rows, rest) matrix, so the
+        # product is approximated by U U^dag Phi: the site tensor is U as
+        # it is, on (new left bond, s'_j, b), and the carry is U^dag Phi.
+        bnew = Index(keep, tags="Link,l={}".format(j))
+        arr = U.reshape(dims + (keep,)).transpose((len(dims),) + tuple(range(len(dims))))
+        B = ITensor((bnew,) + tuple(rows), arr)
+        tensors[j] = B
+        R = ((R * _t_dag(B)) * xs[j - 1]) * Ks[j - 1]  # (bnew, xl[j-2], kl[j-2], s'_{j-1})
+        b = bnew
+    tensors[0] = R
+    out = MPS(tensors)
+    out.center = 1
+    return out
+
+
+# Which algorithm applyMPO uses when the caller names none, read at call
+# time: "exact" (_apply_chain) or "densitymatrix" (_apply_densitymatrix).
+APPLY_METHOD = "exact"
+
+
+def applyMPO(K, x, x0=None, cutoff=0.0, maxdim=None, method=None):
     """K (MPO) applied to x (MPS). The physical leg of the result is left
     *primed* (matching K's own "out" leg) -- callers noPrime() it back to a
     plain ket afterward, exactly like every apply_mpo() call site in
     mpscpp3/chain_session.h does.
 
+    `method` picks the algorithm: "exact" is _apply_chain, the product
+    formed exactly and then truncated by one SVD sweep; "densitymatrix"
+    is _apply_densitymatrix, the same truncation at a cost lower by about
+    the MPO bond dimension. None takes the module default APPLY_METHOD,
+    which is "exact"; any other name raises.
+
     `x0` (an initial guess, used by real ITensor to seed an iterative
     variational "Fit" solve) is accepted for call-signature compatibility
     with chain_session.h's two applyMPO() overloads but is otherwise
-    unused: this always does the same direct contract-then-compress (see
-    _apply_chain) -- not the fastest possible method, but the product is
-    formed exactly and only then truncated, in the gauge that makes the
-    truncation optimal, so the result is bounded by cutoff/maxdim
+    unused: both methods form the truncation of the exact product, in the
+    basis that makes it optimal, so the result is bounded by cutoff/maxdim
     independently of x0 and ignoring it is correctness-preserving."""
-    return _apply_chain(K, x, MPS, cutoff=cutoff, maxdim=maxdim)
+    if method is None:
+        method = APPLY_METHOD
+    if method == "exact":
+        return _apply_chain(K, x, MPS, cutoff=cutoff, maxdim=maxdim)
+    if method == "densitymatrix":
+        return _apply_densitymatrix(K, x, cutoff=cutoff, maxdim=maxdim)
+    raise ValueError("applyMPO: unknown method %r (have: exact, densitymatrix)"
+                     % (method,))
 
 
 def nmultMPO(A, B, cutoff=0.0, maxdim=None):

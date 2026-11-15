@@ -3614,6 +3614,35 @@ path, and `nmultMPO`-built operators such as the $H\cdot H$ of
 `custom_exp`/`evoloperator` — at the 1e-5..1e-9 level, toward the values
 `itensor_version` 2/3 and ED already gave.
 
+**The density-matrix route (`applyMPO(method="densitymatrix")`,
+`mpsalgebra._apply_densitymatrix`, opt-in since 2026-11-15).** This is the
+algorithm ITensorMPS.jl applies by default (`apply(A,psi;
+alg="densitymatrix")`, the other half of the same Stoudenmire-White
+paper), and it is not the zip-up above. We build the exact left
+environments of $\langle x|K^\dagger K|x\rangle$, then sweep from the
+right: at each site the reduced density matrix of the product on (site,
+right bond) is diagonalized, its leading eigenvectors become the new
+right-orthogonal tensor, and the carry moves one site left. These
+eigenvectors are the right Schmidt vectors that the truncating sweep of
+`_apply_chain` keeps at the same bond, so the two routes give the same
+state up to roundoff and up to the choice inside a degenerate multiplet at
+a cut, while the product never exists at bond dimension
+`dim(K-link)*dim(X-link)`. Measured with one BLAS thread on four cores
+(`MKL_NUM_THREADS=1`, `taskset -c 0-3`): a 30-site Heisenberg MPO on a
+random MPS goes from 1.06 s to 0.39 s at `maxdim=60` and from 4.03 s to
+1.43 s at 100, a 20-site long-range MPO (bond dimension 14) from 5.07 s to
+1.44 s at 60, the states agreeing to 3e-14 in 2-norm; the KPM correlator
+of a 20-site Heisenberg chain at `kpmmaxm=40` goes from 27.0 s to 15.1 s,
+the spectra agreeing to 1.7e-8 of the peak. Two limits keep it opt-in: the
+eigenvalues of the density matrix are squared singular values, so at
+`cutoff=0` singular values below about 1e-8 of the largest are not
+resolved (the exact residual of `implicit.py` needs them), and a cut
+inside a degenerate Schmidt multiplet, the rule for SU(2) states, can pick
+a different member than the SVD sweep, which moves a number at the
+truncation level. `pyitensor.mpsalgebra.APPLY_METHOD = "densitymatrix"`
+switches every session call; `tests/test_pyitensor_apply_densitymatrix.py`
+pins the agreement.
+
 **TDVP's gauge precondition (`tdvp.py::tdvp_step`).** Each half-sweep of
 two-site TDVP builds its local generator from plain
 $\langle\psi|\cdots|\psi\rangle$ environments, and such an environment is
