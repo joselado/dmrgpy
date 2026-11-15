@@ -298,6 +298,40 @@ def applyoperator_dmrg(self,A,wf):
     return mps.MPS(self,cpp_handle=handle).copy()
 
 
+def resolve_inverse_solver(self,A=None):
+    """The solver applyinverse() takes on DMRG for the operator A:
+    inverse_solver as set, or for None (the default) "sweep" on
+    itensor_version="python" without a conserved sector when A is not
+    proven Hermitian (MultiOperator.is_hermitian(), the symbolic one-sided
+    proof), and "bicgstab" everywhere else.
+
+    The reason for the Hermitian test: for a resolvent z - H with Im z != 0,
+    the case of CVM_explicit and of the analytic continuation, every local
+    problem of the sweeps is well posed, |z - E| >= |Im z|, and there the
+    sweeps were 26 to 50 times faster than BiCGSTAB and more accurate
+    (pyitensor/implicit.py's linear_solve, docs/development.md). A
+    Hermitian A such as H - e of shift-invert can be indefinite, and then
+    a local problem can be nearly singular: next to a triplet the sweeps
+    gave a shift-invert Arnoldi eigenvalue that is not a level of the
+    chain, where BiCGSTAB from the same start found the level."""
+    solver = getattr(self,"inverse_solver",None)
+    if solver is None:
+        if self.itensor_version!="python" or \
+                getattr(self,"conserved_sector",None):
+            return "bicgstab"
+        hermitian = A is not None and hasattr(A,"is_hermitian") and \
+                bool(A.is_hermitian())
+        return "bicgstab" if hermitian else "sweep"
+    if solver not in ("bicgstab","sweep"):
+        raise ValueError("inverse_solver must be None, 'bicgstab' or "
+                         "'sweep', got "+repr(solver))
+    if solver=="sweep" and self.itensor_version!="python":
+        raise NotImplementedError("inverse_solver='sweep' is implemented "
+                "for itensor_version='python' only (got itensor_version=%r)"
+                %(self.itensor_version,))
+    return solver
+
+
 def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
     """Return A^-1|wf>, by the session's BiCGSTAB (Chain::apply_inverse,
     pyitensor's _bicstab), which stops once the residual of A x = wf is
@@ -318,9 +352,14 @@ def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
     arpacktk.mpsiram_generalized hands in M_A*x, whose norm is not 1, and
     its delta= is now relative to that norm too. wf = 0 has the exact
     answer 0, returned as it is: the BiCGSTAB recurrence divides by zero
-    on it."""
+    on it.
+
+    With the two-site sweeps (resolve_inverse_solver), delta is the same
+    relative residual, now measured on the untruncated A x - wf, and maxn
+    is not used: the sweeps stop after inverse_nsweeps."""
     if delta is None: delta = self.cvm_tol # overwrite
     if maxn is None: maxn = self.cvm_nit # overwrite
+    solver = resolve_inverse_solver(self,A)
     norm = np.sqrt(abs(wf.dot(wf).real)) # ||wf||, the scale of the residual
     if norm==0.: return wf.copy() # A^-1 0 = 0
     if _is_julia(wf): # mpsjulialive/bicgstab.jl, the same BiCGSTAB
@@ -331,6 +370,16 @@ def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    if solver=="sweep": # pyitensor/implicit.py's linear_solve
+        handle, history = self._session.apply_inverse_sweep(A.to_terms(),
+                wf.cpp_handle,delta*norm,int(self.inverse_nsweeps))
+        if min(history)>delta*norm:
+            import warnings
+            warnings.warn("applyinverse (inverse_solver='sweep'): the "
+                "relative residual is %.1e after %d sweeps, above the "
+                "requested %.1e"%(min(history)/norm,len(history)-1,delta),
+                RuntimeWarning,stacklevel=3)
+        return mps.MPS(self,cpp_handle=handle).copy()
     handle = self._session.apply_inverse(A.to_terms(),wf.cpp_handle,
             delta*norm,int(maxn))
     return mps.MPS(self,cpp_handle=handle).copy()

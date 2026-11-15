@@ -1517,6 +1517,18 @@ class Chain:
         A = self._mpo(terms)
         return self._bicstab(A, wf, tol, max_it)
 
+    def apply_inverse_sweep(self, terms, wf, tol, nsweeps):
+        """A^-1 wf by two-site sweeps with local GMRES (implicit.py's
+        linear_solve), truncated to this chain's cutoff/maxm, stopping once
+        ||A x - wf|| <= tol or after nsweeps sweeps. Returns
+        (x, residual history)."""
+        from .implicit import linear_solve
+        self._reject_sector("apply_inverse_sweep")
+        A = self._mpo(terms)
+        x, history = linear_solve(wf, A, self.cutoff, self.maxm, float(tol),
+                                  nsweeps=int(nsweeps))
+        return x, history
+
     def correlation_matrix(self, wf):
         n = self.sites.length()
         out = np.zeros((n, n), dtype=complex)

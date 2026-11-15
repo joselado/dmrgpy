@@ -1874,3 +1874,37 @@ chain holds a state the caller set). At $T\geq0.15$ there, on
 `"julia_live"` and with `itime="tdvp"` the numbers are those of before, bit
 for bit.
 
+
+## The 2026-11-14 defaults of purification and of `applyinverse`
+
+`Thermal_Spin_Chain` on `itensor_version=3` cools the purified state by the
+implicit steps of a logarithmic grid (order 8, 2 steps per panel) whenever
+the Taylor stepper would need at least 4 times as many MPO applications as
+the grid needs solves and $T$ is at most 0.05 times the largest coupling
+(`anneal_method=None`, the author's choice, "make it the default for those
+much faster cases"). This happens on long chains: on 16 sites at `maxm=64` the runs were 1.87 and 2.80 times
+faster at $T=0.05$ and 0.02, and the thermal energy moved by $2\times10^{-6}$
+(relative) at both. On 10 sites at $T=0.02$, the Boltzmann energy is
+reproduced to $8\times10^{-7}$ by the grid and to $5\times10^{-7}$ by
+Taylor. Below that ratio, above that temperature, on `"python"`, on `mode="ED"`, with
+`anneal_method="taylor"` and on a chain whose `anneal_step` or
+`anneal_order` was set, the numbers are those of before, bit for bit.
+
+`applyinverse` on `itensor_version="python"` without a conserved sector
+solves by two-site sweeps when its operator is not proven Hermitian
+(`inverse_solver=None`), so `submode="CVM_explicit"` and the
+analytic-continuation route, whose resolvents $z-H$ sit off the real axis,
+and the stochastic inverse trace of a non-Hermitian operator, take them
+on that backend. With
+every state held (8 sites) $\langle\psi|A^{-1}|\psi\rangle$ moved from
+$10^{-10}$ to $10^{-12}$ off the exact value, and `CVM_explicit` agrees with
+the ED Lorentzian to the printed digits as before, 26 times faster. Under
+truncation (10 sites, `maxm=12`) `CVM_explicit` is $1.9\times10^{-2}$ of
+the peak off with a warning on each frequency whose residual stays above
+the tolerance, where BiCGSTAB returned $3\times10^{73}$ of the peak, and
+on 24 sites at `maxm=40` one resolvent is $9\times10^{-4}$ off its
+converged value in 67 s, where BiCGSTAB returned $3\times10^{9}$ after
+1893 s. Shift-invert Arnoldi and IRAM pass a Hermitian $H-e$ and keep BiCGSTAB:
+with the sweeps, a target next to a triplet gave an eigenvalue that is
+not a level of the chain. `inverse_solver="bicgstab"` gives the numbers of
+before, and every other backend is unchanged.

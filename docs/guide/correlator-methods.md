@@ -138,6 +138,9 @@ the ground state itself, so `maxm` and `nsweeps` ([Ground state](ground-state.md
   The correction vector is found by minimizing a functional with two-site
   sweeps, so the truncation is part of the ansatz. Set `cvm_nsweeps` and
   `cvm_maxm`. The default `"cg"` works on every backend.
+- `sc.inverse_solver` (CVM_explicit): the solver of each resolvent, for
+  any pair `A`, `B`. By default two-site sweeps on `"python"`, since the
+  resolvent is not Hermitian, and BiCGSTAB on the other backends (see [Operators](operators.md#states-and-operators)).
 - `N` and `nkry` (ROOTN, defaults 8 and 20): the number of steps and the
   Krylov dimension. Larger `N` helps at high frequency when `nkry` is
   small.

@@ -70,14 +70,28 @@ class Thermal_Spin_Chain():
             # spectral width W, which anneal() needs anyway: it used to be
             # an absolute T>1e-5, so a Hamiltonian written below about
             # 1e-5 in absolute units got its ground state at every T
+            method = self.anneal_method # checked before any solve
+            if method not in (None,"taylor","implicit"):
+                raise ValueError("Thermal_Spin_Chain: anneal_method must be "
+                                 "None, 'taylor' or 'implicit', got "
+                                 +repr(method))
+            if method!="implicit" and self.anneal_options:
+                raise ValueError("Thermal_Spin_Chain: anneal_options is "
+                                 "used only with anneal_method='implicit'")
             erange = None
             if 0.<T<np.inf: erange = band_edges(self.MBChain,self.hamiltonian)
             if T>0. and (erange is None or T>1e-5*(erange[1]-erange[0])):
                 self.MBChain.set_hamiltonian(h) # singlet Hamiltonian
                 wf = self.MBChain.get_gs() # get the fully entangled WF
-                wf0 = anneal(self.MBChain,self.hamiltonian,wf,T,
-                             step=self.anneal_step,order=self.anneal_order,
-                             erange=erange)
+                if method is None: method = auto_anneal_method(self,wf,T,erange)
+                if method=="implicit":
+                    wf0 = anneal_implicit(self.MBChain,self.hamiltonian,wf,T,
+                                          erange=erange,
+                                          options=self.anneal_options)
+                else:
+                    wf0 = anneal(self.MBChain,self.hamiltonian,wf,T,
+                                 step=self.anneal_step,
+                                 order=self.anneal_order,erange=erange)
                 wf0 = wf0.normalize()
                 # Through the public setters, so MBChain holds the
                 # physical Hamiltonian and the annealed state as a state
@@ -115,6 +129,15 @@ class Thermal_Spin_Chain():
     # over the exact spectrum), for about 2*beta*W factor applications.
     anneal_step = 2.0
     anneal_order = 8
+    # anneal_method="implicit" takes the implicit steps on a logarithmic
+    # grid instead (anneal_implicit(), arXiv:2606.02930), on
+    # itensor_version=3 and "python", and on mode="ED" as the exact
+    # e^{-tau H} on the same grid; anneal_options takes the keywords of
+    # evolve_imaginary_time but the shift, which is the lower band edge.
+    # anneal_step and anneal_order belong to the Taylor stepper only.
+    # None, the default, picks one of the two (auto_anneal_method()).
+    anneal_method = None
+    anneal_options = None
     def set_hamiltonian(self,h):
         self.hamiltonian = (h + h.get_dagger())/2.
         self.computed_gs = False
@@ -231,3 +254,121 @@ def anneal(sc,h,wf,T,dbeta=None,step=2.0,order=8,erange=None):
 
 
 
+
+
+# The keywords anneal_options takes, and the defaults of the purification.
+# The shift is not one of them: it is the lower band edge, which
+# band_edges() has computed already.
+_IMPLICIT_KEYWORDS = ("nsteps","tau0","order","nsweeps","tol","krylov",
+                      "maxiter")
+_IMPLICIT_DEFAULTS = dict(order=8,nsteps=2)
+_AUTO_RATIO = 4. # Taylor applications per implicit solve to take the grid
+_AUTO_TMAX = 0.05 # and the highest T, in units of the largest coupling
+
+
+def anneal_counts(tc,T,erange):
+    """(applications of anneal(), solves of anneal_implicit()) to reach
+    T, at the stepper settings of tc and the defaults of the grid"""
+    from . import imaginarytime
+    beta_half = 1./(2.*float(T))
+    width = float(erange[1])-float(erange[0])
+    nst = max(1,int(np.ceil(beta_half*width/tc.anneal_step-1e-9)))
+    u = imaginarytime._unit(tc.hamiltonian)
+    tau0 = 0.01/u if u>0. else 0.01
+    opts = _IMPLICIT_DEFAULTS
+    steps = imaginarytime.log_grid(beta_half,tau0,opts["nsteps"])
+    return nst*int(tc.anneal_order), len(steps)*(opts["order"]//2)
+
+
+def auto_anneal_method(tc,wf,T,erange):
+    """What anneal_method=None takes: "implicit" on itensor_version=3, when
+    the implicit steps can run there, T is at most _AUTO_TMAX times the
+    largest coupling of H and anneal() needs at least _AUTO_RATIO times as
+    many MPO applications as the grid needs solves, and "taylor"
+    otherwise, as on every other backend and on mode="ED".
+
+    The temperature bound is the range the grid was measured in: much
+    faster at T=0.05 and 0.02, and as accurate as anneal() from T=0.1 down
+    (4.9e-6 against 1.5e-6 at T=0.5). The count alone would take the grid
+    at high T on a long chain (about 280 applications against 64 solves
+    at T=0.5 on 100 sites), where it is less accurate and was not timed.
+
+    The ratio is where the grid was measured much faster (anneal_implicit's
+    docstring): one complex solve costs about 3 applications on v3, so a
+    count ratio of 4.9 (16 sites, T=0.05) gave 1.87 times the speed and
+    10.3 (16 sites, T=0.02) 2.80 times, while 3.0 (10 sites, T=0.05) gave
+    only 1.18 and the grid is also less accurate at high T. On "python" a
+    solve costs more: a ratio of 4.9 gave 0.96. A chain whose anneal_step
+    or anneal_order was set keeps the Taylor stepper it configured."""
+    from . import imaginarytime
+    from .mpsalgebra import wavefunction_mode
+    sc = tc.MBChain
+    if "anneal_step" in vars(tc) or "anneal_order" in vars(tc): return "taylor"
+    if sc.itensor_version!=3 or wavefunction_mode(wf)!="DMRG": return "taylor"
+    if erange is None or not 0.<float(T)<np.inf: return "taylor"
+    # simplified, since set_hamiltonian stores (h+h^dagger)/2 term by term,
+    # whose largest coefficient is half the coupling
+    u = imaginarytime._unit(tc.hamiltonian.simplify())
+    if not float(T)<=_AUTO_TMAX*u: return "taylor"
+    if not float(erange[1])-float(erange[0])>0.: return "taylor"
+    if not imaginarytime._implicit_available(sc): return "taylor"
+    taylor, implicit = anneal_counts(tc,T,erange)
+    return "implicit" if taylor>=_AUTO_RATIO*implicit else "taylor"
+
+
+def anneal_implicit(sc,h,wf,T,erange=None,options=None):
+    """Return e^{-H/(2T)}|wf>, normalized, by implicit steps on a
+    logarithmic grid in imaginary time (imaginarytime.evolve,
+    arXiv:2606.02930), from 0 to beta/2 with the shift at the lower band
+    edge E_min (erange[0], computed with band_edges() when not given).
+
+    The cost is a number of linear solves that grows as log(beta), against
+    about 2*beta*W MPO applications for anneal(), W the spectral width,
+    which is extensive. The default is the 4-stage Gauss-Legendre rule
+    (order=8) with 2 steps per panel. The reason for this is that the
+    purification starts from the T=infinity state, which holds every
+    energy of the spectrum: the trapezoid rule with 8 steps per panel, the
+    default of METTS, is off by 1e-3 (relative) in the thermal energy of a
+    10-site Heisenberg chain at T=0.5, and order=8 with nsteps=2 by 7e-9,
+    against 1.2e-7 for anneal() at its defaults (closed forms over the
+    exact spectrum, tests/test_thermal_anneal_implicit.py).
+
+    On MPS the floor is the truncation, not the time step: every factor is
+    a sweep that truncates at every bond, four of them per step, so at
+    cutoff=1e-12 the energy of a 4-site chain is 4.1e-6 off at T=1 and
+    6e-8 at T=0.1, on both backends, against 3.1e-8 at T=1 for anneal().
+    Measured against anneal() on itensor_version=3 at maxm=64 (one thread,
+    one P-core), 10 sites: 0.45, 0.91, 1.18 and 1.88 times its speed at
+    T=0.5, 0.1, 0.05 and 0.02, 4.9e-6 off the Boltzmann energy at T=0.5
+    (anneal() 1.5e-6) and within 9e-7 below; 16 sites: 1.87 and 2.80 times
+    at T=0.05 and 0.02, the two energies 2e-6 apart. One complex
+    solve costs about 3.4 MPO applications there. On "python" a solve
+    costs more against an application: 0.96 times the speed of anneal()
+    on 8 sites at T=0.02. A longer first panel,
+    tau0 = 2/W, halves the solves in closed form at the same accuracy but
+    not the time on MPS: the GMRES of a long step takes more iterations,
+    and one sweep cannot follow a long step out of the T=infinity state
+    (8e-5 off at T=0.5), so tau0 stays at the default of
+    evolve_imaginary_time.
+
+    sc holds the singlet Hamiltonian on entry; h is set on it here, since
+    the steps solve with the chain's own Hamiltonian."""
+    from . import imaginarytime
+    opts = dict(_IMPLICIT_DEFAULTS)
+    opts.update(dict(options or {}))
+    unknown = sorted(set(opts)-set(_IMPLICIT_KEYWORDS))
+    if unknown:
+        raise TypeError("Thermal_Spin_Chain.anneal_options: unknown "
+                        "keyword(s) %s; the known ones are %s"
+                        %(unknown,list(_IMPLICIT_KEYWORDS)))
+    T = float(T)
+    if not T>0.: raise ValueError("anneal_implicit: T must be > 0, got "+repr(T))
+    beta_half = 1./(2.*T)
+    wf = wf.normalize()
+    if beta_half==0.: return wf # T=infinity: the input is the purification
+    if erange is None: erange = band_edges(sc,h)
+    emin, emax = float(erange[0]), float(erange[1])
+    if not emax-emin>0.: return wf # h is a multiple of the identity
+    sc.set_hamiltonian(h)
+    wf = imaginarytime.evolve(sc,wf,beta_half,shift=emin,**opts)[2]
+    return wf.normalize()

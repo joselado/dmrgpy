@@ -97,7 +97,14 @@ A state remembers the backend that made it (an MPS for DMRG, a vector for
 to `overlap` and `aMb` when the states come from ED. On DMRG,
 `exponential` needs a Hermitian or an anti-Hermitian `A`, so
 `sc.exponential(-1j*t*h, wf)` is a real-time step. For a general `A` use
-`mode="ED"` on a small chain.
+`mode="ED"` on a small chain. On DMRG, `applyinverse` solves $A x=\psi$
+by two-site sweeps on `itensor_version="python"` when $A$ is not
+Hermitian, such as the resolvent $z-H$ off the real axis, as DMRG solves
+the ground state. A Hermitian $A$, the other backends and a conserved
+sector take BiCGSTAB. `sc.inverse_solver="bicgstab"` or `"sweep"` forces one (`"sweep"`
+only on `"python"`). The sweeps warn if the residual stays above the
+tolerance, as it can for an $A$ with eigenvalues of both signs.
+`sc.inverse_nsweeps` is the largest number of sweeps (default 10).
 
 The elementwise products are taken in the computational basis $s$ of the
 sites. On `itensor_version=3` and `"python"` they use recursive sketched

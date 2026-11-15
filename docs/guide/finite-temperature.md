@@ -41,6 +41,20 @@ is accurate to about $10^{-6}$ relative at the defaults. The keywords are:
 - `tc.anneal_step`: the size of each imaginary-time step, in units of the
   spectral width (default 2). Smaller is more accurate and slower.
 - `tc.anneal_order`: the order of the expansion of each step (default 8).
+- `tc.anneal_method`: how $e^{-\beta H/2}$ is applied. `"taylor"` is the
+  expansion above, `"implicit"` the implicit steps of
+  [Imaginary-time evolution](#imaginary-time-evolution), whose number grows
+  as $\log\beta$ and not as $\beta W$, with $W$ the spectral width. The
+  default, `None`, takes the implicit steps on `itensor_version=3` at
+  $T\le0.05$ (in units of the largest coupling) when they need far fewer
+  solves than the expansion needs steps, that is on long chains, and the
+  expansion otherwise. Setting `anneal_step` or
+  `anneal_order` keeps the expansion. The implicit steps run on
+  `itensor_version=3` and `"python"`.
+- `tc.anneal_options`: the keywords of `evolve_imaginary_time` for
+  `"implicit"`, except `shift`. The default is `order=8` with `nsteps=2`:
+  the $T=\infty$ state holds every energy of the spectrum, and the
+  trapezoid rule is not accurate enough for it.
 - `tc.MBChain.maxm`: the bond dimension of the purified state. It needs
   to be larger at intermediate temperatures.
 

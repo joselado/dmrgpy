@@ -244,6 +244,14 @@ class Many_Body_Chain():
           # after every operation -- itensor_version="python" or 3, and
           # only for A=B^dagger; see pyitensor/ddmrg.py)
       self.cvm_nsweeps = 6 # sweeps for cvm_solver="variational"
+      self.inverse_solver = None # applyinverse() on DMRG:
+          # "bicgstab" (global BiCGSTAB over whole-MPS primitives, every
+          # backend) or "sweep" (two-site sweeps with local GMRES,
+          # pyitensor/implicit.py's linear_solve, itensor_version="python");
+          # None takes "sweep" on "python" without a conserved sector for
+          # an operator not proven Hermitian (a resolvent z-H off the real
+          # axis) and "bicgstab" otherwise (mpsalgebra.resolve_inverse_solver)
+      self.inverse_nsweeps = 10 # largest number of sweeps for "sweep"
       self.cvm_maxm = self.maxm # bond dimension for the CVM correction
           # vector, independent of the ground state's own maxm (mirrors
           # kpmmaxm): a correction vector solving [(H-omega)^2+eta^2]xc=b

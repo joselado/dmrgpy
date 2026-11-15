@@ -50,7 +50,8 @@ import numpy as np
 
 from . import backend as bk
 from .tensor import ITensor, contract_many, dag
-from .mpsalgebra import _fresh_link_copy, inner
+from .mpsalgebra import _fresh_link_copy, inner, applyMPO
+from .mpsalgebra import sum as mps_sum
 from .dmrg import (two_site_heff, _apply_local_update, _extend_left,
                    _extend_right, _all_right_environments)
 
@@ -136,6 +137,73 @@ def gmres(matvec, rhs, x0, tol=1e-10, krylov=10, maxiter=100):
     return x, beta / bnorm
 
 
+def _galerkin_sweep(x, psi, H, a0, c0, b0, d0, cutoff, maxdim, tol, krylov,
+                    maxiter):
+    """One two-site sweep (a right and a left half sweep) of x, in place,
+    towards the solution of
+
+        (a0 + c0 H) x = b0 psi + d0 H psi
+
+    projected on the tangent space of x at each bond: the local operator
+    theta -> a0 theta + c0 H_eff theta and the right-hand side
+    b0 P[psi] + d0 P[H psi]. The mixed environments <x|H|psi> are only
+    built when d0 is not zero. x must have its orthogonality centre on
+    site 1, and has it there again on exit."""
+    n = x.length()
+    mixed = d0 != 0
+
+    def local(i, L, Lbra, R, Rbra, Lm, Lmb, Rm, Rmb, Lov, Rov):
+        matvec_h, order_in, shape, xflat = two_site_heff(L, Lbra, H, x, i,
+                                                          R, Rbra)
+        rhs = b0 * _local_overlap(Lov, Rov, psi, i, order_in)
+        if mixed:
+            s_i, s_j = [ind for ind in order_in if ind.hastags("Site")]
+            order_out = (([Lmb] if Lmb is not None else []) +
+                         [s_i.prime(1), s_j.prime(1)] +
+                         ([Rmb] if Rmb is not None else []))
+            rhs = rhs + d0 * _local_hpsi(Lm, Lmb, Rm, Rmb, H, psi, i,
+                                         order_out)
+
+        def matvec(v):
+            return a0 * v + c0 * matvec_h(v)
+        theta, _ = gmres(matvec, rhs, xflat, tol=tol, krylov=krylov,
+                         maxiter=maxiter)
+        return ITensor(tuple(order_in), theta.reshape(shape))
+
+    none2 = (None, None)
+    right_env = _all_right_environments(H, x)
+    right_mix = (_all_right_environments(H, psi, bra=x) if mixed else
+                 {i: none2 for i in range(2, n + 2)})
+    right_ov = {n + 1: None}
+    for i in range(n, 1, -1):
+        right_ov[i] = _overlap_right(right_ov[i + 1], x, psi, i)
+    left_env = {0: none2}
+    left_mix = {0: none2}
+    left_ov = {0: None}
+    for i in range(1, n):
+        theta = local(i, *left_env[i - 1], *right_env[i + 2],
+                      *left_mix[i - 1], *right_mix[i + 2],
+                      left_ov[i - 1], right_ov[i + 2])
+        _apply_local_update(x, i, theta, cutoff, maxdim, "right")
+        left_env[i] = _extend_left(*left_env[i - 1], H, x, i)
+        left_mix[i] = (_extend_left(*left_mix[i - 1], H, psi, i, bra=x)
+                       if mixed else none2)
+        left_ov[i] = _overlap_left(left_ov[i - 1], x, psi, i)
+    right_env = {n + 1: none2}
+    right_mix = {n + 1: none2}
+    right_ov = {n + 1: None}
+    for i in range(n - 1, 0, -1):
+        theta = local(i, *left_env[i - 1], *right_env[i + 2],
+                      *left_mix[i - 1], *right_mix[i + 2],
+                      left_ov[i - 1], right_ov[i + 2])
+        _apply_local_update(x, i, theta, cutoff, maxdim, "left")
+        right_env[i + 1] = _extend_right(*right_env[i + 2], H, x, i + 1)
+        right_mix[i + 1] = (_extend_right(*right_mix[i + 2], H, psi,
+                                          i + 1, bra=x)
+                            if mixed else none2)
+        right_ov[i + 1] = _overlap_right(right_ov[i + 2], x, psi, i + 1)
+
+
 def implicit_factor(psi, H, beta, shift, cutoff, maxdim, nsweeps=1,
                     tol=1e-10, krylov=10, maxiter=100, x0=None):
     """x = (1 + beta(H - shift))^-1 (1 - beta(H - shift)) psi by two-site
@@ -146,55 +214,60 @@ def implicit_factor(psi, H, beta, shift, cutoff, maxdim, nsweeps=1,
     a0 = 1.0 - beta * shift      # theta coefficient of the local operator
     b0 = 1.0 + beta * shift      # psi coefficient of the right-hand side
     x = _fresh_copy(x0 if x0 is not None else psi)
-    n = x.length()
     x.position(1)
-
-    def local(i, L, Lbra, R, Rbra, Lm, Lmb, Rm, Rmb, Lov, Rov):
-        matvec_h, order_in, shape, xflat = two_site_heff(L, Lbra, H, x, i,
-                                                          R, Rbra)
-        s_i, s_j = [ind for ind in order_in if ind.hastags("Site")]
-        order_out = (([Lmb] if Lmb is not None else []) +
-                     [s_i.prime(1), s_j.prime(1)] +
-                     ([Rmb] if Rmb is not None else []))
-        rhs = (b0 * _local_overlap(Lov, Rov, psi, i, order_in)
-               - beta * _local_hpsi(Lm, Lmb, Rm, Rmb, H, psi, i, order_out))
-
-        def matvec(v):
-            return a0 * v + beta * matvec_h(v)
-        theta, _ = gmres(matvec, rhs, xflat, tol=tol, krylov=krylov,
-                         maxiter=maxiter)
-        return ITensor(tuple(order_in), theta.reshape(shape))
-
     for _ in range(nsweeps):
-        right_env = _all_right_environments(H, x)
-        right_mix = _all_right_environments(H, psi, bra=x)
-        right_ov = {n + 1: None}
-        for i in range(n, 1, -1):
-            right_ov[i] = _overlap_right(right_ov[i + 1], x, psi, i)
-        left_env = {0: (None, None)}
-        left_mix = {0: (None, None)}
-        left_ov = {0: None}
-        for i in range(1, n):
-            theta = local(i, *left_env[i - 1], *right_env[i + 2],
-                          *left_mix[i - 1], *right_mix[i + 2],
-                          left_ov[i - 1], right_ov[i + 2])
-            _apply_local_update(x, i, theta, cutoff, maxdim, "right")
-            left_env[i] = _extend_left(*left_env[i - 1], H, x, i)
-            left_mix[i] = _extend_left(*left_mix[i - 1], H, psi, i, bra=x)
-            left_ov[i] = _overlap_left(left_ov[i - 1], x, psi, i)
-        right_env = {n + 1: (None, None)}
-        right_mix = {n + 1: (None, None)}
-        right_ov = {n + 1: None}
-        for i in range(n - 1, 0, -1):
-            theta = local(i, *left_env[i - 1], *right_env[i + 2],
-                          *left_mix[i - 1], *right_mix[i + 2],
-                          left_ov[i - 1], right_ov[i + 2])
-            _apply_local_update(x, i, theta, cutoff, maxdim, "left")
-            right_env[i + 1] = _extend_right(*right_env[i + 2], H, x, i + 1)
-            right_mix[i + 1] = _extend_right(*right_mix[i + 2], H, psi,
-                                             i + 1, bra=x)
-            right_ov[i + 1] = _overlap_right(right_ov[i + 2], x, psi, i + 1)
+        _galerkin_sweep(x, psi, H, a0, beta, b0, -beta, cutoff, maxdim,
+                        tol, krylov, maxiter)
     return x
+
+
+def _residual(A, x, psi):
+    """||A x - psi||, with A x and the difference formed exactly (no
+    truncation). The norm is read off the orthogonality centre of the
+    difference: <r|r> from the full contraction, like
+    <Ax|Ax> - 2Re<psi|Ax> + <psi|psi>, is a cancellation between terms of
+    order ||psi||^2 and floors near 1e-8 ||psi|| (8.5e-9 against 3.9e-14
+    from the centre, on a converged 6-site solve)."""
+    Ax = applyMPO(A, x, cutoff=0.0, maxdim=None)
+    Ax.noPrime("Site")
+    r = mps_sum(Ax, psi * (-1.0), cutoff=0.0, maxdim=None)
+    r.position(1)
+    xp = bk.xp()
+    c = r.A(1).array
+    return float(np.sqrt(abs(bk.scalar(xp.vdot(c, c)))))
+
+
+def linear_solve(psi, A, cutoff, maxdim, tol, nsweeps=10, local_tol=1e-10,
+                 krylov=30, maxiter=300, x0=None):
+    """x solving A x = psi for an MPO A, by two-site sweeps: at each bond
+    the two-site tensor of x solves the projected problem
+    A_eff theta = P[psi] by restarted GMRES, A_eff the two-site effective
+    operator of A (the construction of ITensorMPS.jl's linsolve). The
+    sweeps stop once ||A x - psi|| <= tol, after nsweeps sweeps, or once a
+    sweep no longer lowers the residual by a tenth; the iterate with the
+    smallest residual is returned. A need not be Hermitian or definite,
+    but nothing guarantees convergence for an indefinite A, as for a shift
+    inside the spectrum: the local problems are then indefinite too.
+    Returns (x, residual history), x not normalized, with its
+    orthogonality centre on site 1. x0 optionally replaces psi as the
+    start."""
+    x = _fresh_copy(x0 if x0 is not None else psi)
+    x.position(1)
+    history = [_residual(A, x, psi)]
+    best, best_res = x.copy(), history[0]
+    for _ in range(int(nsweeps)):
+        if best_res <= tol:
+            break
+        _galerkin_sweep(x, psi, A, 0.0, 1.0, 1.0, 0.0, cutoff, maxdim,
+                        local_tol, krylov, maxiter)
+        res = _residual(A, x, psi)
+        history.append(res)
+        improved = res < 0.9 * best_res
+        if res < best_res:
+            best, best_res = x.copy(), res
+        if not improved:
+            break
+    return best, history
 
 
 def implicit_step(psi, H, betas, shift, cutoff, maxdim, nsweeps=1,

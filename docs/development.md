@@ -4142,6 +4142,96 @@ real state: 3.4 times the trapezoid rule at equal solve count on that METTS
 run, 1.4 times on the 12-site evolution. `itime="tdvp"` is the code of
 before.
 
+**Purification on the same steps.** `Thermal_Spin_Chain.anneal_method =
+"implicit"` hands the singlet
+purification to `imaginarytime.evolve` up to $\beta/2$, through
+`thermal.anneal_implicit`, with the shift at the lower band edge that
+`band_edges()` has already solved for, and `anneal_options` for the
+keywords. The purification starts from the $T=\infty$ state, which holds
+every energy, and that is the worst case for the time step: in closed
+form over the exact spectrum of 10 sites at $T=0.5$, the trapezoid rule
+with 8 steps per panel is $10^{-3}$ off, order 8 with 2 steps per panel
+$7\times10^{-9}$, and the Taylor stepper $1.2\times10^{-7}$, so the
+default is `order=8`, `nsteps=2`. On MPS the floor is the truncation, four
+truncating sweeps per step: $4.1\times10^{-6}$ at $T=1$ on 4 sites at
+`cutoff=1e-12`, against $3.1\times10^{-8}$ for Taylor, on both backends. Against Taylor on v3 at
+`maxm=64` (one thread, one P-core): 0.45, 0.91, 1.18 and 1.88 times its
+speed at $T=0.5$, 0.1, 0.05 and 0.02 on 10 sites, and 1.87 and 2.80 at
+$T=0.05$ and 0.02 on 16 sites, since the Taylor count grows with the
+extensive $W$ and the grid does not. One complex solve costs about 3.4
+MPO applications there. On `"python"` a solve costs more against an
+application: 0.40 and 0.32 times Taylor's speed at $T=1$ and 0.1 on 6
+sites, and 0.96 at $T=0.02$ on 8 sites. A first panel of $2/W$ instead of
+$0.01$ halves the solves in closed form but not the time: the GMRES of a
+long step takes more iterations, and one sweep does not follow a long
+step out of the $T=\infty$ state ($8\times10^{-5}$ at $T=0.5$). The
+default, `anneal_method=None`, is `thermal.auto_anneal_method`: the grid
+on v3, when it can run there, $T\le$ `_AUTO_TMAX = 0.05` times the largest
+coupling and Taylor needs at least `_AUTO_RATIO = 4` times as many
+applications as the grid needs solves (`anneal_counts`), and Taylor
+otherwise, on `"python"`, on ED and on a chain whose `anneal_step` or
+`anneal_order` was set. The ratio is where the grid was much faster: 4.9
+gave 1.87 times and 10.3 gave 2.80 times (16 sites), 3.0 only 1.18 (10
+sites, $T=0.05$). The temperature bound is the range that was measured:
+above $T\approx0.1$ the grid is less accurate at the default cutoff, and
+the count alone would take it at $T=0.5$ on 100 sites (280 applications
+against 64 solves), where it was never timed.
+`tests/test_thermal_anneal_implicit.py`.
+
+**The same sweep as a linear solver.** `implicit._galerkin_sweep` is the
+sweep of a factor written for $(a_0+c_0H)x=b_0\psi+d_0H\psi$, and
+`implicit.linear_solve` is the case $a_0=d_0=0$: $Ax=\psi$ for any MPO
+$A$, with the environments of $A$ and the overlap environments of $\psi$,
+the construction of ITensorMPS.jl's `linsolve`. It sweeps until the
+residual $\lVert Ax-\psi\rVert$ meets the
+tolerance, stops improving by a tenth, or `inverse_nsweeps` runs out, and
+returns the best iterate. The residual is the norm of the
+orthogonality centre of the untruncated difference $Ax-\psi$: $\langle
+r|r\rangle$ from the full contraction is a cancellation of terms of order
+$\lVert\psi\rVert^2$ and floors near $10^{-8}\lVert\psi\rVert$, which
+stopped the sweeps early and warned for nothing below that tolerance
+($8.5\times10^{-9}$ against $3.9\times10^{-14}$ on a converged 6-site
+solve). `applyinverse` takes it with `inverse_solver="sweep"`, and by
+default (`None`, `mpsalgebra.resolve_inverse_solver`) on `"python"`
+without a conserved sector when $A$ is not proven Hermitian
+(`MultiOperator.is_hermitian()`, the symbolic proof): for $z-H$ with
+$\mathrm{Im}\,z\neq0$, the case of `CVM_explicit` and of the analytic
+continuation, every local problem is well posed, $|z-E|\geq|\mathrm{Im}\,z|$,
+while a Hermitian $A$ such as the $H-e$ of shift-invert can make one
+nearly singular (the run below). A Hermitian $A$ and the other backends
+keep BiCGSTAB, whose recurrence compresses after every MPS operation. On 8 sites with every state held
+(`maxm=30`), $\langle\psi|A^{-1}|\psi\rangle$ is $10^{-12}$ off against
+$10^{-10}$ for BiCGSTAB, for $z-H$ off the axis, $H-e$ below the spectrum
+and $H-e$ between two levels, at 10 to 50 times less time, and
+`CVM_explicit` on 6 frequencies is 26 times faster at the same numbers.
+Under truncation (10 sites, `maxm=12`, 8 frequencies, $\delta=0.1$,
+against the ED Lorentzian) the sweeps are $1.9\times10^{-2}$ of the peak
+off in 22 s, with 16 warnings that the residual stayed above the
+tolerance, while BiCGSTAB returned $3\times10^{73}$ of the peak after
+1108 s, without a warning. On 24 sites at `maxm=40`, one resolvent
+$\langle\psi|(z-H)^{-1}|\psi\rangle$ with $z=E_0+1+0.1i$ and
+$\psi=S^z_{12}|\mathrm{GS}\rangle$ took 67 s by the sweeps, $9\times10^{-4}$
+(relative) off the value at `maxm=120`, which `maxm=80` reproduces to
+$2\times10^{-7}$, with a warning of a residual of $6.4\times10^{-2}$:
+the overlap is far more accurate than the residual. BiCGSTAB took 1893 s
+and returned $3\times10^{9}$, without a warning. That divergence of
+BiCGSTAB, still the solver of every other backend and of a Hermitian $A$,
+is left open; both measurements are single runs.
+Nothing guarantees convergence for an indefinite $A$. In a seeded run
+(8 sites), shift-invert Arnoldi with a target 0.05 above a triplet warned
+of a residual of $1.2\times10^{-5}$ against $10^{-6}$ and returned
+$-2.374$, which is not a level of the chain (the triplet is at $-2.504$),
+while BiCGSTAB from the same start found $-2.504$. The cause is the
+truncation at `cutoff=1e-12`, amplified by $\lVert A^{-1}\rVert=20$, and
+not the stop rule: without it, 10 sweeps give the same residual and the
+same $-2.374$, and at `cutoff=1e-14` the sweeps return $-2.504$ (with a
+residual of $3.7\times10^{-6}$, still warned). BiCGSTAB stops on the
+residual of its own recurrence, which is built from truncated sums, so it
+does not measure such a floor.
+`tests/test_inverse_solver_sweep.py`. The compiled backends raise for
+`"sweep"`; a port is `Chain::implicit_step`'s sweep with the mixed
+environments dropped.
+
 **Elementwise products by recursive sketched interpolation**
 (arXiv:2602.17974). The kernel is one array function,
 `rsi.hadamard_arrays`, on the backend namespace like `task.py`. The states

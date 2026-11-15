@@ -58,7 +58,7 @@ SETTINGS = frozenset((
     "kpm_energy_truncate","kpm_truncate_dK","kpm_truncate_nsweeps",
     "kpm_truncate_threshold",
     "cvm_tol","cvm_nit","cvm_patience","cvm_blowup","cvm_solver",
-    "cvm_nsweeps","cvm_maxm",
+    "cvm_nsweeps","cvm_maxm","inverse_solver","inverse_nsweeps",
     "tevol_method","tevol_custom_exp","tdvp_gse_sweeps",
     "tdvp_gse_krylov_order","tdvp_gse_cutoff",
     "dmrg_method","cbe_delta",
