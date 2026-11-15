@@ -12,11 +12,15 @@ MultiOperator*MPS algebra and is shared unchanged.
 
 The algorithm is a port of ITensorNHDMRG.jl
 (https://github.com/tipfom/ITensorNHDMRG.jl) in its default
-configuration: "onesided" local Arnoldi solves of A|x> = lambda|x> and
-Adag|y> = conj(lambda)|y> on each two-site block, combined with the
+configuration: "onesided" local Krylov-Schur solves of A|x> = lambda|x>
+and A^T|y> = lambda|y> on each two-site block, combined with the
 "fidelity" truncation of Yamamoto et al., Phys. Rev. B 105, 205125 (both
 MPS truncated with the same isometry from the hermitian average
 rho = (rho_l + rho_r)/2 of the left/right reduced density matrices).
+Inside a sweep the left state is the reference's transposed one,
+H^T|y> = lambda|y>, and every backend hands back the adjoint one,
+psil = conj(y); pyitensor/nhdmrg.py's module docstring says why the sweep
+needs the transposed one (2026-11-15 audit, finding 3).
 
 The optimization targets the eigenvalue with the smallest real part --
 the same "ground state" convention used by the pre-existing MPS Arnoldi
@@ -88,8 +92,10 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
     and link indices, so both behave as ordinary MPS individually).
 
     - H: operator to diagonalize (defaults to self.hamiltonian)
-    - krylovdim/restarts: per-bond local Arnoldi effort; the outer DMRG
-      sweeps (self.nsweeps) do the actual converging, so these stay small.
+    - krylovdim/restarts: per-bond local Krylov-Schur effort, krylovdim
+      vectors per Krylov build and `restarts` thick restarts (restarts+1
+      builds); the outer DMRG sweeps (self.nsweeps) do the actual
+      converging, so these stay small.
       itensor_version="julia_live" delegates the sweep to the real
       ITensorNHDMRG.jl package rather than to one of this codebase's own
       ports, where these two knobs don't map one-to-one -- krylovdim is
@@ -127,7 +133,7 @@ def nhdmrg(self,H=None,krylovdim=20,restarts=2,tol=1e-4,ntries=5):
     |coefficient| of H's terms (exactly 1, i.e. the unscaled call, at a
     largest coefficient of 1 or more), and the energy is divided back
     exactly; psil/psir are the same eigenvectors either way. The local
-    Arnoldi's thresholds (its 1e-13 breakdown, its 1e-10*(1+|lambda|)
+    Krylov solver's thresholds (its 1e-13 breakdown, its 1e-10*(1+|lambda|)
     restart test) are absolute, calibrated at unit scale, and so were
     unconverged below s ~ 1e-13 on v3 (E0/s 0.24 to 2.7 off ED on a
     6-site chain) and in small units generally (finding 27); every other
@@ -272,7 +278,7 @@ def nhdmrg_generalized(self,A,H=None,krylovdim=20,restarts=2,tol=1e-4,
     outer loop wrapped around real ITensorNHDMRG.jl sweeps) -- mpscpp2 has
     no analogous session method yet.
 
-    - krylovdim/restarts: per-bond local Arnoldi effort (same as nhdmrg(),
+    - krylovdim/restarts: per-bond local Krylov-Schur effort (same as nhdmrg(),
       including julia_live's own caveat about restarts being ignored there)
     - tol/ntries: eigen-residual certificate, same rationale as nhdmrg():
       the non-Hermitian generalized "eigenvalue" is not a variational

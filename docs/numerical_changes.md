@@ -2026,3 +2026,22 @@ nothing changes, since a dense index has no arrow. `ctmode="full"`,
 one raw AutoMPO per tuple, aborted inside ITensor on spinless sites in any
 sector and on native spinful sites when $S^z$ is conserved; it now raises
 `ValueError` there and names the route that works.
+
+## The 2026-11-15 non-Hermitian DMRG sweep
+
+`nhdmrg()`, `nhdmrg_generalized()` and `gs_energy()` on a non-Hermitian
+Hamiltonian, on v2, v3 and `"python"`, now sweep the transposed left
+state and solve each bond with a Krylov-Schur restart
+(`docs/audit_2026_11_15_hole_hunt.md`, finding 3). When several
+eigenvalues share the smallest real part, the old sweep could stop at a
+pair that is not an eigenpair. On the 10-site PT-symmetric XX chain with
+an imaginary staggered field $0.3i$ it returned $\mathrm{Re}\,E$ up to
+0.03 below the spectrum, with a relative residual of about 0.3, on every
+attempt. It now returns an eigenvalue to $6\times10^{-11}$, with a
+residual of $3.4\times10^{-6}$ at the cutoff $10^{-10}$. Where the old
+sweep converged, the eigenvalue does not move. The left state now comes
+back scaled to $\langle\psi_l|\psi_r\rangle=1$ exactly. As before, every
+attempt starts from a fresh random state, so which member of a set with
+one real part comes back can change from run to run. `restarts` now
+counts thick restarts, so the default `restarts=2` is three Krylov
+builds. `julia_live` is unchanged.

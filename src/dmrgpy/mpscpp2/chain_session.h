@@ -1,6 +1,8 @@
 #include <tuple>
 #include <cmath> // std::sqrt/std::lround/std::log2 (reduced_dm, announce_solver_scale)
 #include <limits> // std::numeric_limits<double>::epsilon() (SRTieBreak window)
+#include <algorithm> // std::stable_sort (nh_ritz_order)
+#include <stdexcept> // std::runtime_error (nh_biorthonormalize)
 
 // Phase 3 session/handle model: one Chain instance per Python
 // Many_Body_Chain object, replacing the old model of one fresh mpscpp.x
@@ -272,6 +274,12 @@ class Chain
     //  - the random start is v2's own MPS(sites_) (a random bond-dim-1
     //    product state, the same start every other v2 DMRG here uses);
     //    the two-site update grows the bond dimension from there.
+    //  - there is no separate one-sweep function (v2 has no
+    //    nhdmrg_generalized), so psil holds the sweep's TRANSPOSED left
+    //    state wl (H^T|wl> = lambda|wl>, against HT = conj(HA)) through
+    //    every sweep and is conjugated into the adjoint psil once at the
+    //    end; see the mpscpp3 original's comment for why the sweep works
+    //    with wl (2026-11-15 audit, finding 3).
     NHDMRGResult
     nhdmrg(std::vector<MOTerm> const& terms_h,
            std::vector<MOTerm> const& terms_hadj,
@@ -286,7 +294,10 @@ class Chain
         MPS psir(sites_);
         psir.position(1);
         normalize(psir);
-        MPS psil = psir;
+        MPS psil = psir; // wl, starting as psir as in the reference
+        // H^T from the adjoint's terms (v2 has no QNs: conj is all of dag)
+        MPO HT = HA;
+        for (int i=1;i<=N;++i) HT.Aref(i) = conj(HA.A(i));
         std::vector<ITensor> Lh(N+2), Rh(N+2), La(N+2), Ra(N+2);
         auto make_env = [&](std::vector<ITensor>& E, MPO const& W,
                             MPS const& ket, MPS const& bra, int i, int prev)
@@ -299,7 +310,7 @@ class Chain
         for (int i=N;i>=3;--i)
             {
             make_env(Rh,H,psir,psil,i,i+1);
-            make_env(Ra,HA,psil,psir,i,i+1);
+            make_env(Ra,HT,psil,psir,i,i+1);
             }
         auto apply_proj = [&](MPO const& W, std::vector<ITensor> const& L,
                               std::vector<ITensor> const& R, int b, ITensor v)
@@ -323,14 +334,14 @@ class Chain
                 int b = (ha==1) ? 1+bi : N-1-bi;
                 auto thl = psil.A(b)*psil.A(b+1);
                 auto thr = psir.A(b)*psir.A(b+1);
-                auto er_thr = arnoldi_smallest_real(
+                auto er_thr = nh_krylov_schur(
                     [&](ITensor const& v) { return apply_proj(H,Lh,Rh,b,v); },
                     thr,krylovdim,restarts,
                     have_energy ? Sel::SRTieBreak : Sel::SR,energy);
-                auto el_thl = arnoldi_smallest_real(
-                    [&](ITensor const& v) { return apply_proj(HA,La,Ra,b,v); },
+                auto el_thl = nh_krylov_schur(
+                    [&](ITensor const& v) { return apply_proj(HT,La,Ra,b,v); },
                     thl,krylovdim,restarts,
-                    Sel::Closest,std::conj(er_thr.first));
+                    Sel::Closest,er_thr.first);
                 energy = er_thr.first;
                 have_energy = true;
                 thr = er_thr.second;
@@ -389,7 +400,7 @@ class Chain
                     if (b<N-1)
                         {
                         make_env(Lh,H,psir,psil,b,b-1);
-                        make_env(La,HA,psil,psir,b,b-1);
+                        make_env(La,HT,psil,psir,b,b-1);
                         }
                     }
                 else
@@ -401,7 +412,7 @@ class Chain
                     if (b>1)
                         {
                         make_env(Rh,H,psir,psil,b+1,b+2);
-                        make_env(Ra,HA,psil,psir,b+1,b+2);
+                        make_env(Ra,HT,psil,psir,b+1,b+2);
                         }
                     }
                 }
@@ -409,9 +420,12 @@ class Chain
                 printfln("NH-DMRG sweep %d energy = %.12f + %.12f i",
                          sw,energy.real(),energy.imag());
             }
+        // transposed -> adjoint left state, then <psil|psir> = 1
+        for (int i=1;i<=N;++i) psil.Aref(i) = conj(psil.A(i));
         // both sweeps end at bond 1 with ortho "right": center at site 1
         psil.leftLim(0); psil.rightLim(2);
         psir.leftLim(0); psir.rightLim(2);
+        nh_biorthonormalize(psil,psir);
         NHDMRGResult out;
         out.energy = overlapC(psil,H,psir)/overlapC(psil,psir);
         out.psil = psil;
@@ -1054,6 +1068,194 @@ class Chain
             if (resid_est <= 1e-10*(opscale()+std::abs(ebest))) break;
             }
         return {lambda,x0};
+        }
+
+    // Back-ports of mpscpp3/chain_session.h's nh_ritz_order,
+    // nh_krylov_schur and nh_biorthonormalize (see the annotated originals
+    // there, and pyitensor/nhdmrg.py) to the v2 API: .cplx() for eltC,
+    // Index("a",m), overlapC for innerC, Aref for ref.
+    static std::vector<int>
+    nh_ritz_order(std::vector<Cplx> const& ev, Sel sel, Cplx target)
+        {
+        int m = (int)ev.size();
+        std::vector<int> idx(m);
+        for (int k=0;k<m;++k) idx[k] = k;
+        auto by_dist = [&](int a, int b)
+            { return std::abs(ev[a]-target)<std::abs(ev[b]-target); };
+        auto by_re = [&](int a, int b) { return ev[a].real()<ev[b].real(); };
+        if (sel==Sel::Closest)
+            {
+            std::stable_sort(idx.begin(),idx.end(),by_dist);
+            return idx;
+            }
+        if (sel==Sel::SRTieBreak)
+            {
+            double remin = ev[0].real();
+            for (int k=1;k<m;++k) remin = std::min(remin,ev[k].real());
+            double remax = remin, amax = 0.0;
+            for (int k=0;k<m;++k)
+                {
+                remax = std::max(remax,ev[k].real());
+                amax = std::max(amax,std::abs(ev[k]));
+                }
+            double degtol = 1e-6*(remax-remin)
+                          + 100.0*std::numeric_limits<double>::epsilon()*amax;
+            std::vector<int> cand, rest;
+            for (int k=0;k<m;++k)
+                {
+                if (ev[k].real()<=remin+degtol) cand.push_back(k);
+                else rest.push_back(k);
+                }
+            std::stable_sort(cand.begin(),cand.end(),by_dist);
+            std::stable_sort(rest.begin(),rest.end(),by_re);
+            cand.insert(cand.end(),rest.begin(),rest.end());
+            return cand;
+            }
+        std::stable_sort(idx.begin(),idx.end(),by_re);
+        return idx;
+        }
+
+    template <typename Fn>
+    std::pair<Cplx,ITensor>
+    nh_krylov_schur(Fn&& A, ITensor x0, int krylovdim, int restarts,
+                    Sel sel=Sel::SR, Cplx target=0) const
+        {
+        double nx = norm(x0);
+        if (nx<1e-14) return {Cplx(0,0),x0};
+        x0 /= nx;
+        double opnorm = 0.0;
+        auto opscale = [&]() { return std::min(1.0,opnorm); };
+        int kd = krylovdim;
+        std::vector<ITensor> V;
+        V.push_back(x0);
+        std::vector<std::vector<Cplx>> h(kd+1,std::vector<Cplx>(kd,Cplx(0,0)));
+        int k = 0;
+        Cplx lambda = 0;
+        ITensor x = x0;
+        int nbuilds = std::max(0,restarts)+1; // restarts thick restarts
+        for (int r=0;r<nbuilds;++r)
+            {
+            int m = kd;
+            bool breakdown = false;
+            for (int j=k;j<kd;++j)
+                {
+                auto w = A(V.at(j));
+                opnorm = std::max(opnorm,norm(w));
+                for (int pass=0;pass<2;++pass)
+                for (int i=0;i<=j;++i)
+                    {
+                    auto c = (dag(V.at(i))*w).cplx();
+                    h.at(i).at(j) += c;
+                    w -= c*V.at(i);
+                    }
+                double nw = norm(w);
+                h.at(j+1).at(j) = nw;
+                if (!(nw > 1e-13*opscale())) { m = j+1; breakdown = true; break; }
+                V.push_back(w/nw);
+                }
+            auto a = Index("a",m);
+            auto Hm = ITensor(prime(a),a);
+            for (int i=0;i<m;++i)
+            for (int j=0;j<m;++j)
+                Hm.set(prime(a)(i+1),a(j+1),h.at(i).at(j));
+            ITensor W,D;
+            eigen(Hm,W,D);
+            auto c = commonIndex(W,D);
+            std::vector<Cplx> ev(m);
+            for (int q=1;q<=m;++q) ev[q-1] = D.cplx(c(q),prime(c)(q));
+            auto Y = [&](int i, int q) { return W.cplx(a(i+1),c(q+1)); };
+            auto order = nh_ritz_order(ev,sel,target);
+            int ib = order[0];
+            lambda = ev[ib];
+            ITensor xnew;
+            for (int i=0;i<m;++i)
+                {
+                if (!xnew) xnew = Y(i,ib)*V.at(i);
+                else xnew += Y(i,ib)*V.at(i);
+                }
+            x = xnew;
+            double resid = std::abs(h.at(m).at(m-1))*std::abs(Y(m-1,ib));
+            if (breakdown || r==nbuilds-1
+                || resid <= 1e-10*(opscale()+std::abs(lambda))) break;
+            int nkeep = std::max(1,(3*m)/5);
+            std::vector<std::vector<Cplx>> Z;
+            for (int t=0;t<nkeep;++t)
+                {
+                std::vector<Cplx> v(m);
+                for (int i=0;i<m;++i) v[i] = Y(i,order[t]);
+                double nv0 = 0.0;
+                for (auto const& z : v) nv0 += std::norm(z);
+                nv0 = std::sqrt(nv0);
+                for (int pass=0;pass<2;++pass)
+                for (auto const& u : Z)
+                    {
+                    Cplx p = 0;
+                    for (int i=0;i<m;++i) p += std::conj(u[i])*v[i];
+                    for (int i=0;i<m;++i) v[i] -= p*u[i];
+                    }
+                double nv = 0.0;
+                for (auto const& z : v) nv += std::norm(z);
+                nv = std::sqrt(nv);
+                if (nv>1e-8*nv0 || Z.empty())
+                    {
+                    for (auto& z : v) z /= nv;
+                    Z.push_back(v);
+                    }
+                }
+            int kn = (int)Z.size();
+            std::vector<std::vector<Cplx>> hn(kd+1,std::vector<Cplx>(kd,Cplx(0,0)));
+            for (int p=0;p<kn;++p)
+            for (int q=0;q<kn;++q)
+                {
+                Cplx t = 0;
+                for (int i=0;i<m;++i)
+                for (int j=0;j<m;++j)
+                    t += std::conj(Z[p][i])*h.at(i).at(j)*Z[q][j];
+                hn.at(p).at(q) = t;
+                }
+            for (int q=0;q<kn;++q) hn.at(kn).at(q) = h.at(m).at(m-1)*Z[q][m-1];
+            std::vector<ITensor> Vn;
+            for (int q=0;q<kn;++q)
+                {
+                ITensor vq;
+                for (int i=0;i<m;++i)
+                    {
+                    if (!vq) vq = Z[q][i]*V.at(i);
+                    else vq += Z[q][i]*V.at(i);
+                    }
+                Vn.push_back(vq);
+                }
+            Vn.push_back(V.at(m));
+            V = Vn;
+            h = hn;
+            k = kn;
+            }
+        return {lambda,x};
+        }
+
+    static void
+    nh_biorthonormalize(MPS& psil, MPS& psir)
+        {
+        Cplx ov = overlapC(psil,psir);
+        if (!(std::abs(ov)>1e-14))
+            throw std::runtime_error("Chain::nhdmrg: <psil|psir> collapsed to "
+                  "~0 (or NaN): the left and right states belong to different "
+                  "eigenvalues");
+        Cplx fl, fr;
+        if (std::abs(ov.imag())<1e-14*std::abs(ov))
+            {
+            double sq = std::sqrt(std::abs(ov.real()));
+            fl = 1.0/sq;
+            fr = 1.0/(ov.real()<0 ? -sq : sq);
+            }
+        else
+            {
+            Cplx sq = std::sqrt(ov);
+            fl = 1.0/std::conj(sq);
+            fr = 1.0/sq;
+            }
+        psil.Aref(1) *= fl;
+        psir.Aref(1) *= fr;
         }
 
     // ITensor's dmrg() defaults to neither "Quiet" nor "Silent", i.e. full

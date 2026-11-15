@@ -457,7 +457,8 @@ Do not undo one without reading its finding first.
   larger of that and the summed signature magnitudes); CVM stops relative
   to `||b||` and its early exits read the CG functional; NH-DMRG's Ritz tie
   window is `1e-6*(max Re - min Re) + 100*eps*max|ev|` with `<=`,
-  identically in `pyitensor/nhdmrg.py` and both `arnoldi_select_kbest`; the
+  identically in `pyitensor/nhdmrg.py` and in both `arnoldi_select_kbest`
+  and `nh_ritz_order`; the
   VUMPS Lanczos reference is capped by the Hamiltonian's unit; the KPM
   same-vector shortcut and ROOTN's Lanczos breakdown compare against the
   vectors' own norms (`test_audit_2026_09_25_scale.py`,
@@ -568,6 +569,16 @@ Do not undo one without reading its finding first.
   (`groundstate.warn_unconverged`). Entropies of a site or a pair are those
   of the normalized state, with a relative eigenvalue floor
   (`test_audit_2026_10_23_leads.py`).
+- **NH-DMRG sweeps the transposed left state.** Inside every v2, v3 and
+  `"python"` sweep the left state is ITensorNHDMRG.jl's own,
+  H^T|wl> = E|wl>, solved against the conjugate of the adjoint MPO and
+  conjugated into dmrgpy's adjoint psil on the way out, and each bond is
+  solved by a Krylov-Schur restart that keeps 3/5 of the Ritz vectors;
+  `restarts` counts thick restarts. With the adjoint left state the
+  shared isometry has to hold r and conj(r) of a complex-symmetric H, and
+  on the 10-site PT-symmetric XX chain every attempt stopped at a
+  non-eigenpair, Re E up to 0.03 below the spectrum
+  (`test_audit_2026_11_15_nh.py`).
 - **The DMRG `vev` has no `**kwargs`**: an unknown keyword raises, and
   `T>0` raises naming `mode="ED"` and `metts_vev()`
   (`test_audit_2026_10_23.py`).
@@ -579,12 +590,17 @@ Do not undo one without reading its finding first.
   design.
 
 Left open and recorded as such, in the records' "Left open" and "New leads"
-sections: the four findings of `docs/audit_2026_11_15_hole_hunt.md`, from
-the 2026-11-15 backend benchmark and not yet fixed (the `"python"` and
-`"julia_live"` Sz=0 sector solves going wrong between 56 and 80 sites at
-`maxm=128`, v3 and `"python"` NH-DMRG stuck off any eigenpair when four
-eigenvalues share the smallest real part, and `"python"`'s `randomMPS`
-overflowing from about 300 sites at `maxm=128`); the `kpm_energy_truncate` window problem outside its worst regime
+sections: three of the four findings of
+`docs/audit_2026_11_15_hole_hunt.md`, from the 2026-11-15 backend
+benchmark and not yet fixed (the `"python"` and `"julia_live"` Sz=0
+sector solves going wrong between 56 and 80 sites at `maxm=128`, and
+`"python"`'s `randomMPS` overflowing from about 300 sites at
+`maxm=128`), and the lead of its finding 3, fixed at 10 sites: on the
+PT-symmetric XX chain, several eigenvalues with one real part, one
+NH-DMRG attempt in three still stalls at 12 sites and the attempts stall
+at 14 (ITensorNHDMRG.jl does worse), while implicit imaginary-time steps
+with H plus a Rayleigh-Ritz on the late states reach it up to 16 sites;
+the `kpm_energy_truncate` window problem outside its worst regime
 (`docs/known_issue_kpm_energy_truncation_window.md`); the sliver just below
 `kpm_scale=1/2` where the elastic line is distorted while the moments are
 still under the bound; the truncated CVM regime (warned, about 2x the cost,

@@ -172,7 +172,78 @@ tell a start-state problem from a solver setting.
 
 ### 3. v3 and `"python"` `nhdmrg()` settle on a fixed point that is not an eigenpair when four eigenvalues share the smallest real part, already at N=10
 
-`bug` &middot; severity **MEDIUM** &middot; OPEN &middot; found by the benchmark
+`bug` &middot; severity **MEDIUM** &middot; FIXED at 10 sites, larger chains open &middot; found by the benchmark
+
+**Status**: FIXED on 2026-11-15 on v2, v3 and `"python"`, and not in the
+way the suggested fix below proposes, since the reading in this finding
+was wrong. The fidelity isometry is not the cause: `julia_live` runs
+ITensorNHDMRG.jl with `biorthoalg="fidelity"` too
+(`mpsjulialive/groundstate.py`), and on this chain at `maxm=30` it
+reaches a relative residual of 8e-12 to 9e-11 from three seeds. What
+differs is the left state. The reference sweeps the transposed left
+eigenvector, H^T|wl> = E|wl>, while the ports swept the adjoint one,
+H^dagger|psil> = conj(E)|psil>. The shared isometry has to hold the right
+state and the left state of the sweep. For a complex-symmetric H, as
+here, wl is r itself, so the reference keeps the Schmidt basis of r
+alone, while the ports had to hold r and conj(r) together. Logged bond by
+bond on `"python"`, the projected two-site problem at the chain ends then
+had converged Ritz values below the spectrum (-2.646 against -2.567), and
+the "smallest real part" rule followed them. The fix has two parts, and
+each alone is not enough. Measured on `"python"` at `maxm=30`, 10 sweeps,
+cutoff 1e-10, three seeds: the transposed sweep with the old restart on
+one Ritz vector stops at 8e-4 to 4e-2, and the adjoint sweep with a thick
+restart at 1.3e-2. Together they give 3.4e-6 on every seed, which is the
+floor of the cutoff.
+
+What changed: `_nhdmrg_one_sweep`, v3's `Chain::nhdmrg_one_sweep` and
+the inline sweep of v2 solve the left block against H^T = conj(H^dagger),
+anchored to E instead of conj(E), and conjugate psil on the way in and
+out (v2 once, at the end). The local solver is a Krylov-Schur restart that
+keeps 3/5 of the Ritz vectors, as KrylovKit does
+(`_krylov_schur_smallest_real`, `nh_krylov_schur`). `restarts` now counts
+restarts, so the default `restarts=2` is three Krylov builds, 36
+matrix-vector products per solve against 40 before; with two builds one
+seed in three still stopped at 4.4e-3. The pair is scaled to
+<psil|psir> = 1 once at the end. v3's `arnoldi_smallest_real` is
+unchanged, since iDMRG uses it. Through `nhdmrg(ntries=1)` on the 10-site
+chain, `maxm=30`, 10 sweeps, cutoff 1e-10, three seeds, with the default
+noise and with `noise=0.1`: v2, v3 and `"python"` all return -2.566782 or
+-2.566782 +- 0.264096i, both relative residuals 3.4e-6, and Re E within
+6e-11 of the exact -2.566782167 (the chain is free fermions after
+Jordan-Wigner). One attempt takes 1.5 s on `"python"` (about 3 s before),
+2.3 s on v2 and 4.2 s on v3. The `tests/test_nh_dmrg.py` models (the
+fermion chain and the asymmetric hopping chain) stay at 1e-14, with and
+without noise. Pinned by `tests/test_audit_2026_11_15_nh.py`.
+
+Open, and recorded as a lead: larger chains. At 12 sites, `maxm=128`,
+cutoff 1e-10, 10 sweeps, one attempt per seed, the fixed sweep reaches
+the certificate in two attempts of three on each backend (v3 residuals
+2.1e-4, 1.2e-4 and 1.5e-2; `"python"` 9.5e-6, 2.4e-4 and 4.8e-3), so the
+retry loop finds the eigenpair there. The reference does worse on the same
+chain: ITensorNHDMRG.jl's onesided sweep stops at 1.8e-3 to 9.3e-3 on
+three seeds, and its `alg="twosided"` with `biorthoalg="biorthoblock"`
+(arXiv:2401.15000) reaches 4e-11 on one seed and 1e-3 on the other two.
+At 14 sites one attempt stops at 2.1e-2 on v3 and 0.15 on `"python"`;
+before the fix the benchmark gave -3.670 on both and -3.617477 on
+`julia_live`, against the exact -3.617441. The certificate warns in these
+cases, so the number is not silent. A smaller lead: on 10 sites a smaller
+cutoff gives a larger residual, 1.1e-4 at 1e-14 against 3.4e-6 at 1e-10,
+on the reference too.
+
+A route that does reach these chains, measured but not part of the fix:
+implicit imaginary-time steps with the non-Hermitian H itself
+(`Chain.implicit_step`, the log grid of arXiv:2606.02930, shift at Re E0
+or at the running Re <H>), renormalized every step, followed by a
+Rayleigh-Ritz in the span of the last 8 to 24 states and a residual for
+every Ritz pair. A single evolved state does not settle, since it ends in
+the span of all levels with one real part and their phases rotate, but
+the Rayleigh-Ritz resolves them: from a random state on `"python"`,
+`maxm=64`, tau=200 to 400, every level of smallest real part comes out with
+a residual of 3e-5 to 2e-4 and Re within 5e-6 of the exact value, on 10,
+12, 14 and 16 sites (5 s, 11 s, 24 s, 108 s; on 16 sites 16 levels share
+the real part, and the one spurious Ritz value has residual 0.28). The
+public `evolve_imaginary_time` refuses a non-Hermitian H, so these runs
+call the session directly.
 
 **Where**: `src/dmrgpy/pyitensor/nhdmrg.py` (`_arnoldi_smallest_real`,
 `_select_ritz`, the fidelity truncation in `_nhdmrg_one_sweep`),

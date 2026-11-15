@@ -362,9 +362,10 @@ converges in far fewer Krylov vectors, and v3 can end up *faster* than
 `"python"` (confirmed directly on a dimerized `n_uc=2` chain: v3 0.08s
 vs `"python"` 0.23s at `maxm=30`, `maxiter=60`). This asymmetry is
 `arnoldi_smallest_real`'s own `early_tol` early-exit at work (see its
-own doc comment): every pre-existing caller of that shared Arnoldi
-routine (`nhdmrg_one_sweep`) opts out (`early_tol<0`, the default) and
-is completely unaffected; only `idmrg_local_solve`'s own call opts in,
+own doc comment): every other caller of that shared Arnoldi
+routine opts out (`early_tol<0`, the default) and is completely
+unaffected (the NH-DMRG sweep has its own `nh_krylov_schur` since
+2026-11-15); only `idmrg_local_solve`'s own call opts in,
 checking the same residual-tolerance criterion the between-restart
 check already trusted, just checked incrementally (every 3rd
 Krylov-vector addition, from `m>=8` on) instead of only once a full
@@ -3365,7 +3366,17 @@ Notable, deliberate implementation details (not bugs to "fix"):
   The adjoint MPO is built from `MultiOperator.get_dagger()`'s terms on
   the Python side, and since the non-Hermitian energy is not variational,
   `nhdmrg.py` certifies each run by the eigen-residual and redraws a
-  fresh random start when a run stalls.
+  fresh random start when a run stalls. Inside a sweep the left state is
+  the reference's transposed one, $H^T|w_l\rangle=E|w_l\rangle$, solved
+  against the conjugate of the adjoint MPO, and it is conjugated into
+  dmrgpy's adjoint $|\psi_l\rangle$ on the way out of every sweep. The
+  shared truncation basis has to hold the right state and the sweep's
+  left state, and for a complex-symmetric $H$ the transposed one is the
+  right state itself. The local solver is a Krylov-Schur restart that
+  keeps 3/5 of the Ritz vectors (`_krylov_schur_smallest_real`,
+  `nh_krylov_schur`), not a restart on the single selected one. Both
+  were needed to reach an eigenpair when four eigenvalues share the
+  smallest real part (2026-11-15 audit, finding 3).
 - A few pre-existing bugs in the original (pre-refactor) file-based
   backend are deliberately reproduced rather than silently fixed —
   see the call-site comments in `chain_session.h` for both versions.

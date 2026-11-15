@@ -145,8 +145,19 @@ pybind` has rebuilt the `.so` and the test ran against the rebuilt one.
   second scale inside `Chain::nhdmrg`.
 - **NH-DMRG's Ritz tie window** is `1e-6*(max Re - min Re) +
   100*eps*max|ev|`, compared with `<=`, identically in `pyitensor/nhdmrg.py`
-  and both `arnoldi_select_kbest`; keep the two spellings identical. Its
-  certificate divides by `c + |E - e_id|`.
+  (`_select_ritz`, `_ritz_order`) and in both `arnoldi_select_kbest` and
+  `nh_ritz_order`; keep the spellings identical. Its certificate divides
+  by `c + |E - e_id|`.
+- **The NH-DMRG sweep works with the transposed left state** (2026-11-15
+  audit, finding 3): `nhdmrg_one_sweep` (v3) and v2's inline sweep solve
+  the left block against `conj(HA)` = H^T with the target anchored to E,
+  conjugate psil on the way in and out (v3) or once at the end (v2), and
+  scale the pair to <psil|psir> = 1 in `nh_biorthonormalize`. Their
+  local solver is `nh_krylov_schur`, the thick restart of
+  `pyitensor/nhdmrg.py`; `arnoldi_smallest_real` stays as it was for
+  iDMRG. Do NOT go back to the adjoint left state inside the sweep: the
+  shared isometry then has to hold r and conj(r) for a complex-symmetric
+  H, and the sweep stopped at a non-eigenpair.
 - **`Chain::vx_lanczos_ground_state`'s residual reference** `max(1,|lambda|)`
   is capped by the Hamiltonian's own unit, its largest non-identity
   coefficient, so that it holds in small units and next to an offset
