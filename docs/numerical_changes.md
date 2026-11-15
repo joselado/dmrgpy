@@ -1940,6 +1940,13 @@ held exactly `gs_energy_fluctuation()` went from 2.05e-12 to 4.5e-13, and
 a residual at cutoff 0 floors near 1e-8 of ||K|| ||x||. Setting both names
 to `"exact"` gives the numbers of before. The full suite had not run on
 this change when it was made; 176 tests of the most exposed files passed.
+The full suite then found one place where the route broke a result: the
+in-sector start state of a `"python"` sector solve (`pyitensor/sector.py`,
+a truncated sum of many product states of the sector). The density-matrix
+route kept eigenvectors of roundoff-level eigenvalues there, which mix
+charges, and a SECTOR excited state left its sector (`<(Q-q)^2> = 4`) and
+an NRG head basis mixed $S^z$ by $2.4\times10^{-6}$. That sum is exact
+again, so those results are those of before the default.
 
 ## The 2026-11-15 default `dmmode` of `get_correlation_matrix` on `"python"`
 
@@ -1996,3 +2003,12 @@ per-pair loop to $5\times10^{-15}$ on 64 sites; the default moves from
 `"fast"` by its truncation, $4\times10^{-9}$ to $6\times10^{-8}$ on 16 to
 64 sites. On 64 sites it takes 0.37 s against 19 s for `"fast"` and 30 s
 for the per-pair loop. `dmmode="fast"` gives the numbers of before.
+
+## The 2026-11-15 exact sum of one-site chains on `"python"`
+
+`pyitensor.mpsalgebra.sum_many` and `sum` on the exact route returned the
+last operand alone for a chain of one site, since the block placement has
+no bond to place the operands along; they now return the sum of the site
+tensors, as the density-matrix route already did. `mpo_is_hermitian`
+builds on it, so on one site it no longer reports a Hermitian MPO as
+non-Hermitian. Chains of two sites or more are unchanged.

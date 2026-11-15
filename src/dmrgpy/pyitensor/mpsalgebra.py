@@ -646,6 +646,11 @@ def sum_many(chains, cutoff=0.0, maxdim=None, method=None):
             idx += [slice(None)] * len(phys)
             if new_right:
                 idx.append(slice(right_off, right_off + right_dim))
+            if not new_left and not new_right:
+                # one site: no bond to place the operands along, so the sum
+                # is the sum of the tensors (setblock would keep the last)
+                combined = combined + arr
+                continue
             # setblock, not `combined[...] = arr`: JAX arrays are immutable,
             # so this returns a new array rather than mutating in place.
             combined = bk.setblock(combined, tuple(idx), arr)

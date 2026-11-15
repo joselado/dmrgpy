@@ -200,6 +200,20 @@ def test_one_site_chains():
     out = ma.sum_many(states, maxdim=1, method="densitymatrix")
     assert _rel(_vec(out, sites), _dense_sum(states, sites)) < 1e-12
     assert out.center == 1
+    # the exact route too, which kept only the last operand before
+    for method in ("exact", "densitymatrix"):
+        out = ma.sum_many(states, method=method)
+        assert _rel(_vec(out, sites), _dense_sum(states, sites)) < 1e-12
+        out = ma.sum(states[0], states[1], method=method)
+        assert _rel(_vec(out, sites), _dense_sum(states[:2], sites)) < 1e-12
+    # and a one-site MPO: Sx + Sz, and the Hermiticity test built on it
+    H1 = mb.to_mpo(AutoMPO.from_terms(sites, [(1.0, [("Sx", 1)])]))
+    H2 = mb.to_mpo(AutoMPO.from_terms(sites, [(0.5, [("Sz", 1)])]))
+    S = ma.sum_many([H1, H2])
+    assert _rel(_op(S, sites), _op(H1, sites) + _op(H2, sites)) < 1e-12
+    assert ma.mpo_is_hermitian(H1)
+    H3 = mb.to_mpo(AutoMPO.from_terms(sites, [(1.0, [("S+", 1)])]))
+    assert not ma.mpo_is_hermitian(H3)
 
 
 def test_default_and_unknown_methods():
