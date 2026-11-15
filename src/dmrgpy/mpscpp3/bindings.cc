@@ -569,6 +569,17 @@ PYBIND11_MODULE(_dmrgcpp, m)
                 std::copy(flat.begin(),flat.end(),arr.mutable_data());
                 return arr;
             }, py::arg("wf"), "Returns <Cdag_i C_j> as an (N,N) array")
+        .def("correlation_matrix_sweep",[](Chain& self, MPS const& wf) {
+                int n = self.num_sites();
+                auto flat = self.correlation_matrix_sweep(wf);
+                py::array_t<std::complex<double>> arr({n,n});
+                std::copy(flat.begin(),flat.end(),arr.mutable_data());
+                return arr;
+            }, py::arg("wf"),
+               "Returns <Cdag_i C_j> as an (N,N) array, the same matrix as "
+               "correlation_matrix, by one environment walk per row "
+               "instead of one AutoMPO per pair. Spinless fermion sites "
+               "only (ValueError otherwise).")
         .def("four_correlation_tensor",
             [](Chain& self, MPS const& wf, bool accelerate) {
                 int n = self.num_sites();

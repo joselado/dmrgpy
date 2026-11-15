@@ -2702,6 +2702,96 @@ class Chain
         return out;
         }
 
+    // <Cdag_i C_j> for every pair by one environment walk per i, the
+    // algorithm of ITensorMPS.jl's correlation_matrix and the port of
+    // pyitensor/chain.py's correlation_matrix_sweep. correlation_matrix
+    // above builds one AutoMPO per pair and contracts it over the whole
+    // chain; here it is about N^2/2 one-site folds.
+    //
+    // For each a, the orthogonality centre goes to a, so the left part of
+    // the chain is the identity. The environment carries Cdag_a, then an
+    // F on every site it crosses, and each b > a closes it with C_b and
+    // the identity of the right-orthogonal tail. This is the
+    // Jordan-Wigner form c^dag_a c_b = a^dag_a F_{a+1}...F_{b-1} a_b, with
+    // no F on the two end sites, since a^dag_a F_a = a^dag_a. The
+    // diagonal is Cdag_a C_a, and the lower triangle is filled by
+    // conjugation.
+    //
+    // Same row-major N*N layout as correlation_matrix, and the same
+    // convention: not renormalized, <wf|O|wf> as innerC(wf,op,wf) gives.
+    // Like correlation_matrix it covers spinless Fermion sites only (the
+    // "C", "Cdag" and "F" names of FermionSite, site-type code 0); other
+    // site types are not covered, and are refused here before op() would
+    // abort on a missing name.
+    //
+    // QN sites (set_conserved_sector) need the arrows right: the left
+    // base takes its link from psi.A(a-1), the tensor outside the fold,
+    // and the right close takes its link from psi.A(b+1) for the same
+    // reason, so the delta never meets an index with its own direction.
+    std::vector<std::complex<double>>
+    correlation_matrix_sweep(MPS const& wf) const
+        {
+        for (size_t k=0;k<site_types_.size();++k)
+            if (site_types_[k]!=0)
+                throw std::invalid_argument("Chain::correlation_matrix_sweep: "
+                    "only spinless fermion sites (type 0) are covered");
+        int N = sites_.length();
+        std::vector<std::complex<double>> out(size_t(N)*N,0.0);
+        auto psi = wf; // copied, since position() changes the gauge in place
+
+        // Apply a one-site operator to a ket tensor and bring the site
+        // index back to prime level 0, as in four_correlation_tensor_sweep.
+        auto apply_local = [&](ITensor T, int s, std::string const& name) -> ITensor
+            {
+            T = T*op(sites_,name,s);
+            T.noPrime(TagSet("Site"));
+            return T;
+            };
+        // Fold site s into a left environment E: the ket tensor T (with its
+        // operators already applied) against the bra, whose Link indices
+        // are primed.
+        auto fold = [&](ITensor const& E, ITensor T, int s) -> ITensor
+            {
+            if (E) T = E*T;
+            return T*dag(prime(psi.A(s),TagSet("Link")));
+            };
+        // Close an environment that ends on site s: the identity of the
+        // right-orthogonal tail, then the scalar.
+        auto close_env = [&](ITensor E, int s) -> Cplx
+            {
+            if (s<N)
+                {
+                auto rn = commonIndex(psi.A(s+1),psi.A(s));
+                E = E*delta(dag(prime(rn)),rn);
+                }
+            return eltC(E);
+            };
+
+        for (int a=1; a<=N; ++a)
+            {
+            psi.position(a);
+            ITensor lbase; // default-constructed = trivial "1" when a==1
+            if (a>1)
+                {
+                auto ln = commonIndex(psi.A(a-1),psi.A(a));
+                lbase = delta(dag(prime(ln)),ln);
+                }
+            // diagonal: C first, then Cdag, applied to the ket in turn
+            ITensor Tn = apply_local(psi.A(a),a,"C");
+            Tn = apply_local(Tn,a,"Cdag");
+            out[size_t(a-1)*N+(a-1)] = close_env(fold(lbase,Tn,a),a);
+            ITensor run = fold(lbase,apply_local(psi.A(a),a,"Cdag"),a);
+            for (int b=a+1; b<=N; ++b)
+                {
+                if (b>a+1) run = fold(run,apply_local(psi.A(b-1),b-1,"F"),b-1);
+                Cplx val = close_env(fold(run,apply_local(psi.A(b),b,"C"),b),b);
+                out[size_t(a-1)*N+(b-1)] = val;
+                out[size_t(b-1)*N+(a-1)] = std::conj(val);
+                }
+            }
+        return out;
+        }
+
     std::vector<std::complex<double>>
     four_correlation_tensor(MPS const& wf, bool accelerate=true) const
         {
