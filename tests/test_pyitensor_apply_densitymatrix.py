@@ -198,7 +198,7 @@ def test_truncated_result_is_an_orthogonal_projection(model, method):
     _assert_center_one(out)
 
 
-def test_default_is_exact_and_unknown_methods_raise():
+def test_default_and_unknown_methods():
     """The default is the density-matrix route (the author's pick of
     2026-11-15) and equals the exact one here, an unknown name is an error
     rather than a fallback, and a zero operator gives the zero state, not

@@ -586,7 +586,7 @@ def sum_many(chains, cutoff=0.0, maxdim=None, method=None):
     the truncating sweep; "densitymatrix" is _sum_densitymatrix, the same
     truncation without forming the sum at full bond dimension. It exists
     for MPS only, so a sum of MPO takes the exact route whatever the
-    method. None takes the module default SUM_METHOD, which is "exact";
+    method. None takes the module default SUM_METHOD, "densitymatrix" since 2026-11-15;
     any other name raises. A single chain comes back as a copy, not
     truncated, by either method."""
     if method is None:
@@ -972,7 +972,7 @@ def applyMPO(K, x, x0=None, cutoff=0.0, maxdim=None, method=None):
     formed exactly and then truncated by one SVD sweep; "densitymatrix"
     is _apply_densitymatrix, the same truncation at a cost lower by about
     the MPO bond dimension. None takes the module default APPLY_METHOD,
-    which is "exact"; any other name raises.
+    "densitymatrix" since 2026-11-15; any other name raises.
 
     `x0` (an initial guess, used by real ITensor to seed an iterative
     variational "Fit" solve) is accepted for call-signature compatibility

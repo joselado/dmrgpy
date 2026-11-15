@@ -228,9 +228,9 @@ def _residual(A, x, psi):
     <Ax|Ax> - 2Re<psi|Ax> + <psi|psi>, is a cancellation between terms of
     order ||psi||^2 and floors near 1e-8 ||psi|| (8.5e-9 against 3.9e-14
     from the centre, on a converged 6-site solve)."""
-    Ax = applyMPO(A, x, cutoff=0.0, maxdim=None)
+    Ax = applyMPO(A, x, cutoff=0.0, maxdim=None, method="exact")
     Ax.noPrime("Site")
-    r = mps_sum(Ax, psi * (-1.0), cutoff=0.0, maxdim=None)
+    r = mps_sum(Ax, psi * (-1.0), cutoff=0.0, maxdim=None, method="exact")
     r.position(1)
     xp = bk.xp()
     c = r.A(1).array

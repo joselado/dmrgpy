@@ -828,7 +828,9 @@ class Chain:
             return inner(psi, A, psi)
         psi1 = psi
         for _ in range(npow - 1):
-            psi1 = self._apply_mpo(A, psi1)
+            # exact: a power of (H-<H>) is how vev.energy_variance reads a
+            # small variance, which the density-matrix floor would cut
+            psi1 = self._apply_mpo(A, psi1, method="exact")
         return inner(psi, A, psi1)
 
     def apply_operator(self, terms, wf):
@@ -2116,8 +2118,12 @@ class Chain:
                                         seed=self._sector_draws)
         return randomMPS(self.sites, max(1, int(maxm)))
 
-    def _apply_mpo(self, K, x, x0=None):
-        out = applyMPO(K, x, x0=x0, cutoff=self.cutoff, maxdim=self.maxm)
+    def _apply_mpo(self, K, x, x0=None, method=None):
+        # method=None takes mpsalgebra.APPLY_METHOD (the density-matrix
+        # route); the callers whose result is small by cancellation ask for
+        # "exact" (docs/development.md, the density-matrix route)
+        out = applyMPO(K, x, x0=x0, cutoff=self.cutoff, maxdim=self.maxm,
+                       method=method)
         out.noPrime("Site")
         return out
 
@@ -2243,7 +2249,7 @@ class Chain:
     def _energy_fluctuation(self, psi1, H):
         psi1 = psi1.copy()
         psi1.normalize()
-        psi2 = self._apply_mpo(H, psi1)
+        psi2 = self._apply_mpo(H, psi1, method="exact")  # see vev's powers
         de = inner(psi1, psi2).real
         de = inner(psi2, psi2).real - de * de
         return de
@@ -2326,7 +2332,8 @@ class Chain:
         # C[eps*Sz0,eps*Sz3] came back as C[Sz3,Sz3] from eps=1.2e-10 down
         # (2026-09-25b audit, finding 23). Strict <, so two zero vectors take
         # the full recursion, which returns their zero moments.
-        d = mps_sum(vi * 1.0, vj * (-1.0), cutoff=cutoff, maxdim=maxm)
+        d = mps_sum(vi * 1.0, vj * (-1.0), cutoff=cutoff, maxdim=maxm,
+                    method="exact")  # a difference at 1e-10 of the norms
         dd = np.sqrt(inner(d, d).real)
         ref = max(np.sqrt(inner(vi, vi).real), np.sqrt(inner(vj, vj).real))
         return dd < 1e-10 * ref
@@ -2342,26 +2349,28 @@ class Chain:
         return out
 
     def _bicstab(self, A, b, tol, max_it):
+        # every sum and product by the exact route: the residuals r, s and
+        # r_new are differences that cancel, below the density-matrix floor
         x = b.copy()
-        r_old = mps_sum(b, self._apply_mpo(A, x) * (-1.0), cutoff=self.cutoff, maxdim=self.maxm)
+        r_old = mps_sum(b, self._apply_mpo(A, x, method="exact") * (-1.0), cutoff=self.cutoff, maxdim=self.maxm, method="exact")
         r_ = r_old.copy()
         p = r_old.copy()
         k = 0
         while k < max_it:
-            Ap = self._apply_mpo(A, p)
+            Ap = self._apply_mpo(A, p, method="exact")
             alpha = inner(self.conjugate(r_old), r_) / inner(self.conjugate(Ap), r_)
-            s = mps_sum(r_old, Ap * (-alpha), cutoff=self.cutoff, maxdim=self.maxm)
-            As = self._apply_mpo(A, s)
+            s = mps_sum(r_old, Ap * (-alpha), cutoff=self.cutoff, maxdim=self.maxm, method="exact")
+            As = self._apply_mpo(A, s, method="exact")
             w = inner(self.conjugate(As), s) / inner(self.conjugate(As), As)
-            x = mps_sum(x, mps_sum(p * alpha, s * w, cutoff=self.cutoff, maxdim=self.maxm),
-                        cutoff=self.cutoff, maxdim=self.maxm)
-            r_new = mps_sum(s, As * (-w), cutoff=self.cutoff, maxdim=self.maxm)
+            x = mps_sum(x, mps_sum(p * alpha, s * w, cutoff=self.cutoff, maxdim=self.maxm, method="exact"),
+                        cutoff=self.cutoff, maxdim=self.maxm, method="exact")
+            r_new = mps_sum(s, As * (-w), cutoff=self.cutoff, maxdim=self.maxm, method="exact")
             res = np.sqrt(abs(inner(self.conjugate(r_new), r_new).real))
             if res <= tol:
                 break
             beta = (alpha / w) * inner(self.conjugate(r_new), r_) / inner(self.conjugate(r_old), r_)
-            p = mps_sum(r_new, mps_sum(p, Ap * (-w), cutoff=self.cutoff, maxdim=self.maxm) * beta,
-                        cutoff=self.cutoff, maxdim=self.maxm)
+            p = mps_sum(r_new, mps_sum(p, Ap * (-w), cutoff=self.cutoff, maxdim=self.maxm, method="exact") * beta,
+                        cutoff=self.cutoff, maxdim=self.maxm, method="exact")
             r_old = r_new
             k += 1
         return x
@@ -2513,9 +2522,9 @@ def _is_left_zero_mode(G, d, rtol=1e-10):
     the charge on both sides of rho. Measured on the 3-site Bose-Hubbard
     Lindbladian: 6.7e-14 of ||d|| with number-conserving jumps, 0.15 once a
     decay of one site is added."""
-    x = applyMPO(mpo_dagger(G), d)
+    x = applyMPO(mpo_dagger(G), d, method="exact")  # a ratio at 1e-10
     x.noPrime("Site")
-    y = applyMPO(G, d)
+    y = applyMPO(G, d, method="exact")
     y.noPrime("Site")
     nx = np.sqrt(abs(inner(x, x)))
     ny = np.sqrt(abs(inner(y, y)))

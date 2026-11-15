@@ -192,7 +192,11 @@ def global_subspace_expand(H, phi, krylov_order, cutoff, maxdim=None, bond_maxdi
     companions = []
     cur = phi
     for _ in range(krylov_order - 1):
-        cur = applyMPO(H, cur, cutoff=cutoff, maxdim=maxdim)
+        # exact: the expansion exists to add directions of small weight,
+        # which the density-matrix floor (about 1e-8 of ||H|| ||phi||)
+        # drops; on a stiff Lindbladian (tests/test_lindblad.py) the
+        # occupations went from 3e-4 to 2.4e-3 off ED with it
+        cur = applyMPO(H, cur, cutoff=cutoff, maxdim=maxdim, method="exact")
         cur.noPrime("Site")  # applyMPO leaves the physical leg primed
         # Each Krylov vector enters the density matrix at unit weight, as
         # it does on v3, where Chain::global_subspace_expand passes

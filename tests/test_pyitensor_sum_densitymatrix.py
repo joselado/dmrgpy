@@ -202,7 +202,7 @@ def test_one_site_chains():
     assert out.center == 1
 
 
-def test_default_is_exact_and_unknown_methods_raise():
+def test_default_and_unknown_methods():
     """The default is the density-matrix route (the author's pick of
     2026-11-15) and equals the exact one here, and an unknown name is an error
     rather than a fallback, also for a single chain, which is returned
