@@ -672,11 +672,13 @@ def _apply_densitymatrix(K, x, cutoff=0.0, maxdim=None):
     product never exists at bond dimension chi_K*chi_x, and a site costs
     about O(d chi_x^3 chi_K^2) against O(d (chi_K chi_x)^3), a factor of
     about chi_K less. The price is memory, n-1 environments of
-    chi_x^2 chi_K^2 entries, and precision: rho's eigenvalues are known
-    to about eps times the largest, so singular values below about 1e-8 of
-    the largest are not resolved. At cutoff=0 a product with such a tail
-    comes out good to about 1e-8 relative in 2-norm, not to roundoff; any
-    cutoff of 1e-15 or more drops that tail in both methods.
+    chi_x^2 chi_K^2 entries, and precision: rho's eigenvalues carry a
+    roundoff of about eps ||K||^2 ||x||^2, so singular values below about
+    1e-8 of ||K|| ||x|| are not resolved, which is not of the product's
+    own scale when K|x> is small by cancellation. On an 8-site Heisenberg
+    ground state held exactly, the variance ||(H-<H>)psi||^2 comes out
+    4.5e-13 here against 2.05e-12 by the exact route
+    (docs/development.md, section 4.5).
 
     The kept dimension at a bond is also capped by dim(x link)*dim(K link)
     on its left, the largest rank the product can have there. Inside that
