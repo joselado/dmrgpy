@@ -42,17 +42,50 @@ end
 implicit_clean(psi) = noprime(copy(psi), "Link")
 
 
+# The budget (krylov, maxiter) of pyitensor's gmres as the (krylovdim,
+# maxiter) of KrylovKit 0.10.4's GMRES. Counted in matrix-vector products,
+# for a solve that does not converge:
+#
+# - pyitensor: one product for the start residual, then cycles of
+#   m = min(krylov, maxiter - nmv) Arnoldi products, each followed by one
+#   product for the new residual, until nmv reaches maxiter. So it runs
+#   fld(maxiter, krylov + 1) cycles of krylov vectors, then at most one
+#   shorter cycle, and makes maxiter or maxiter + 1 products in all.
+# - KrylovKit: one product for the start residual, krylovdim products per
+#   outer iteration (initialize, then expand!), the restart residual from
+#   the Arnoldi relation with no product, and one product for an explicit
+#   residual after the last iteration, or after one whose estimate says
+#   converged. So one outer iteration costs at most krylovdim + 1 products,
+#   as one pyitensor cycle does.
+#
+# Julia therefore runs the cycles of full length that pyitensor runs, with
+# krylovdim = min(krylov, maxiter - 1), the length of pyitensor's first
+# cycle, and never makes more products. It drops pyitensor's shorter last
+# cycle, since KrylovKit keeps one krylovdim for all its iterations. At
+# krylov=10, maxiter=100 both run 9 cycles of 10 vectors: pyitensor makes
+# 100 products and Julia 92, since it skips 8 restart residuals. At
+# krylov=30, maxiter=300 pyitensor runs 9 cycles of 30 and one of 20 (301
+# products) and Julia the 9 cycles of 30 (272), since a tenth would cost
+# 302. At maxiter <= krylov + 1 both run one cycle of maxiter - 1
+# vectors.
+function implicit_gmres_budget(krylov, maxiter)
+	krylovdim = min(krylov, maxiter - 1)
+	return krylovdim, fld(maxiter, krylovdim + 1)
+end
+
+
 # (a0 + c0 heff) theta = rhs by restarted GMRES from theta0, stopped at
 # ||rhs - A theta|| <= tol ||rhs||. As in pyitensor's gmres, krylov is the
 # Krylov dimension of one restart and maxiter counts matrix-vector
-# products; KrylovKit's maxiter counts restarts, each of one residual and
-# up to krylov products.
+# products; implicit_gmres_budget maps the two onto KrylovKit. At
+# maxiter = 1 pyitensor makes no update, so theta0 comes back as it is.
 function implicit_local_solve(heff, rhs, theta0, a0, c0, tol, krylov, maxiter)
 	bn = norm(rhs)
 	bn == 0.0 && return 0.0 * rhs
-	restarts = max(1, cld(maxiter - 1, krylov + 1))
+	maxiter <= 1 && return theta0
+	krylovdim, restarts = implicit_gmres_budget(krylov, maxiter)
 	theta, _ = _IMPLICIT_KK.linsolve(heff, rhs, theta0, a0, c0;
-		ishermitian = false, krylovdim = krylov, maxiter = restarts,
+		ishermitian = false, krylovdim = krylovdim, maxiter = restarts,
 		rtol = tol, atol = 0.0, verbosity = 0)
 	return theta
 end

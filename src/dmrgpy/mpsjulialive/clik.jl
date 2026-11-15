@@ -22,13 +22,20 @@ end
 
 
 # The global subspace expansion before the first steps of each branch, the
-# counterpart of v3's Chain::global_subspace_expand(G,psi,order,cutoff,
-# maxdim) and of pyitensor/gse.py: the order-1 Krylov vectors G psi,
-# G^2 psi, ..., each applied at maxdim and cutoff and normalized, enter
-# ITensorMPS's own expand(...; alg="orthogonalize"), and a bond that comes
-# out above maxdim is cut back to maxdim with no cutoff, as v3 does. A
-# cutoff there would drop exactly the directions the expansion added,
-# since they carry zero weight in psi (v3's note in chain_session.h).
+# counterpart of pyitensor/gse.py, the reference, and of v3's
+# Chain::global_subspace_expand(G,psi,order,cutoff,maxdim): the order-1
+# Krylov vectors G psi, G^2 psi, ..., each applied at maxdim and at the
+# chain cutoff and normalized, enter ITensorMPS's own
+# expand(...; alg="orthogonalize"), and a bond that comes out above maxdim
+# is cut back to maxdim with no cutoff, as v3 does. A cutoff there would
+# drop exactly the directions the expansion added, since they carry zero
+# weight in psi (v3's note in chain_session.h).
+#
+# The cutoff of the Krylov vectors follows "python", where gse.py applies
+# them with applyMPO(H, cur, cutoff=cutoff, maxdim=maxdim), at the chain
+# cutoff that clik.py hands over. v3 differs: with maxdim > 0 its addBasis
+# gives applyMPO only MaxDim (TDVP/basisextension.h), so each vector is
+# cut at ITensor's default cutoff of 1e-13 for the DensityMatrix method.
 #
 # Not tdvp.jl's gse_expand, which serves tevol_method="TDVP_GSE": it hands
 # its order to expand(...; alg="global_krylov") as krylovdim, the number
