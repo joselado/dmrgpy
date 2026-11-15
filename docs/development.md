@@ -3650,7 +3650,14 @@ inside a degenerate Schmidt multiplet, the rule for SU(2) states, can pick
 a different member than the SVD sweep, which moves a number at the
 truncation level. `pyitensor.mpsalgebra.APPLY_METHOD = "densitymatrix"`
 switches every session call; `tests/test_pyitensor_apply_densitymatrix.py`
-pins the agreement.
+pins the agreement. The MPS sum has the same opt-in route since the same
+night (`sum(..., method="densitymatrix")`, `SUM_METHOD`): unlike
+ITensorMPS.jl it keeps the cross terms of the operands and sweeps from the
+left, so it gives the truncation of the exact route, and two random
+30-site MPS summed to bond 60 take 0.13 s against 0.47 s, equal to 3e-14
+(`tests/test_pyitensor_sum_densitymatrix.py`). Its writer found by
+reading that `sum_many`'s exact route keeps only the last operand on a
+one-site chain; that is not changed yet.
 
 **TDVP's gauge precondition (`tdvp.py::tdvp_step`).** Each half-sweep of
 two-site TDVP builds its local generator from plain
