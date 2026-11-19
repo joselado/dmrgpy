@@ -2064,3 +2064,22 @@ NH-DMRG's. The level of smallest real part is taken as it comes, the
 smallest real part of the accepted Ritz values. `nh_gs_method="nhdmrg"`
 gives the NH-DMRG route of before.
 
+
+## The 2026-11-18 tip vertex on a chain with several baths
+
+`ysr.tunneling_operators` and `ysr.get_stm_spectrum` with `imp=` and no
+`site=` on a chain with several baths (`fc.bath_sites`, which
+`ysrtk/surrogate.surrogate_kondo_chain` stores) took the electron at the
+first site of the first spin's bath, whatever spin was under the tip. They
+now take the first site of the bath of the tip spin. The values of
+`surrogate.get_stm_spectrum` do not change, since it always passed
+`site=`; only a direct call with `imp=` of another spin moves. Chains with
+one bath, `kondo_chain`, `island_chain` and `spin_chain_on_metal` with an
+int `site`, do not move.
+A list `imp=` (several sites at once) on such a chain with no `site=`
+now raises, since no single bath is under the tip; it took the first
+spin's bath before. `nrgmps.twin_chain` passes `fc.Upen` to the twins of
+a Kondo chain too, as it does for an Anderson chain; before, a chain
+built with its own `Upen` got twins with the default one, which leaves
+the states of one electron per spin site, and so the spectrum, as they
+were.

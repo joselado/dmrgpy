@@ -98,14 +98,32 @@ def head_state(fc, Nf=None, Sz=None):
     field, fc.B_imp != 0). On itensor_version=3 the solve starts from the
     warm solve of ysr._seed_impurity_charge, since no term moves charge
     onto a spin site; every solved state is checked to hold one electron
-    on every spin site. Returns (chain, E0)."""
+    on every charge-frozen spin site (fc.penalized when the chain has an
+    Anderson level, else all of them).
+
+    With an Anderson level (ysr.anderson_spin_chain) the charge of the
+    ground state need not be half filling away from ed = -U/2, so
+    Nf="auto", the default there, solves Nf = n0 - 1, n0 and n0 + 1
+    (n0 the number of sites) and keeps the lowest. Returns (chain, E0)."""
     from . import ysr
     if fc.itensor_version not in ("python", 3):
         raise NotImplementedError("nrgmps: itensor_version=\"python\" or 3, "
                                   "got %r" % (fc.itensor_version,))
     ns, wil = _layout(fc)
     if Nf is None:
-        Nf = ns + len(wil)
+        Nf = "auto" if getattr(fc, "anderson", None) else ns + len(wil)
+    if isinstance(Nf, str):
+        if Nf != "auto":
+            raise ValueError("Nf must be an integer or \"auto\", got %r"
+                             % (Nf,))
+        n0, best = ns + len(wil), None
+        for nf in (n0 - 1, n0, n0 + 1):
+            if not isinstance(Sz, (str, type(None))) and (nf - Sz) % 2:
+                continue # a fixed 2Sz takes the charges of its parity only
+            c, e = head_state(fc, Nf=nf, Sz=Sz)
+            if best is None or e < best[1] - 1e-12*max(1.0, abs(e)):
+                best = (c, e)
+        return best
     if Sz is None:
         Sz = "auto" if getattr(fc, "B_imp", 0.0) != 0.0 else Nf % 2
     if isinstance(Sz, str):
@@ -125,10 +143,12 @@ def head_state(fc, Nf=None, Sz=None):
                          % (Nf, Sz))
     c = copy.deepcopy(fc)
     c.set_conserved_sector(Nf=int(Nf), Sz=int(Sz))
-    if c.itensor_version == 3:
+    if c.itensor_version == 3 or getattr(c, "anderson", None):
+        # with a level the sectors Nf = n0 +- 1 are solved too, whose
+        # start can leave a frozen spin empty on "python" as well
         ysr._seed_impurity_charge(c, ns)
     e0 = float(np.real(c.gs_energy()))
-    ysr._check_impurity_charge(c, ns, "DMRG")
+    ysr._check_impurity_charge(c, getattr(c, "penalized", ns), "DMRG")
     c.promote_to_dense()
     c.head_sector = dict(Nf=int(Nf), Sz=int(Sz))
     return c, e0
@@ -522,7 +542,7 @@ def spin_flip_matrix(fc, export):
 
 
 def handover_shell(fc, k0, U=0.0, imp=None, export=None, pad_bonds=None,
-                   Lambda=None, symmetric=False):
+                   Lambda=None, symmetric=False, q=0.0):
     """The StartShell of nrgspectral at the Wilson site k0 of the DMRG
     state of fc: the block Hamiltonian, the labels, f_{p s} and the tip
     vertices X^dag_sigma (ysr.tunneling_operators with U and imp, the
@@ -563,7 +583,7 @@ def handover_shell(fc, k0, U=0.0, imp=None, export=None, pad_bonds=None,
     H = rot(block_hamiltonian(fc, p))
     c = {1: rot(fc.Cup[p]), -1: rot(fc.Cdn[p])}
     where = {} if imp is None else {"imp": imp}
-    Xs = tunneling_operators(fc, U=U, site=ns, **where)
+    Xs = tunneling_operators(fc, U=U, q=q, site=ns, **where)
     ops = {"up": rot(Xs[0]), "dn": rot(Xs[1])}
     anti = {}
     for name, X in zip(("up", "dn"), Xs):
@@ -696,9 +716,11 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
                     nkry=90, w_join=None, stop_tol=1e-4, stop_extra=6,
                     wilson_tail=None, task=True, Nf=None, Sz=None,
                     window=None, solved=False, pad_bonds=None, symmetric="auto",
-                    flip=None, join="fade"):
+                    flip=None, join="fade", q=0.0):
     """Poles of the STM spectrum A(w) of ysr.py on the chain fc (a
-    ysr.spin_chain_on_metal, or a spin-1/2 ysr.kondo_chain at Delta = 0),
+    ysr.spin_chain_on_metal, or a spin-1/2 ysr.kondo_chain at Delta = 0,
+    or a ysr.anderson_spin_chain with one level, whose tip vertex is
+    d^dag_s + q f^dag_{0 s}),
     with a DMRG head and an NRG tail (docs/nrg_mps_kondo_plan.md, N3
     and N4).
 
@@ -746,6 +768,7 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
                          % (symmetric,))
     if join not in JOINS:
         raise ValueError("join must be one of %s, got %r" % (JOINS, join))
+    tunneling_operators(fc, U=U, q=q, site=_layout(fc)[0]) # U, q before any solve
     if solved:
         c, e0 = fc, float(np.real(fc.gs_energy()))
     else:
@@ -771,7 +794,7 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     wp = getattr(c, "wilson_params", None) or {}
     Lambda = wp.get("Lambda", abs(t[0]/t[2]) if len(t) > 2 else 4.0)
     sh, ex = handover_shell(c, k0, U=U, Lambda=Lambda, pad_bonds=pad_bonds,
-                            symmetric=symmetric)
+                            symmetric=symmetric, q=q)
     omega_k0 = sh.omega
     lost = [k for k in lost_wilson_bonds(c) if k < k0]
     if lost:
@@ -804,7 +827,7 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
         sh, eps[k0+1:], t[k0:], keep=keep, T=T, flip=flip,
         stop_tol=stop_tol if T == 0.0 else None, stop_extra=stop_extra,
         stop_omega=T/100.0 if T > 0.0 else None)
-    Xs = tunneling_operators(c, U=U, site=len(c.impurity))
+    Xs = tunneling_operators(c, U=U, q=q, site=len(c.impurity))
     sum_rule = 0.0
     for X in Xs:
         Xd = X.get_dagger()
@@ -814,7 +837,7 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     om, wt = [r.omega[sel]], [r.weight[sel]*f[sel]]
     p = None
     if task:
-        p = head_task_poles(c, U=U, nkry=nkry)
+        p = head_task_poles(c, U=U, nkry=nkry, q=q)
         g = 1.0 - join_share(p["omega"], w_join, window, join)
         selp = g > 0.0
         om.append(p["omega"][selp])
@@ -889,18 +912,26 @@ def twin_chain(fc, z):
     ysr.spin_chain_on_metal with fc's spins, Js, J_chain, B_imp, tip_spin,
     Wilson length and mesh (fc.wilson_params), and fc's backend, maxm,
     nsweeps, cutoff and noise. A spin-1/2 kondo_chain becomes the
-    spin_chain_on_metal of one spin, the same Hamiltonian."""
-    from .ysr import spin_chain_on_metal
+    spin_chain_on_metal of one spin, the same Hamiltonian, and an
+    anderson_spin_chain the anderson_spin_chain with fc's ed, U and tD."""
+    from .ysr import spin_chain_on_metal, anderson_spin_chain
     ns, wil = _layout(fc)
     wp = getattr(fc, "wilson_params", None)
     if wp is None:
         raise ValueError("the chain was built with wilson= by hand, so its "
                          "twists cannot be rebuilt; use nz=1")
-    c = spin_chain_on_metal(ns, len(wil), site=getattr(fc, "tip_spin", ns - 1),
-                            Js=getattr(fc, "Js", 0.0), JK=fc.J_chain,
-                            Lambda=wp["Lambda"], D=wp["D"],
-                            B=getattr(fc, "B_imp", 0.0), z=z, mesh=wp["mesh"],
-                            itensor_version=fc.itensor_version)
+    common = dict(Js=getattr(fc, "Js", 0.0), Lambda=wp["Lambda"], D=wp["D"],
+                  B=getattr(fc, "B_imp", 0.0), z=z, mesh=wp["mesh"],
+                  itensor_version=fc.itensor_version)
+    if getattr(fc, "anderson", None):
+        c = anderson_spin_chain(ns, len(wil), site=fc.contacts[0],
+                                ed=fc.ed[0], U=fc.U_d[0], tD=fc.tD[0],
+                                Upen=fc.Upen, **common)
+    else:
+        c = spin_chain_on_metal(ns, len(wil),
+                                site=getattr(fc, "tip_spin", ns - 1),
+                                JK=fc.J_chain, Upen=getattr(fc, "Upen", None),
+                                **common)
     for key in ("maxm", "nsweeps", "cutoff", "noise"):
         if hasattr(fc, key):
             setattr(c, key, getattr(fc, key))
@@ -910,10 +941,13 @@ def twin_chain(fc, z):
 def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
                      T=0.0, keep=800, m=4, k0=None, n_tail=None, nkry=90,
                      stop_tol=1e-4, stop_extra=6, tip_fermi=True,
-                     return_poles=False, symmetric="auto", join="fade"):
+                     return_poles=False, symmetric="auto", join="fade",
+                     q=0.0):
     """ysr.get_stm_spectrum(fc, es, submode="NRG"): A(w) at the energies es,
     in the units of the TASK route (the chain's own normalization;
-    multiply by fc.dos_factor for the continuum), averaged over nz twists
+    multiply by fc.dos_factor for the continuum, for the composite vertex
+    of a Kondo spin: the spectral function of an Anderson level needs no
+    factor), averaged over nz twists
     of the mesh, z = fc's twist + k/nz (twin_chain builds the others from
     the parameters fc stores, with fc's solver settings).
 
@@ -939,6 +973,13 @@ def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
                          % (head,))
     if getattr(fc, "Delta_sc", 0.0) != 0.0:
         raise ValueError("submode=\"NRG\": a normal metal only (Delta = 0)")
+    if q != 0.0 and not getattr(fc, "anderson", None):
+        raise ValueError("q= is the direct tunneling of a tip on an Anderson "
+                         "level; on a Kondo spin the direct path is U=")
+    if head == "exact" and getattr(fc, "anderson", None):
+        raise NotImplementedError("head=\"exact\" builds a start shell of "
+                                  "spins only; an Anderson level takes "
+                                  "head=\"dmrg\"")
     if b is None:
         b = 0.8 if nz == 1 else (0.6 if nz < 4 else 0.4)
     ns, wil = _layout(fc)
@@ -964,7 +1005,7 @@ def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
             r = head_tail_poles(c, m=m, k0=k0, n_tail=n_tail, keep=keep, T=T,
                                 U=U, nkry=nkry, stop_tol=stop_tol,
                                 stop_extra=stop_extra, symmetric=symmetric,
-                                join=join)
+                                join=join, q=q)
             scales.append(r.omega_N)
         results.append(r)
     floor = nrgspectral.FLOOR*max(scales)
@@ -999,7 +1040,7 @@ def _session_arrays(c, ops):
     return Ms, Ws, Wo
 
 
-def head_task_poles(c, U=0.0, nkry=90):
+def head_task_poles(c, U=0.0, nkry=90, q=0.0):
     """TASK poles of the STM spectrum of the head state c (a solved chain,
     one of definite parity), from one block Krylov space
     (pyitensor.task.block_krylov, nkry blocks) started from P X^dag_sigma
@@ -1013,7 +1054,7 @@ def head_task_poles(c, U=0.0, nkry=90):
     that task.projected_spectrum also builds."""
     from .ysr import tunneling_operators
     from .pyitensor import task, backend
-    Xd = tunneling_operators(c, U=U, site=len(c.impurity))
+    Xd = tunneling_operators(c, U=U, q=q, site=len(c.impurity))
     X = [x.get_dagger() for x in Xd]
     Ms, Ws, Wo = _session_arrays(c, Xd + X)
     ts = task.TangentSpace(Ms, Ws)

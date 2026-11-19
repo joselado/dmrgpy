@@ -21,3 +21,8 @@ public API.
   from the exact first shell or from the bond basis of a DMRG head, in
   `nrgspectral.py` and `nrgmps.py`
   (`ysr.get_stm_spectrum(submode="NRG")`).
+- `chains_on_metal/`: several spins of a chain on a metal, each with its
+  own Wilson chain (`ysr.spin_chain_on_metal(site=[...])`), and a chain
+  whose spin on the metal is an Anderson level
+  (`ysr.anderson_spin_chain`), with the site orders, the TASK route on
+  several baths and the NRG route on a level.

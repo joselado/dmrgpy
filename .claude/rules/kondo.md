@@ -710,6 +710,66 @@ screened case (spin 2 of 7) gave the same ranking. Delta != 0 is not
 offered. `docs/development.md`
 4.8i, `tests/test_ysr_spin_chain_on_metal.py`.
 
+**Several spins on the metal, and an Anderson level (2026-11-18)**,
+`spin_chain_on_metal(ns, n, site=[...])` and `ysr.anderson_spin_chain`,
+both built by `ysr._chain_on_metal`; the record is
+`docs/new_methods/chains_on_metal/README.md`, the architecture
+`docs/development.md` 4.8k. They came from the author's question whether
+Jacob's OCA could go to tensor networks; the answer, checked by Fable,
+was no (composite OCA is not size consistent in the number of contacted
+sites), and these two are the MPS routes asked for instead. Rules:
+(1) An int `site` keeps the old `spin_chain_on_metal` code path, term for
+term; only a list goes through `_chain_on_metal`. Do not route the int
+through the new builder. (2) Every spin of the list has its OWN Wilson
+chain (independent baths); a common metal is not in the model.
+(3) The default order for several chains is `"sides"`, Fable's pick of
+2026-11-18 after the measurement (README section 2): lowest at JK = 0.3
+with 2, 3 and 4 chains, exact at JK = 0, where `"comb"` stalls (0.177
+and 0.36 above the exact energy with 3 and 4 chains, a stall a maxm
+sweep does not show). Do NOT make comb the default on its JK = 1 lead;
+an explicit comb with a contact of zero coupling warns. (4) TASK on
+several Kondo baths: the tangent space holds the tip vertex only in the
+linear order with the tip spin first (its chain right after a block of
+spins and nothing else). Missing weight of X^dag|GS> on 2 spins at maxm
+128 with n Wilson sites per chain: sides 1e-3, 0.62 and 0.95 at n = 9,
+15 and 21, linear tip-first 0 up to 15; on short chains at saturation
+the other tips are 3e-2 to 1e-1 of the peak off ED. So plain TASK there
+RAISES unless linear tip-first (Fable's decision of 2026-11-18, the
+author's named reviewer for the night), linear tip-first warns until
+measured at n = 21, on 5+ spins and against the variational CVM, and
+with `expand_bonds` any order runs and raises above `ysr.MISSING_RAISE`
+= 0.1 of the sum rule (read from `return_poles` of the same call).
+Anderson levels warn only. Do NOT turn the raise back into a warning:
+sides is wrong at both ends (9.6e-2 at n = 3 with nothing missing, 95%
+missing at n = 21). The expansion stays opt-in (0.018 left at n = 21,
+and above the tangent-space cap at maxm 256 on 3 and 4 baths). The
+default CG correction vector is not a reference on these vertices
+(0.115 of the peak off ED on 8 sites at saturation); use
+`cvm_solver="variational"` (6e-9). The linear order stalls at Js = 0
+(1.4e-2 above sides in energy on the dimer: the second spin's singlet
+has to be built across the first chain), with the spectrum under the
+first spin unaffected; on 8 sites against exact Lanczos both TASK
+routes converge with maxm (README section 5). On the 44-site dimer
+(2 x 21 Wilson sites) linear tip-first holds m0, m1, m2 of the TASK
+poles to all digits and sides with 8/3 misses 1.7% of each; the
+zero-bias value and the weight below |eV| = 0.35 agree between routes
+and maxm 64 to 256 to about 10%, while the lines near the band edge move
+by a third with maxm in both. Do not quote multi-bath TASK line heights
+there without a maxm sweep. (5) `_default_site` takes the chain of
+the tip spin when there are several, which also fixed
+`get_stm_spectrum(imp=)` without `site=` on a surrogate chain of several
+spins (it took the first spin's bath). (6) On an Anderson level the
+vertex is `d^dag + q f^dag_0` (`q=`), `U=` raises there and `q=` raises on
+a Kondo spin. At U >> Gamma it is the Kondo spin with JK = 8 tD^2/U and
+dI/dV = 64 (tD/U)^2 times the composite-vertex one, approached as 1/U
+(measured on ED, not taken from memory). (7) The NRG route takes one
+level in the linear order: `head_state` scans Nf = n0-1, n0, n0+1
+(`Nf="auto"`), checks the charge of `fc.penalized` only and seeds the
+charge on every backend when there is a level (the "python" sector start
+left the frozen spin empty at Nf = n0 +- 1); `head="exact"` raises. The
+Friedel sum rule pi Gamma rho_d(0) = 1 holds to 1e-3 with two meshes
+(U = 0.5, Gamma = 0.05, Lambda = 4). `tests/test_ysr_chains_on_metal.py`.
+
 **The NRG route to the STM spectrum (2026-11-13)**, `nrgspectral.py`
 (the complete-basis NRG with the full density matrix, and the exact first
 shell of up to about six spins) and `nrgmps.py` (the shells read off a

@@ -276,6 +276,12 @@ only chains, so this is a separate project with its own plan.
 - N5. Only if N2 fails: several states in one MPS and variational sweeps.
 - N6. Two and three channels on interleaved chains. The fork network is not
   part of this plan.
+  Status (2026-11-18): the DMRG side has several channels, one independent
+  Wilson chain per spin (`spin_chain_on_metal(site=[...])`, orders
+  linear, comb and sides, measured in
+  `docs/new_methods/chains_on_metal/README.md`), with the spectrum by TASK
+  (linear order with the tip spin first, or bond expansion) or by the
+  variational correction vector. The NRG tail still takes one chain.
 - N7. Public entry (`get_stm_spectrum(..., submode="NRG")` or its own
   function), a page in `docs/guide/`, a folder in `docs/new_methods/`,
   examples with plots.

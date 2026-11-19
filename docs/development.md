@@ -7570,6 +7570,76 @@ The measurements behind every default are in
 `docs/new_methods/kondo_nrg_mps/README.md` and the rules in
 `.claude/rules/kondo.md`.
 
+### 4.8k Several spins on the metal, and an Anderson level (`ysr._chain_on_metal`)
+
+`spin_chain_on_metal(ns, n, site=[...])` with a list of spins and
+`anderson_spin_chain(ns, n, site=...)` share one builder,
+`ysr._chain_on_metal`. With `site` an int, `spin_chain_on_metal` keeps its
+old code path term for term, so nothing of 4.8i moves. With a list, every
+spin of the list has its own Wilson chain (independent baths), Kondo
+coupled by `JK` (a number or one per spin) or, in `anderson_spin_chain`,
+an Anderson level that hops onto it by `tD`, with `ed` and `U` on the
+level and no charge penalty there; the other spins stay penalized. The
+positions are no longer the labels: `fc.spin_sites[i]` is the site of
+spin i, `fc.contacts` the spins of the list, `fc.impurities` their sites
+and `fc.bath_sites` their chains (the names of `ysrtk/surrogate.py`),
+`fc.channels = fc.bath_sites`, `fc.penalized` the charge-frozen spins and
+`fc.anderson` the levels. `fc.wilson` is set only with one chain, which
+is what `nrgmps._layout` reads, so the NRG route refuses several chains
+through its own check and `ysr.get_stm_spectrum` raises before it.
+
+`_metal_layout` holds the orders: `"linear"` (all chains after all
+spins), `"comb"` (each chain after its spin, as `surrogate.py`) and
+`"sides"` (the chains of each half of the chain stacked on its end,
+reversed on the left). The default for several chains is `"sides"`
+(`ysr.METAL_ORDER`), measured in section 2 of
+`docs/new_methods/chains_on_metal/README.md`: at JK = 0.3 it is the
+lowest energy at maxm 64 and 128 with 2, 3 and 4 chains, and at JK = 0
+it lands on the exact energy, where comb stalled 0.177 and 0.36 above it
+(two-site DMRG does not build a spin bond that jumps an uncoupled chain);
+comb led only at JK = 1 with 3 and 4 chains. An explicit `order="comb"`
+with a contact of zero coupling warns.
+
+The tip. `_default_site(fc, site, imp)` takes the first site of the chain
+of the tip spin when the chain has several (`fc.bath_sites`) and raises
+for a spin with none; with one chain it is `channels[0][0]` as before, so
+`island_chain`, `kondo_chain` and the single-spin chain do not move. This
+also fixes `ysr.get_stm_spectrum(fc, es, imp=fc.impurities[k])` on a
+surrogate chain with several spins and no `site=`, which took the first
+spin's bath for every spin (`surrogate.get_stm_spectrum` always passed
+`site=` and was right). On a site of `fc.anderson` the vertex is
+`d^dag_s + q f^dag_{0 s}` (`q=` in `tunneling_operators` and
+`get_stm_spectrum`), and `U=` raises there, as `q=` does on a Kondo spin.
+
+TASK with several chains. Each chain keeps its own charge, so the
+Schmidt basis of a block holding a whole chain has that charge only, and
+the one-site tangent space cannot hold "an electron added to the chain
+and its spin flipped" across such a block. Only the linear order with
+the tip spin first puts the tip's chain right after a block of spins and
+nothing else; there nothing of X^dag|GS> is missing (up to 15 Wilson
+sites measured), while sides misses 62% and 95% of it at 15 and 21.
+`get_stm_spectrum` on a chain of `_chain_on_metal` with several Kondo
+chains (`fc.contacts`, so the surrogate BCS baths are not concerned):
+plain TASK raises before any solve unless `fc.order == "linear"` and the
+tip is `fc.impurities[0]`, linear tip-first warns, and with
+`expand_bonds` the call runs in any order but reads the missing weight
+of every vertex from the same call (`return_poles=True,
+variance=False`) and raises above `MISSING_RAISE` = 0.1 of the sum rule.
+Levels (`fc.anderson`) warn only. The J = 0 warning, which recommends 4
+and 2, is not given on several chains. `tunneling_operators` refuses an
+`imp` that is not in `fc.spin_sites`, and `_default_site` a list `imp`
+when there are several chains.
+
+The NRG route takes one Anderson level in the linear order:
+`nrgmps.head_state` solves Nf = n0-1, n0 and n0+1 (`Nf="auto"`, the default
+with a level, since away from ed = -U/2 the ground state need not be at
+half filling) and checks the charge of `fc.penalized` only, `q` goes
+through `handover_shell`, `head_tail_poles`, `head_task_poles` and
+`get_stm_spectrum`, `twin_chain` rebuilds an `anderson_spin_chain`, and
+`head="exact"` raises, since `spin_cluster_shell` holds spins only. The
+measurements are in `docs/new_methods/chains_on_metal/README.md` and the
+tests in `tests/test_ysr_chains_on_metal.py`.
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,

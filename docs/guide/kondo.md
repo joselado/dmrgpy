@@ -1281,6 +1281,108 @@ last hopping of the chain, `fc.t_last`, is its energy resolution.
 
 The example is `examples/kondo/spin_chain_on_metal_site_resolved`.
 
+### Several spins on the metal
+
+When several spins of the chain touch the metal, each of them is Kondo
+coupled to the first site of its own Wilson chain,
+
+$$
+H = J_s \sum_{i} \mathbf{S}_i\cdot\mathbf{S}_{i+1} + \sum_{j} J_K\, \mathbf{S}_{j}\cdot\mathbf{s}^{(j)}_{0} + \sum_j H_{\text{metal}}^{(j)},
+$$
+
+with $j$ running over the spins on the metal. The metals of different
+spins are independent, which is the case of spins far apart on the scale
+of the Fermi wavelength. The tip on spin $j$ puts its electron into the
+metal of that spin. For a dimer with $J_s$ above the Kondo scale the
+ground state is a singlet, and the tip excites the triplet: dI/dV has two
+steps at $eV=\pm J_s$, which is how the exchange of a spin dimer is
+measured with STM.
+
+```python
+fc = ysr.spin_chain_on_metal(2, 5, site=[0, 1], Js=0.4, JK=0.4) # each spin on its own metal
+fc.maxm, fc.nsweeps = 64, 16
+es = np.linspace(-1.0, 1.0, 201)
+(e, didv) = ysr.get_stm_spectrum(fc, es, delta=0.03, imp=fc.impurities[0],
+                                 expand_bonds=8, expand_rounds=3) # tip on spin 0
+print(didv[100]) # 0.135 at zero bias, and 0.579 with Js=0
+```
+
+- `site`: the list of the spins on the metal.
+- `JK`: a number, or one value per spin of `site`.
+- `order`: where the Wilson chains go in the MPS. `"sides"` (default)
+  puts them on the two ends of the chain and gives the best energies,
+  `"comb"` each one after its spin, `"linear"` all after the spins, in
+  the order of `site`. The order changes the bond dimension a result
+  needs, not the result.
+- `imp` (in `get_stm_spectrum`): the site of the spin under the tip, one
+  of `fc.impurities`; `fc.spin_sites[i]` is the site of spin `i`.
+- The STM spectrum by TASK needs the tip spin first in `site` and
+  `order="linear"`: each metal keeps its own charge, and in any other
+  layout the tangent space of TASK misses most of the spectrum, so
+  `get_stm_spectrum` raises there. For another tip, build the chain
+  again with that spin first.
+- `expand_bonds`, `expand_rounds` (in `get_stm_spectrum`): the other
+  route, in any order: `expand_bonds=8, expand_rounds=3` adds most of
+  the missing directions, and the call raises when more than a tenth of
+  the weight is still missing. Check the result against a larger value
+  or against `submode="CVM"` with `fc.cvm_solver="variational"`.
+
+The `submode="NRG"` route takes one metal only.
+The example is `examples/kondo/spin_dimer_two_metals`.
+
+### An Anderson level in the chain
+
+The spin under the tip can also be an orbital with a charge, an Anderson
+level: an energy $\epsilon_d$, a repulsion $U$ and a hopping $t_D$ onto
+the metal,
+
+$$
+H_d = \epsilon_d N_d + U n_{d\uparrow} n_{d\downarrow} + t_D \sum_s \left(d^\dagger_s f_{0s} + \mathrm{h.c.}\right),
+$$
+
+with the hybridization $\Gamma = \pi\rho t_D^2$. The exchange $J_s$ with
+the neighbouring spins acts on the spin of the level. The tip puts its
+electron on the level, so dI/dV is the spectral function of the level:
+the two Hubbard peaks near $\epsilon_d$ and $\epsilon_d+U$, the Kondo
+resonance, and the spin excitations of the chain. Away from
+$\epsilon_d=-U/2$, adding and removing an electron cost different
+energies, and the spectrum is not symmetric in the bias. At
+$U\gg\Gamma$ the level is a Kondo spin with $J_K = 8t_D^2/U$ at
+$\epsilon_d=-U/2$, and the chain becomes `spin_chain_on_metal`.
+
+```python
+fc = ysr.anderson_spin_chain(3, 3, Js=0.3, ed=-0.4, U=1.6, tD=0.3) # the last spin is a level
+fc.maxm, fc.nsweeps = 64, 16
+es = np.linspace(-1.5, 1.5, 151)
+(e, didv) = ysr.get_stm_spectrum(fc, es, delta=0.04)
+print(es[:75][np.argmax(didv[:75])], es[75:][np.argmax(didv[75:])]) # -0.56 and 0.10
+```
+
+The NRG route resolves the Kondo resonance of the level, at any
+temperature. For one level at $\epsilon_d=-U/2$ the Friedel sum rule
+fixes its height, $\pi\Gamma\rho_d(0)=1$ per spin:
+
+```python
+Gamma = 0.05 # the hybridization, in units of the half-bandwidth
+tD = np.sqrt(2*Gamma/np.pi)*np.sqrt(ysr.lambda_factor(4.0)) # tD on the mesh
+fc = ysr.anderson_spin_chain(1, 12, U=0.5, tD=tD, Lambda=4.0, itensor_version=3)
+fc.maxm, fc.nsweeps, fc.cutoff = 160, 30, 1e-12
+(e, didv) = ysr.get_stm_spectrum(fc, np.array([0.0]), submode="NRG", nz=2)
+print(np.pi*Gamma*didv/2) # 1.000
+```
+
+- `ed`, `U`, `tD`: the level; `ed` defaults to `-U/2`. On the default
+  mesh, `tD*np.sqrt(ysr.lambda_factor(Lambda))` stands for the
+  continuum $t_D$.
+- `site`: the spin that is a level; a list makes several levels, each on
+  its own metal.
+- `q` (in `get_stm_spectrum`): the direct tunneling into the metal
+  relative to the level, `d^dag + q f^dag_0`, which gives Fano line
+  shapes. 0 by default.
+- With `submode="NRG"`, `head="dmrg"` only.
+
+The example is `examples/kondo/anderson_level_on_spin_chain`.
+
 ## The Kondo resonance by NRG
 
 TASK resolves the spectrum of a Wilson chain only down to about a third

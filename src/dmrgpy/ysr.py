@@ -72,7 +72,12 @@ with no island: ns spins 1/2 and the Wilson chain of the metal, Kondo
 coupled to any one spin of the chain, the one under the tip. The Wilson
 chain comes after all the spins also when that spin is in the middle, so
 the Kondo term is then long-range (docs/development.md 4.8i says why this
-order and not one that alternates the spins with the Wilson sites).
+order and not one that alternates the spins with the Wilson sites). With
+a list of spins every spin of the list has a Wilson chain of its own,
+independent baths, placed by order= (_chain_on_metal), and
+anderson_spin_chain makes the spins of the list Anderson levels that
+hop onto their metal instead of Kondo spins, with the level's own
+d^dag as the tip vertex.
 
 The STM spectrum is the composite-operator form of
 docs/kondo_higher_order_plan.md: at lowest order in the tip coupling the
@@ -620,11 +625,13 @@ def island_spin_correlations(fc, mode="DMRG"):
 
 def spin_chain_on_metal(ns, n, site=None, Js=0.5, JK=0.5, Lambda=2.0, D=1.0,
                         B=0.0, z=0.0, Upen=None, mesh="mean", wilson=None,
-                        **kwargs):
+                        order=None, **kwargs):
     """A Heisenberg chain of ns spins 1/2 on a normal metal: the spin
     site (any of 0..ns-1, default the end spin ns-1) is Kondo coupled by
     JK to the first site of a Wilson chain of n sites, the metal under
-    that spin. ns+n native spinful sites (Spinful_Fermionic_Chain_Native):
+    that spin. With site a list of spins, every spin of the list has a
+    Wilson chain of its own, see "Several spins on the metal" below.
+    ns+n native spinful sites (Spinful_Fermionic_Chain_Native):
     spins 0..ns-1, Wilson chain ns..ns+n-1, for every site. With w0 = ns,
 
         H = Js sum_i S_i.S_{i+1} + JK S_site.s_{w0} + B sum_i S^z_i
@@ -678,7 +685,42 @@ def spin_chain_on_metal(ns, n, site=None, Js=0.5, JK=0.5, Lambda=2.0, D=1.0,
     the chain), fc.wilson_chain = (eps, t), fc.wilson_params (Lambda, D,
     z and mesh, None for wilson= by hand), fc.qp_gap (the lowest level
     of the Wilson chain alone, zero for n odd on a symmetric band) and
-    fc.reaches_gap = False."""
+    fc.reaches_gap = False.
+
+    Several spins on the metal. With site a list (or tuple, or array) of
+    spins, each of them has its own Wilson chain of n sites, the same
+    chain for all, and JK is a number or one value per spin of the list.
+    The baths are independent: this is the model of spins far apart on
+    the scale of the Fermi wavelength, where the metal under one spin
+    does not see the other (on a common metal the number of channels is
+    the rank of the coupling matrix instead, Eickhoff and Anders,
+    arXiv:2008.09034). order sets where the chains go: "sides" (the
+    default for several spins) puts the chains of the left half of the
+    chain on its left end, reversed, and those of the right half on its
+    right end, "comb" puts every chain right after its spin, and
+    "linear" all the chains after all the spins, one after the other;
+    see _chain_on_metal for the measurement behind the default.
+    The positions are then no longer the labels: fc.spin_sites[i] is the
+    site of spin i. The chain stores fc.contacts (the spins of the list,
+    in order), fc.impurities (their sites) and fc.bath_sites (their
+    Wilson chains, first site first), the names of
+    ysrtk.surrogate.surrogate_kondo_chain, fc.channels = fc.bath_sites,
+    fc.tip_spin = the site of the first spin of the list, fc.J_chain
+    (one value per chain when there are several), fc.order and
+    fc.anderson = []. get_stm_spectrum(fc, es, imp=fc.impurities[k])
+    puts the tip on spin fc.contacts[k] and takes the electron at the
+    first site of its own chain; a tip on a spin with no chain raises.
+    submode="NRG" takes one chain only. A list of one spin with
+    order="linear" is the chain above, up to the order of the terms."""
+    if np.ndim(site) == 1:
+        return _chain_on_metal(ns, n, site, order, Js=Js, B=B, Lambda=Lambda,
+                               D=D, z=z, Upen=Upen, mesh=mesh, wilson=wilson,
+                               JK=JK, kwargs=kwargs)
+    if order is not None:
+        raise ValueError("order= places several Wilson chains; with one "
+                         "spin on the metal (site an int) the chain always "
+                         "comes after the spins. Pass site as a list for "
+                         "the general layout")
     ns, n = int(ns), int(n)
     if ns < 1 or n < 1:
         raise ValueError("spin_chain_on_metal needs ns >= 1 spins and "
@@ -741,9 +783,281 @@ def spin_chain_on_metal(ns, n, site=None, Js=0.5, JK=0.5, Lambda=2.0, D=1.0,
     return fc
 
 
-def _default_site(fc, site):
+def anderson_spin_chain(ns, n, site=None, Js=0.5, ed=None, U=1.0, tD=0.2,
+                        Lambda=2.0, D=1.0, B=0.0, z=0.0, Upen=None,
+                        mesh="mean", wilson=None, order=None, **kwargs):
+    """A Heisenberg chain of ns spins 1/2 on a normal metal in which the
+    spin site (default the end spin ns-1) is an Anderson level: an
+    orbital d with energy ed, repulsion U and hopping tD onto the first
+    site of a Wilson chain of n sites, the metal under it,
+
+        H = Js sum_i S_i.S_{i+1} + B sum_i S^z_i + Upen sum_{i != d} (N_i - 1)^2
+            + ed N_d + U n_{d up} n_{d dn} + tD sum_s (d^dag_s f_{0 s} + h.c.)
+            + sum_m eps_m N_m + sum_m t_m (f^dag_m f_{m+1} + h.c.),
+
+    with S_d = d^dag (sigma/2) d in the Heisenberg term, so the exchange
+    with the neighbours acts on the singly occupied level and vanishes on
+    the empty and the doubly occupied one. The other spins are charge
+    frozen, as in spin_chain_on_metal. ed defaults to -U/2, the particle
+    hole symmetric point. The hybridization is Gamma = pi rho tD^2 with
+    rho = 1/(2D); on mesh="mean" pass tD*sqrt(lambda_factor(Lambda)) to
+    stand for tD in the continuum (the factor of island_chain's t_c), on
+    mesh="zp" pass it bare. At U >> Gamma the level is a spin 1/2 Kondo
+    coupled to the metal with J = 2 tD^2 (1/|ed| + 1/(ed+U)), 8 tD^2/U at
+    ed = -U/2 (Schrieffer and Wolff), and the chain becomes
+    spin_chain_on_metal with that JK.
+
+    site may be a list: every spin of it is then an Anderson level with
+    its own Wilson chain, and ed, U and tD are numbers or one value per
+    spin of the list; order is as in spin_chain_on_metal. The STM vertex
+    of a tip on an Anderson site is d^dag_s (plus q f^dag_{0 s} for the
+    direct path into the metal, get_stm_spectrum(q=)), so dI/dV is the
+    spectral function of the level summed over spin, the ideal STM limit
+    of Jacob, arXiv:1805.10624. On mesh="mean" pass
+    q*sqrt(lambda_factor(Lambda)) to stand for q in the continuum, as for
+    tD (a bare q acts as q/sqrt(A_Lambda), 7% low at Lambda = 4), and the
+    spectral function of the level needs no fc.dos_factor. Stored on the chain as in
+    spin_chain_on_metal with several spins (fc.spin_sites, fc.contacts,
+    fc.impurities, fc.bath_sites, fc.channels, fc.tip_spin), plus
+    fc.anderson (the sites of the levels), fc.ed, fc.U_d and fc.tD (one
+    value per level), fc.penalized (the charge-frozen spins) and
+    fc.J_chain = None. Extra keywords go to the chain."""
+    return _chain_on_metal(ns, n, ns - 1 if site is None else site, order,
+                           Js=Js, B=B, Lambda=Lambda, D=D, z=z, Upen=Upen,
+                           mesh=mesh, wilson=wilson, kwargs=kwargs,
+                           anderson=dict(ed=ed, U=U, tD=tD))
+
+
+METAL_ORDERS = ("comb", "linear", "sides")
+MISSING_RAISE = 0.1 # TASK on several Kondo baths raises above this missing
+# share of the sum rule (Fable's choice of 2026-11-18, between the 0.02 of
+# expand_bonds=8, expand_rounds=3 and the 0.62 to 0.95 of no expansion)
+METAL_ORDER = "sides" # the default order for several Wilson chains
+
+
+def _metal_contacts(ns, site):
+    """The spins on the metal, as a list of labels in the order given."""
+    out = []
+    for s in np.atleast_1d(site):
+        if s != int(s) or not 0 <= s < ns:
+            raise ValueError("site must be one of the spins 0..%d, got %r"
+                             % (ns - 1, s))
+        out.append(int(s))
+    if len(out) == 0:
+        raise ValueError("site is an empty list: at least one spin must be "
+                         "on the metal")
+    if len(set(out)) != len(out):
+        raise ValueError("site lists a spin twice: %r" % (list(site),))
+    return out
+
+
+def _metal_layout(ns, n, contacts, order):
+    """The site of every spin and the sites of the Wilson chain of every
+    contact (first Wilson site first), for the orders of METAL_ORDERS."""
+    if order == "linear":
+        spins = list(range(ns))
+        baths = [list(range(ns + k*n, ns + (k + 1)*n))
+                 for k in range(len(contacts))]
+        return spins, baths
+    if order == "comb":
+        spins, own, p = [], {}, 0
+        for i in range(ns):
+            spins.append(p)
+            p += 1
+            if i in contacts:
+                own[i] = list(range(p, p + n))
+                p += n
+        return spins, [own[c] for c in contacts]
+    if order == "sides":
+        left = sorted(c for c in contacts if 2*c < ns - 1)
+        right = sorted((c for c in contacts if 2*c > ns - 1), reverse=True)
+        for c in contacts: # the middle spin of an odd chain
+            if 2*c == ns - 1:
+                (left if len(left) < len(right) else right).append(c)
+        nl, own = len(left), {}
+        for k, c in enumerate(left): # depth k from the spins, reversed
+            own[c] = [(nl - k)*n - 1 - m for m in range(n)]
+        spins = [nl*n + i for i in range(ns)]
+        r0 = nl*n + ns
+        for k, c in enumerate(right):
+            own[c] = [r0 + k*n + m for m in range(n)]
+        return spins, [own[c] for c in contacts]
+    raise ValueError("order must be one of %s, got %r" % (METAL_ORDERS, order))
+
+
+def _per_contact(name, x, nc):
+    x = np.asarray(x, dtype=float)
+    if x.ndim > 1 or (x.ndim == 1 and len(x) != nc):
+        raise ValueError("%s must be a number or one value per spin on the "
+                         "metal (%d), got %r" % (name, nc, x))
+    return np.broadcast_to(x, (nc,)).copy()
+
+
+def _chain_on_metal(ns, n, site, order, Js, B, Lambda, D, z, Upen, mesh,
+                    wilson, kwargs, JK=None, anderson=None):
+    """The builder behind spin_chain_on_metal with a list of spins and
+    behind anderson_spin_chain: ns spins 1/2, the spins of site on the
+    metal, each with its own Wilson chain, Kondo coupled by JK or, with
+    anderson = dict(ed, U, tD), an Anderson level hopping onto it.
+
+    Why "sides" for several chains. A cut of the MPS carries the sum of
+    the entropies of what it separates. With the chains one after the
+    other ("linear"), a cut inside one chain also separates every spin
+    from the chains still to come, so its entropy grows with the number
+    of chains. "sides" splits them between the two ends, and "comb" puts
+    every chain right after its spin, where a cut inside a chain carries
+    that chain and one bond of the spin chain, but every Heisenberg bond
+    that jumps a chain costs bond dimension (2 to 4 times for one chain,
+    docs/development.md 4.8i). Measured on 5 spins with 13 Wilson sites
+    per chain (docs/new_methods/chains_on_metal/README.md section 2):
+    at JK = 0.3 sides is the lowest at maxm 64 and 128 with 2, 3 and 4
+    chains, and its largest bond entropy the smallest (1.79 against 2.35
+    for comb with 4 chains); comb leads only at JK = 1 with 3 and 4
+    chains. At JK = 0, where the exact energy is the Heisenberg chain
+    plus free chains, comb stopped 0.177 (3 chains) and 0.36 (4 chains)
+    above it at maxm 128, since two-site DMRG does not build a spin bond
+    that jumps an uncoupled chain, so an explicit order="comb" with a
+    contact of zero coupling warns."""
+    ns, n = int(ns), int(n)
+    if ns < 1 or n < 1:
+        raise ValueError("a chain on a metal needs ns >= 1 spins and n >= 1 "
+                         "Wilson sites")
+    contacts = _metal_contacts(ns, site)
+    nc = len(contacts)
+    if order is None:
+        order = METAL_ORDER if nc > 1 else "linear"
+    if order not in METAL_ORDERS:
+        raise ValueError("order must be one of %s, got %r"
+                         % (METAL_ORDERS, order))
+    if wilson is None:
+        eps, t = wilsonchain.wilson_chain(n, Lambda=Lambda, band=(-D, D),
+                                          z=z, mesh=mesh)
+    else:
+        eps, t = (np.asarray(x, dtype=float) for x in wilson)
+        if len(eps) != n or len(t) != n - 1:
+            raise ValueError("wilson=(eps, t) needs %d energies and %d "
+                             "hoppings" % (n, n - 1))
+    spins, baths = _metal_layout(ns, n, contacts, order)
+    level = [spins[c] for c in contacts]
+    if anderson is None:
+        Jc = _per_contact("JK", JK, nc)
+        andersons, scale = [], np.max(np.abs(Jc))
+    else:
+        Ud = _per_contact("U", anderson["U"], nc)
+        ed = (-Ud/2.0 if anderson["ed"] is None
+              else _per_contact("ed", anderson["ed"], nc))
+        tD = _per_contact("tD", anderson["tD"], nc)
+        andersons = list(level)
+        scale = max(np.max(np.abs(ed)), np.max(np.abs(Ud)),
+                    np.max(np.abs(tD)))
+    weak = Jc if anderson is None else tD
+    if order == "comb" and nc > 1 and np.any(weak == 0.0):
+        import warnings
+        warnings.warn("order=\"comb\" with a spin of zero coupling to its "
+                      "metal: a Heisenberg bond that jumps an uncoupled "
+                      "Wilson chain is not built by two-site DMRG, and the "
+                      "solve can stop far above the ground state (0.36 on "
+                      "4 chains at JK = 0). comb was measured to lead only "
+                      "at strong coupling; use order=\"sides\" (the "
+                      "default)", RuntimeWarning, stacklevel=3)
+    penalized = [p for p in spins if p not in andersons]
+    if Upen is None:
+        Upen = 2.0*(D + scale + abs(Js) + abs(B))
+    fc = fermionchain.Spinful_Fermionic_Chain_Native(ns + n*nc, **kwargs)
+    def dot(a, b):
+        return fc.Sx[a]*fc.Sx[b] + fc.Sy[a]*fc.Sy[b] + fc.Sz[a]*fc.Sz[b]
+    h = 0
+    for i in range(ns - 1): # Heisenberg chain
+        h = h + Js*dot(spins[i], spins[i+1])
+    for k in range(nc): # the coupling of each spin to its own metal
+        p, w0 = level[k], baths[k][0]
+        if anderson is None:
+            h = h + Jc[k]*dot(p, w0)
+        else:
+            if ed[k] != 0.0:
+                h = h + ed[k]*(fc.Nup[p] + fc.Ndn[p])
+            if Ud[k] != 0.0:
+                h = h + Ud[k]*fc.Nup[p]*fc.Ndn[p]
+            h = h + tD[k]*_hop(fc, p, w0)
+    for p in spins:
+        if B != 0.0:
+            h = h + B*fc.Sz[p]
+    for p in penalized: # one electron on every charge-frozen spin
+        q = fc.Nup[p] + fc.Ndn[p] - 1
+        h = h + Upen*q*q
+    for w in baths: # the Wilson chains
+        for m in range(n):
+            if eps[m] != 0.0:
+                h = h + eps[m]*(fc.Nup[w[m]] + fc.Ndn[w[m]])
+            if m < n - 1:
+                h = h + t[m]*_hop(fc, w[m], w[m+1])
+    fc.set_hamiltonian(h)
+    fc.impurity = list(spins)
+    fc.spin_sites = list(spins)
+    fc.penalized = penalized
+    fc.contacts = list(contacts)
+    fc.impurities = list(level)
+    fc.bath_sites = [list(w) for w in baths]
+    fc.channels = fc.bath_sites
+    if nc == 1:
+        fc.wilson = list(baths[0])
+    fc.order = order
+    fc.anderson = andersons
+    fc.spin = fractions.Fraction(ns, 2)
+    fc.tip_spin = level[0]
+    fc.Delta_sc = 0.0
+    fc.Dz = 0.0
+    fc.B_imp = B
+    if anderson is None:
+        fc.J_chain = float(Jc[0]) if nc == 1 else Jc
+    else:
+        fc.J_chain = None
+        fc.ed, fc.U_d, fc.tD = ed, Ud, tD
+    fc.Js = Js
+    fc.Upen = Upen
+    fc.mesh = mesh
+    fc.dos_factor = lambda_factor(Lambda) if mesh == "mean" else 1.0
+    fc.t_last = abs(t[-1]) if n > 1 else D
+    fc.wilson_chain = (np.array(eps), np.array(t))
+    fc.wilson_params = (None if wilson is not None
+                        else dict(Lambda=Lambda, D=D, z=z, mesh=mesh))
+    fc.qp_gap = bath_quasiparticle_gap(eps, t, 0.0)
+    fc.reaches_gap = False
+    return fc
+
+
+def _tip_position(fc, imp):
+    """The site of the tip spin, as impurity_spin resolves imp, or None
+    when it is several sites (a spin S > 1/2 of kondo_chain)."""
+    if imp is None:
+        imp = getattr(fc, "tip_spin", None)
+    if imp is None:
+        imp = getattr(fc, "impurity", 0)
+    imps = list(np.atleast_1d(imp))
+    return int(imps[0]) if len(imps) == 1 else None
+
+
+def _default_site(fc, site, imp=None):
+    """The substrate site under the tip: site when given; with several
+    Wilson chains (fc.bath_sites), the first site of the chain of the tip
+    spin, which must have one; else the first site of fc.channels[0]."""
     if site is not None:
         return site
+    baths = getattr(fc, "bath_sites", None)
+    if baths is not None and len(baths) > 1:
+        p = _tip_position(fc, imp)
+        if p is None:
+            raise ValueError("a tip on several sites at once has no single "
+                             "chain under it on a chain with several Wilson "
+                             "chains; pass site= by hand")
+        imps = [int(a) for a in fc.impurities]
+        if p not in imps:
+            raise ValueError("the tip spin, site %r, has no Wilson chain of "
+                             "its own: with several chains the electron is "
+                             "taken at the first site of the chain of the "
+                             "tip spin, so the tip must be on one of the "
+                             "sites %s (or pass site= by hand)" % (p, imps))
+        return baths[imps.index(p)][0]
     ch = getattr(fc, "channels", None)
     return ch[0][0] if ch else 1
 
@@ -782,9 +1096,12 @@ def _seed_impurity_charge(c, ni, t=0.1):
 
 def _check_impurity_charge(c, ni, mode):
     """Every penalized site 0..ni-1 (the impurity sites of kondo_chain,
-    the spins of island_chain) must hold one electron in a solved state."""
+    the spins of island_chain) must hold one electron in a solved state.
+    ni may also be the list of the penalized sites (the spins of
+    anderson_spin_chain other than the Anderson levels)."""
+    sites = range(ni) if np.ndim(ni) == 0 else ni
     w = sum(np.real(c.vev((c.Nup[a] + c.Ndn[a] - 1)*(c.Nup[a] + c.Ndn[a] - 1),
-                          mode=mode)) for a in range(ni))
+                          mode=mode)) for a in sites)
     if w > 1e-6:
         raise RuntimeError("the solved state has weight %.3e outside one "
             "electron per penalized spin site (an impurity site of "
@@ -792,17 +1109,51 @@ def _check_impurity_charge(c, ni, mode):
             "empty or doubly occupied; raise nsweeps or Upen" % w)
 
 
-def tunneling_operators(fc, imp=None, site=None, U=0.0):
+def tunneling_operators(fc, imp=None, site=None, U=0.0, q=0.0):
     """The two tunneling vertices X_up^dag and X_dn^dag of the module
     docstring, for the impurity spin on imp (a site or a list of sites
     whose spins add up, default fc.tip_spin, else fc.impurity, else site
     0, see impurity_spin) and the substrate site site (default
     fc.channels[0][0], the first site of the Wilson chain of kondo_chain
-    or the first island site of island_chain, else site 1). On an
-    island_chain the electron is taken at that island site for every
-    spin, since it is the only fermionic site a spin touches."""
+    or the first island site of island_chain, else site 1; with several
+    Wilson chains, fc.bath_sites, the first site of the chain of the tip
+    spin). On an island_chain the electron is taken at that island site
+    for every spin, since it is the only fermionic site a spin touches.
+
+    A tip on an Anderson level (a site of fc.anderson, anderson_spin_chain)
+    puts the electron on the level itself, X_s^dag = d^dag_s +
+    q f^dag_{site s}, with q the direct tunneling into the metal relative
+    to the level (0 by default, the ideal STM limit of the level's
+    spectral function; on mesh="mean", q*sqrt(lambda_factor(Lambda))
+    stands for q in the continuum); U belongs to the exchange vertex of a
+    Kondo spin and raises there, as q does on a Kondo spin. On a chain of
+    _chain_on_metal imp must be a spin (fc.spin_sites), since the
+    positions are not the labels in its orders."""
+    p = _tip_position(fc, imp)
+    spins = getattr(fc, "spin_sites", None)
+    if spins is not None:
+        for a in np.atleast_1d(fc.tip_spin if imp is None else imp):
+            if int(a) not in spins:
+                raise ValueError("imp=%r: site %d is not a spin of this "
+                                 "chain, whose spins are on the sites %s "
+                                 "(fc.spin_sites)" % (imp, int(a), spins))
+    if p is not None and p in getattr(fc, "anderson", ()):
+        if U != 0.0:
+            raise ValueError("U is the potential scattering of the exchange "
+                             "vertex of a Kondo spin; a tip on an Anderson "
+                             "level takes q=, the direct tunneling into the "
+                             "metal")
+        X = [fc.Cdagup[p], fc.Cdagdn[p]]
+        if q != 0.0:
+            w0 = _default_site(fc, site, imp)
+            X = [X[0] + q*fc.Cdagup[w0], X[1] + q*fc.Cdagdn[w0]]
+        return X
+    if q != 0.0:
+        raise ValueError("q= is the direct tunneling into the metal of a tip "
+                         "on an Anderson level (anderson_spin_chain); on a "
+                         "Kondo spin the direct path is U=")
     S = impurity_spin(fc, imp)
-    site = _default_site(fc, site)
+    site = _default_site(fc, site, imp)
     Sp, Sm = S[0] + 1j*S[1], S[0] - 1j*S[1]
     cu, cd = fc.Cdagup[site], fc.Cdagdn[site]
     Xup = 0.5*(cu*(U + S[2]) + cd*Sp)
@@ -810,7 +1161,7 @@ def tunneling_operators(fc, imp=None, site=None, U=0.0):
     return [Xup, Xdn]
 
 
-def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0,
+def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0, q=0.0,
                      submode="TASK", mode="DMRG", **kwargs):
     """dI/dV(eV) at the energies es, with a normal tip at T=0, in units of
     2 pi T0^2 per unit of tip density of states: A(w) of the module
@@ -825,10 +1176,18 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0,
     With Dz != 0 the same holds within a degenerate pair +-Sz, since the
     spin-summed correlator conserves Sz and the two members differ in Sz.
     imp and site are as in tunneling_operators: for S > 1/2 the impurity
-    spin is the total spin of the 2S impurity sites.
+    spin is the total spin of the 2S impurity sites. With several Wilson
+    chains (spin_chain_on_metal with a list of spins) imp picks the spin
+    under the tip and the electron goes to the first site of its own
+    chain. On an Anderson level (anderson_spin_chain) the vertex is
+    d^dag_s + q f^dag_{0 s}, and dI/dV at q=0 is the spectral function of
+    the level summed over spin.
 
-    submode="NRG" (spin_chain_on_metal, or a spin-1/2 kondo_chain at
-    Delta = 0) is the numerical renormalization group of nrgmps instead,
+    submode="NRG" (spin_chain_on_metal with one spin on the metal,
+    anderson_spin_chain with one level and the linear order, or a
+    spin-1/2 kondo_chain at Delta = 0; an Anderson level takes
+    head="dmrg" only) is the numerical renormalization group of nrgmps
+    instead,
     on the mesh of fc: a DMRG head and an NRG tail (head="dmrg", the
     default), or the exact start shell of the spins and the first Wilson
     site (head="exact", up to nrgspectral.MAX_START_SPINS spins), with
@@ -848,14 +1207,61 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0,
         if delta is not None:
             raise ValueError("get_stm_spectrum: submode=\"NRG\" broadens on "
                              "a logarithmic mesh, with b=, not delta=")
+        if len(getattr(fc, "bath_sites", None) or ()) > 1:
+            raise ValueError("get_stm_spectrum: submode=\"NRG\" runs one "
+                             "Wilson chain, and this chain has %d (one per "
+                             "spin on the metal); use submode=\"TASK\""
+                             % len(fc.bath_sites))
         from . import nrgmps
-        return nrgmps.get_stm_spectrum(fc, es, U=U, **kwargs)
+        return nrgmps.get_stm_spectrum(fc, es, U=U, q=q, **kwargs)
     if delta is None:
         delta = 0.02*(np.max(es) - np.min(es))
     Jc = getattr(fc, "J_chain", None) # a number, or one per spin (surrogate)
-    if (submode == "TASK" and mode != "ED" and getattr(fc, "mode", None) != "ED"
+    # the Wilson chains of _chain_on_metal (not the surrogate BCS baths,
+    # which pairing and t_b do not leave with a charge of their own)
+    nbath = len(getattr(fc, "contacts", None) or ())
+    on_task = (submode == "TASK" and mode != "ED"
+               and getattr(fc, "mode", None) != "ED"
+               and kwargs.get("pad_bonds") != "full")
+    kondo_baths = nbath > 1 and not getattr(fc, "anderson", None)
+    plain = kwargs.get("expand_bonds") is None
+    if on_task and kondo_baths and plain:
+        import warnings
+        p = _tip_position(fc, imp)
+        if not (getattr(fc, "order", None) == "linear"
+                and p == fc.impurities[0]):
+            raise ValueError("get_stm_spectrum: plain TASK on a chain with "
+                "%d Wilson chains misses most of the spectrum unless the "
+                "tip spin is the first of site= in order=\"linear\": each "
+                "chain keeps its own charge, and the one-site tangent space "
+                "of any other layout cannot hold X^dag|GS> (62%% to 95%% of "
+                "its weight missing with 15 and 21 Wilson sites in sides, "
+                "and 3e-2 to 1e-1 of the peak against ED on short chains "
+                "for the other tips). Build the chain again with "
+                "site=[tip, others...] and order=\"linear\" (reorder a "
+                "per-spin JK with it), or pass expand_bonds=8, "
+                "expand_rounds=3 and check the result against a stronger "
+                "expansion or submode=\"CVM\" with "
+                "fc.cvm_solver=\"variational\"" % nbath)
+        warnings.warn("get_stm_spectrum: TASK with the tip spin first in "
+            "order=\"linear\" was measured on two chains of up to 15 "
+            "Wilson sites (nothing of X^dag|GS> missing, 1.7e-4 of the peak "
+            "against ED on 3 sites); check it against a stronger expansion "
+            "or submode=\"CVM\" with fc.cvm_solver=\"variational\". With "
+            "three chains or more the linear order also costs about 1e-2 "
+            "in the energy at maxm 128 (docs/new_methods/chains_on_metal)",
+            RuntimeWarning)
+    elif on_task and nbath > 1 and plain: # Anderson levels: not measured
+        import warnings
+        warnings.warn("get_stm_spectrum: this chain has %d Wilson chains, "
+            "one per level on the metal; on several Kondo baths the "
+            "one-site tangent space of TASK misses part of X^dag|GS>, and "
+            "levels were not measured. Pass expand_bonds=8, "
+            "expand_rounds=3 and check the result against a stronger "
+            "expansion or against submode=\"CVM\" with "
+            "fc.cvm_solver=\"variational\"" % nbath, RuntimeWarning)
+    if (on_task and nbath <= 1
             and Jc is not None and np.all(np.asarray(Jc) == 0)
-            and kwargs.get("pad_bonds") != "full"
             and not (kwargs.get("expand_bonds") is not None
                      and kwargs.get("expand_rounds", 1) >= 2)):
         import warnings
@@ -868,14 +1274,31 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0,
             "mode=\"ED\" on a short chain, or use the BdG density of states "
             "of zaverage.bdg_chain_dos, for J = 0",
             RuntimeWarning)
-    out = np.zeros(len(es))
-    for X in tunneling_operators(fc, imp=imp, site=site, U=U):
+    # with several Kondo baths the poles come back with their missing
+    # weight, and a TASK space that lost a tenth of the sum rule raises
+    check = on_task and kondo_baths
+    extra = dict(return_poles=True, variance=False) if check else {}
+    out, lost, rule = np.zeros(len(es)), 0.0, 0.0
+    for X in tunneling_operators(fc, imp=imp, site=site, U=U, q=q):
         Xd = X.get_dagger() # the operator that removes the electron
-        _, ce = fc.get_dynamical_correlator(mode=mode, submode=submode,
-                    name=(Xd, X), es=es, delta=delta, **kwargs)
-        _, ch = fc.get_dynamical_correlator(mode=mode, submode=submode,
-                    name=(X, Xd), es=-es[::-1], delta=delta, **kwargs)
-        out = out + np.real(ce) + np.real(ch)[::-1]
+        for name, x in (((Xd, X), es), ((X, Xd), -es[::-1])):
+            r = fc.get_dynamical_correlator(mode=mode, submode=submode,
+                        name=name, es=x, delta=delta, **kwargs, **extra)
+            c = np.real(r[1])
+            out = out + (c if x is es else c[::-1])
+            if check:
+                info = r[2]
+                m = abs(info["missing_weight"])
+                lost += m
+                rule += abs(info["missing_weight"] + info["elastic"]
+                            + complex(np.sum(info["weight"])))
+    if check and lost > MISSING_RAISE*rule:
+        raise ValueError("get_stm_spectrum: the TASK space misses %.3g of "
+                         "the sum rule %.3g of the tip vertices on this "
+                         "chain with several Wilson chains, above %g of it; "
+                         "raise expand_bonds or fc.maxm, or use the linear "
+                         "order with the tip spin first"
+                         % (lost, rule, MISSING_RAISE))
     return es, out
 
 
