@@ -899,6 +899,14 @@ T-matrix puts the log elsewhere; do NOT "restore" eq. 25 to get back on the
 figure. The notes, formerly this file's section of the same name, are in
 `.claude/rules/kondo.md`.
 
+`get_esr_spectrum` (`esrstm.py`, `esrtk/`, the same three chains) is the
+ESR-STM line shape: the rate equation between eigenstates with Korringa
+relaxation and a DC plus homodyne readout of the tip-site spin, on the ED
+eigenbasis or on the lowest DMRG eigenstates, never on TASK or a
+correlator (excited states are populated at 1 K and 10 to 30 GHz). Plan
+and derivation in `docs/esr_stm_plan.md`, architecture in
+`docs/development.md` 4.8l, rules in `.claude/rules/kondo.md`.
+
 ### Julia vs C++ backend
 
 The two DMRG backends are independent implementations, not a shared

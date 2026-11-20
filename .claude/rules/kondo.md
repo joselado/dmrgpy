@@ -12,6 +12,9 @@ paths:
   - "tests/test_kondo_cloud.py"
   - "tests/test_atom_iets.py"
   - "examples/kondo/**"
+  - "src/dmrgpy/esrstm.py"
+  - "src/dmrgpy/esrtk/**"
+  - "tests/test_esr_stm.py"
 ---
 
 # STM/Kondo tunneling spectra (`kondospectrumtk/`)
@@ -969,3 +972,38 @@ noise into a warm start that is already at maxm. `nsweeps_warm="auto"`
 is opt-in and was not measured on the 26-site chain, so it is not the
 default. A warm start does not see
 a large jump in Delta, so only `cold_every` catches it.
+
+**ESR-STM spectra (2026-11-20)**, `get_esr_spectrum` in `esrstm.py` and
+`esrtk/`, is the plan of `docs/esr_stm_plan.md` with the author's picks of
+that day (Korringa rates of eq. 42 of arXiv:2606.27830 with thermal
+populations, V = D = m.S_tip by default, its own guide page, and `f_ref`
+required: do NOT give it a default, a reference that follows the window
+moved a line by 2 to 8% on zooming); the
+architecture is `docs/development.md` 4.8l. Rules it rests on. (1) It is
+NOT the spin spectral function: each line carries the form factor
+D_nn - D_mm and the population difference p_m - p_n, and the S-T0 line
+of a dimer has a form factor of exactly zero at zero tip field; the
+supplement of Yang et al. (PRL 119, 227206, eq. S13, open on the APS site,
+not on arXiv) uses the thermal absorption spectrum instead, and the weak
+lines of their dimer differ by a factor sin^2(xi/2) between the two
+(`docs/esr_stm_plan_yang_weights.py`). (2) Do NOT route the DMRG side
+through TASK, KPM or the correction vector: excited states are populated
+at 1 K and 10 to 30 GHz, and the tangent space of the ground state does
+not hold the transitions out of them (the same reason TASK refuses a
+thermal population of its Ritz states); the DMRG route is the lowest
+`nstates` eigenstates, and it raises when they do not reach `emax`.
+(3) The relaxation is block diagonal over what S connects (the charge
+sectors of a fermion chain), each block at its thermal weight; a drive
+across two blocks raises. (4) Only an exact degeneracy coupled by V, D or K
+raises; the eq. 42 jumps are secular by construction, so a near
+degeneracy is not refused, and `method="floquet"` (ED, up to 64 states) is
+the reference for close lines (1e-3 of the peak on a dimer with two lines
+sharing a level, 6e-5 on one saturated spin). (5) The kept states end
+`lineshape.WINDOW_MARGIN` = 30 free-spin widths above the window, plus 2 kT
+ln(1/p_cut) (the populated states and the thermal upward rates out of an
+upper state; with one kT ln(1/p_cut) the width of a line moved by 1% with
+the window); 1000 widths made the DMRG route ask for 160 GHz of states at
+T2 = 2 ns. On DMRG the degeneracy tolerance adds sigma_n + sigma_m. (6) At zero tip field the S-T0 line keeps a small DC part from
+the relaxation of S and T0 to T- and T+ (1.2e-3 of the homodyne part at
+rabi = 1e-4 and V_RF/V_DC = 0.2, growing as rabi T1 over V_RF/V_DC); it is
+the model, not a bug. `tests/test_esr_stm.py`.

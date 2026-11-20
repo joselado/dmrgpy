@@ -74,6 +74,7 @@ nav:
       - Choosing a correlator method: correlator-methods.md
       - Real-time evolution: real-time.md
       - STM and Kondo spectra: kondo.md
+      - ESR-STM spectra: esr-stm.md
   - Finite temperature: finite-temperature.md
   - Open systems: open-systems.md
   - Infinite chains: infinite-chains.md

@@ -7706,6 +7706,96 @@ against the Heisenberg chain plus two BdG chains with different Delta, D
 and Lambda, a reordered `site` list in every order, the sign of one
 pairing, and DMRG against ED on v3 and `"python"`.
 
+### 4.8l ESR-STM spectra (`esrstm.py`, `esrtk/`)
+
+`get_esr_spectrum` is a mixin, `esrstm.ESRSpectrumMixin`, on `Spin_Chain`
+and both spinful fermion chains, as `get_kondo_spectrum` is; it reads only
+`Sx/Sy/Sz` of the sites, the Hamiltonian and, on DMRG, the session. The
+method is the plan of `docs/esr_stm_plan.md`, where the choice of the
+method and the derivation are: the steady state of the rate equation
+between eigenstates with Lorentzian drive rates (secular, a rotating-wave
+approximation per line), the Korringa relaxation of eq. 42 of
+arXiv:2606.27830 through every site, and a readout made of the change of
+the populations read through D (DC part) and the coherences read through
+the RF modulation of the conductance (homodyne part). The author's picks
+of 2026-11-20 are recorded there: Korringa rates with thermal populations
+(polarized-tip rates left for later), V = D = m.S_tip by default, a
+guide page of its own (`docs/guide/esr-stm.md`), and `f_ref` required:
+T1 and T2 are those of a free spin 1/2 with Zeeman frequency `f_ref`, and
+a reference that followed the window (its centre, the first version) made
+every rate depend on the window, 2 to 8% on a line of a 6-site chain.
+`drive=` and `detection=` must be Hermitian (`chain.is_hermitian`); the
+DMRG route fills both matrices by conjugation.
+
+The pieces:
+
+- `esrtk/spectrum.py` builds an `ESRSpectrum` (energies, V, D and the
+  Korringa kernel K[m,n] = sum_k w_k sum_a |<m|S^a_k|n>|^2) on the states
+  up to `emax` above the lowest. On ED it is the full eigenbasis
+  (`edkondo.eigenpairs`, real for a real H) up to `algebra.maxsize`, and the
+  lowest eigenpairs of the sparse H from eigsh above it (`_low_states`, the
+  rule of `krylovkondo.low_states`); on DMRG it is the `nstates` lowest
+  states of `get_excited_states` (orthogonalized and rediagonalized in their
+  span there), with every matrix element an `aMb` and the energy variance
+  of each state from `vev.energy_variance`. K is built per site from S^z and
+  S^+, real for real eigenvectors.
+- `emax` is h(f_max + `lineshape.WINDOW_MARGIN` widths of a free spin)
+  plus 2 kT ln(1/p_cut): the populated states, those a line in the window
+  reaches, and those the upper state of such a line reaches by a thermal
+  upward rate (without the second kT ln(1/p_cut) the total rate out of an
+  upper state, and so its width, moved by 1% with the window). Lines
+  further out than the margin are dropped, with their tails (2.3e-4 of a
+  line of the 6-site chain of the tests). The DMRG route raises when its
+  highest state is below `emax`; that guard is only as good as the order
+  in which the excited-state solver finds states.
+- `esrtk/rates.py`: the Korringa rates, their scale from `T1` (a free spin
+  1/2 at the centre of the window), the pure dephasing from `T2`, and the
+  resolvent G of the relaxation. G is block diagonal over the blocks the
+  relaxation connects (`rates.blocks`): S does not move charge, so the
+  charge sectors of a fermion chain are blocks, and each keeps its thermal
+  weight. A drive that connects two blocks raises.
+- `esrtk/lineshape.py`: `Lines` holds the driven pairs (inside the window
+  and its margin, connected by V, reached from a populated state) and
+  solves, per frequency, the pairs whose saturation parameter is above
+  `SAT_TOL` exactly (a small linear system on them, the Woodbury form of
+  (R + W) p = 0, with the far pairs entering it at first order in their
+  rates, K_NF w_F (y0_F + K_FN w_N y_N)) and the others at first order with
+  the populations the saturated ones leave. The DC part then agrees with
+  the null vector of the dense R + W to 1e-8 at strong drive, and the
+  population differences, which the homodyne part reads, to 5e-8 (the
+  far-far coupling is dropped, about their number times SAT_TOL). For one
+  spin 1/2 this is the Bloch steady state to roundoff.
+- `esrtk/floquet.py`: the driven Lindblad equation in the same eigenbasis,
+  with the jumps of the same rates and the same dephasing, solved in
+  Floquet harmonics without the secular and rotating-wave approximations
+  (`method="floquet"`, ED only, up to 64 kept states). It is the reference
+  of the rate equation: 1e-3 of the peak on a dimer with two lines that
+  share a level, 4e-5 to 2e-4 per line on resolved lines, 6e-5 for one
+  saturated spin.
+
+Two rules. An exact degeneracy (DEG_TOL of the width of the kept spectrum,
+plus sigma_n + sigma_m on the DMRG route, where two Ritz energies are only
+known to that) between states coupled by V, D or K, with one of them
+populated or reached, raises, because the populations inside the level depend on the
+basis the eigensolver picked; with the eigenbasis jumps of eq. 42 the
+model is secular by construction, so a near degeneracy is not refused, and
+`method="floquet"` is the check for close lines. And no TASK, KPM or
+correction vector: at the temperatures of the experiments (1 K against
+10 to 30 GHz) the excited states are populated, the tangent space of the
+ground state does not hold the transitions out of them, the DC part needs
+<n|D|n> of the final states, and line widths of 1e-8 eV need poles with
+an analytic line shape. `tests/test_esr_stm.py` pins the Bloch formula,
+the power-broadened width, the steady state of `lindblad.py` in the
+rotating frame, Floquet against the rates on a dimer, the angle
+dependence of the DC amplitude, the singlet to T0 line, the four lines of
+the Yang et al. dimer, the zero-field raise, the sparse ED route, DMRG
+against ED on `"python"` and v3, the incomplete-manifold raise, a
+Hubbard atom with its charge blocks on both spinful chains, `f_ref`
+against a moved window, the saturated solve against the dense rate
+equation, and the raises on a drive across charge blocks, on a relaxation
+with two stationary states, on a non-Hermitian drive and at zero field on
+DMRG.
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,

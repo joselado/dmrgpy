@@ -6,6 +6,7 @@ from . import pychainwrapper
 from . import multioperator
 from . import correlator
 from .kondospectrumtk.kondomethod import KondoSpectrumMixin
+from .esrstm import ESRSpectrumMixin
 
 class Coupling():
   def __init__(self,i,j,g):
@@ -47,7 +48,7 @@ def get_site(label):
     else: return None
 
 
-class Spin_Chain(KondoSpectrumMixin,Many_Body_Chain):
+class Spin_Chain(KondoSpectrumMixin,ESRSpectrumMixin,Many_Body_Chain):
     """Class for spin Hamiltonians"""
     def __init__(self,sites,**kwargs):
         """Build a spin chain from a list of site labels (e.g. "1/2",

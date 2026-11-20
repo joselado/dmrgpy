@@ -18,6 +18,9 @@ eV = np.linspace(-4e-3, 4e-3, 161)        # bias in eV
 eV, dIdV = sc.get_kondo_spectrum(eV, site=0, Jrho_s=-0.05, U=0.25, T=1.0)
 ```
 
+The spin resonance driven by an RF voltage on the tip is on
+[ESR-STM spectra](esr-stm.md).
+
 ## Second order
 
 Second order (`order=2`) is the Fermi golden rule for spin-flip and

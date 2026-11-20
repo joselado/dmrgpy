@@ -8,6 +8,7 @@ from . import funtk
 from . import gap
 from .kondospectrumtk.kondomethod import KondoSpectrumMixin
 from .kondoscreening import KondoScreeningMixin
+from .esrstm import ESRSpectrumMixin
 
 class Fermionic_Chain(Many_Body_Chain):
     """Class for fermionic Hamiltonians"""
@@ -156,7 +157,7 @@ class Majorana_Chain(Fermionic_Chain):
 
 
 
-class Spinful_Fermionic_Chain(KondoSpectrumMixin,KondoScreeningMixin,
+class Spinful_Fermionic_Chain(KondoSpectrumMixin,KondoScreeningMixin,ESRSpectrumMixin,
         Fermionic_Chain):
     """
     Class to deal with fermionic Hamiltonians with
@@ -233,7 +234,7 @@ class Spinful_Fermionic_Chain(KondoSpectrumMixin,KondoScreeningMixin,
 
 
 
-class Spinful_Fermionic_Chain_Native(KondoSpectrumMixin,KondoScreeningMixin,
+class Spinful_Fermionic_Chain_Native(KondoSpectrumMixin,KondoScreeningMixin,ESRSpectrumMixin,
         Many_Body_Chain):
     """
     Spinful fermionic (Hubbard-like) chain built directly on native
