@@ -89,18 +89,23 @@ def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
             raise ValueError("%s= must be a Hermitian operator" % name)
     kT = kB*T
     # the states that can take part: populated above p_cut (kT ln(1/p_cut)
-    # above the lowest), a transition inside the window and its margin
-    # (lineshape.WINDOW_MARGIN full widths of a free spin with this T2), and
-    # the states the upper state of such a line reaches by a thermal upward
-    # rate above p_cut (another kT ln(1/p_cut)): without them the total
-    # rate out of the upper state, and so the width, depend on the window
-    # (1% on a 6-site chain)
+    # above the lowest), and a transition inside the window and its margin
+    # (lineshape.WINDOW_MARGIN full widths of a free spin with this T2).
+    # The states above that, which the upper state of a line reaches only
+    # by a thermal upward rate, are left out, and p_cut is then the
+    # accuracy of the DC part: it changes by 1.3e-4 at p_cut=1e-4 and by
+    # 1.8e-8 at p_cut=1e-8 against a converged curve (10 Heisenberg spins,
+    # J = 240 GHz, T = 1.2 K), with 6.6 times fewer states than a second
+    # kT ln(1/p_cut) kept at the default p_cut. The 1% window dependence
+    # that second term was added for was the homodyne tail of far lines
+    # (lineshape.homodyne_taper), not the relaxation: zooming onto a line
+    # moves the DC part by 1.7e-5 on 6 spins with one term.
     if not (T1 > 0. and T2 > 0.):
         raise ValueError("T1 and T2 must be positive, got %r and %r" % (T1, T2))
     margin = lineshape.WINDOW_MARGIN/(np.pi*T2)
     emax = h*(np.max(f) + margin)
     if kT > 0.:
-        emax += 2.*kT*np.log(1./p_cut)
+        emax += kT*np.log(1./p_cut)
     if mode == "DMRG":
         mode = chain.get_mode(mode="DMRG") # the automatic fallbacks to ED
     if mode == "ED":
@@ -163,6 +168,9 @@ class ESRSpectrumMixin():
               broadening.
           vrf_over_vdc, phase: the homodyne part, V_RF/V_DC and the phase
               between the RF voltage and the drive; 0 gives the DC part only.
+              Each line enters it only within 30 free-spin widths of its
+              resonance (lineshape.homodyne_taper): its dispersive tail
+              falls as 1/detuning, and the far background is left out.
           mode: "ED" (full diagonalization up to 2000 states, the lowest
               states of the sparse H above) or "DMRG" (the nstates lowest
               DMRG eigenstates; raises if they do not reach every state the
@@ -173,7 +181,8 @@ class ESRSpectrumMixin():
               driven Lindblad equation in the same eigenbasis without the
               secular and rotating-wave approximations, nharm harmonics,
               mode="ED" and up to 64 kept states, as a reference).
-          p_cut: relative Boltzmann weight below which a state is empty.
+          p_cut: relative Boltzmann weight below which a state is empty,
+              and so roughly the relative accuracy of the DC part.
           h, kB: Planck's constant in energy/GHz and Boltzmann's in
               energy/K, eV by default (pass h=1 and kB=20.8366 for H in GHz).
           return_parts: also return dict(dc=..., homodyne=...).

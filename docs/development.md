@@ -7736,20 +7736,40 @@ The pieces:
   lowest eigenpairs of the sparse H from eigsh above it (`_low_states`, the
   rule of `krylovkondo.low_states`); on DMRG it is the `nstates` lowest
   states of `get_excited_states` (orthogonalized and rediagonalized in their
-  span there), with every matrix element an `aMb` and the energy variance
-  of each state from `vev.energy_variance`. K is built per site from S^z and
+  span there), with every matrix element an overlap with an MPO built once
+  per operator (`StaticOperator`, 1.7 times faster per element than
+  `aMb` with a MultiOperator, which builds the MPO on every call) and the
+  energy variance of each state from `vev.energy_variance`. K is built per site from S^z and
   S^+, real for real eigenvectors.
 - `emax` is h(f_max + `lineshape.WINDOW_MARGIN` widths of a free spin)
-  plus 2 kT ln(1/p_cut): the populated states, those a line in the window
-  reaches, and those the upper state of such a line reaches by a thermal
-  upward rate (without the second kT ln(1/p_cut) the total rate out of an
-  upper state, and so its width, moved by 1% with the window). Lines
-  further out than the margin are dropped, with their tails (2.3e-4 of a
-  line of the 6-site chain of the tests). The DMRG route raises when its
-  highest state is below `emax`; that guard is only as good as the order
-  in which the excited-state solver finds states.
+  plus kT ln(1/p_cut): the populated states and those a line in the
+  window reaches. The states above, which the upper state of a line
+  reaches only by a thermal upward rate, are left out, so p_cut is also
+  the accuracy of the DC part: 1.3e-4 at p_cut=1e-4 and 1.8e-8 at the
+  default 1e-8 against a converged curve on 10 spins (J = 240 GHz,
+  T = 1.2 K). The first version kept a second kT ln(1/p_cut), 6.6 times
+  more states at the default p_cut for nothing the default accuracy needs;
+  the 1% window dependence it was added for was the homodyne tail below,
+  not the relaxation (zooming onto a line moves the DC part by 1.7e-5 on
+  6 spins with one term). Lines further out than the margin are dropped,
+  with their DC tails, 1/(4 WINDOW_MARGIN^2) of a line. The DMRG route
+  raises when its highest state is below `emax`; that guard is only as
+  good as the order in which the excited-state solver finds states.
+- The homodyne part of a line is dispersive, with a 1/detuning tail, so a
+  sum over the kept states depends on where `emax` ends: it moved by 1e-2
+  (6 spins) to 4e-2 (12 spins) of the DC line when the window was zoomed
+  onto a line. `lineshape.homodyne_taper` multiplies every coherence by 1
+  up to `HOMODYNE_INNER` = 15 free-spin widths from its resonance and 0
+  beyond `WINDOW_MARGIN`, a smoothstep in between, on the rates and on
+  the Floquet route alike (there element by element at the detuning
+  w - (w_a - w_b), which also removes the counter-rotating elements).
+  The zoom then moves the homodyne part by 1e-11 to 4e-5 of the DC peak.
+  The far dispersive background is left out by choice (picked for the
+  author on 2026-11-21): it needs every state up to the exchange scale and
+  the counter-rotating terms, and experiments subtract a smooth
+  background.
 - `esrtk/rates.py`: the Korringa rates, their scale from `T1` (a free spin
-  1/2 at the centre of the window), the pure dephasing from `T2`, and the
+  1/2 at `f_ref`), the pure dephasing from `T2`, and the
   resolvent G of the relaxation. G is block diagonal over the blocks the
   relaxation connects (`rates.blocks`): S does not move charge, so the
   charge sectors of a fermion chain are blocks, and each keeps its thermal

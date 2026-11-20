@@ -392,3 +392,34 @@ def test_zero_field_raises_on_dmrg():
         sz.get_esr_spectrum(np.linspace(10., 25., 31), tip=[0.6, 0, 0.8],
                             T=0.05, T2=2., f_ref=20., p_cut=1e-4, mode="DMRG",
                             nstates=16)
+
+
+def test_homodyne_taper():
+    """1 up to HOMODYNE_INNER free-spin widths 2/T2 (rad/ns) from the
+    resonance, 0 beyond WINDOW_MARGIN, even and monotonic in between"""
+    T2 = 4.
+    w = 2./T2
+    x = np.linspace(0., 40.*w, 4001)
+    t = lineshape.homodyne_taper(x, T2)
+    assert np.all(t[x <= lineshape.HOMODYNE_INNER*w] == 1.)
+    assert np.all(t[x >= lineshape.WINDOW_MARGIN*w] == 0.)
+    assert np.all(np.diff(t) <= 0.)
+    assert np.array_equal(lineshape.homodyne_taper(-x, T2), t)
+
+
+def test_homodyne_part_does_not_depend_on_the_window():
+    """The dispersive tail of a line falls only as 1/detuning, so each
+    coherence is cut between 15 and 30 free-spin widths from its resonance;
+    without the cut, zooming the window onto the strongest line moved the
+    homodyne part by 1e-2 of the DC line on this chain, since the kept
+    states change with the window (measured 1.2e-11 with it). The DC part
+    moves by the DC tails of the lines past the margin (1.8e-5)"""
+    sc = chain(6)
+    kw = dict(KW, p_cut=1e-8, return_parts=True)
+    _, _, a = sc.get_esr_spectrum(F, **kw)
+    k = np.argmax(np.abs(a["dc"]))
+    fb = np.array([F[k] - 0.02, F[k], F[k] + 0.02])
+    _, _, b = sc.get_esr_spectrum(fb, **kw)
+    pk = np.max(np.abs(a["dc"]))
+    assert abs(b["homodyne"][1] - a["homodyne"][k]) < 1e-8*pk
+    assert abs(b["dc"][1] - a["dc"][k]) < 1e-4*pk

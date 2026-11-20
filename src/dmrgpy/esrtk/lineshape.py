@@ -41,12 +41,31 @@ V_TOL = 1e-20
 # is 1/(4 MARGIN^2) of its peak.
 MARGIN = 1000.
 # The states kept are those up to WINDOW_MARGIN full widths of a free spin
-# (1/(pi T2) GHz) above the top of the window, plus 2 kT ln(1/p_cut) at T > 0
-# (the populated states, and the thermal upward rates out of an upper state):
-# a line further out than that is dropped, and its tail inside the window is
-# below 1/(4 WINDOW_MARGIN^2) = 3e-4 of its own peak. Among the kept states,
-# pairs are kept up to MARGIN widths.
+# (1/(pi T2) GHz) above the top of the window, plus kT ln(1/p_cut) at T > 0
+# (the populated states): a line further out than that is dropped, and its
+# DC tail inside the window is below 1/(4 WINDOW_MARGIN^2) = 3e-4 of its own
+# peak. Among the kept states, pairs are kept up to MARGIN widths.
 WINDOW_MARGIN = 30.
+# The homodyne part of a line is dispersive, with a tail 1/detuning that
+# a sum over the kept states cuts off wherever emax happens to end: it
+# moved by 1e-2 to 4e-2 of the DC line when the window was zoomed onto a
+# line (6 and 12 Heisenberg spins). Each line's coherence is therefore
+# multiplied by homodyne_taper, 1 up to HOMODYNE_INNER free-spin widths
+# from its resonance and 0 beyond WINDOW_MARGIN, a smoothstep in between.
+# The far dispersive background is left out: it would need every state up
+# to the exchange scale and the counter-rotating terms, and experiments
+# subtract a smooth background anyway.
+HOMODYNE_INNER = 15.
+
+
+def homodyne_taper(det, T2):
+    """The factor of a coherence at a detuning |det| (rad/ns) from its
+    resonance: 1 up to HOMODYNE_INNER full widths 2/T2 of a free spin, 0
+    beyond WINDOW_MARGIN, and a smoothstep in between"""
+    x1 = HOMODYNE_INNER*2./T2
+    x2 = WINDOW_MARGIN*2./T2
+    t = np.clip((np.abs(det) - x1)/(x2 - x1), 0., 1.)
+    return 1. - t*t*(3. - 2.*t)
 # Pairs with a saturation parameter above SAT_TOL at a frequency are solved
 # exactly there; the error of the others is of order SAT_TOL of their own
 # small contribution.
@@ -71,6 +90,7 @@ class Lines():
         self.spec = spec
         e = spec.e
         self.kT = kT
+        self.T2 = float(T2)
         # f_ref: the frequency at which a free spin 1/2 relaxes in T1
         self.f_ref = float(f_ref)
         self.g = rates.korringa_scale(T1, h*self.f_ref, kT)
@@ -219,6 +239,7 @@ class Lines():
             dc[i] = np.sum(wp*y*self.d)
             if vrf_over_vdc != 0.:
                 rho = -0.5*self.Omega*self.Vul*y/(w - self.w_p + 1j*self.gam)
+                rho = rho*homodyne_taper(w - self.w_p, self.T2)
                 hom[i] = vrf_over_vdc*np.real(ph*np.sum(rho*self.Dlu))
         return dc, hom
 

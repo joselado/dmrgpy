@@ -999,11 +999,23 @@ raises; the eq. 42 jumps are secular by construction, so a near
 degeneracy is not refused, and `method="floquet"` (ED, up to 64 states) is
 the reference for close lines (1e-3 of the peak on a dimer with two lines
 sharing a level, 6e-5 on one saturated spin). (5) The kept states end
-`lineshape.WINDOW_MARGIN` = 30 free-spin widths above the window, plus 2 kT
-ln(1/p_cut) (the populated states and the thermal upward rates out of an
-upper state; with one kT ln(1/p_cut) the width of a line moved by 1% with
-the window); 1000 widths made the DMRG route ask for 160 GHz of states at
-T2 = 2 ns. On DMRG the degeneracy tolerance adds sigma_n + sigma_m. (6) At zero tip field the S-T0 line keeps a small DC part from
+`lineshape.WINDOW_MARGIN` = 30 free-spin widths above the window, plus ONE
+kT ln(1/p_cut) (2026-11-21, picked for the author): p_cut is then the
+accuracy of the DC part (1.8e-8 at the default 1e-8 on 10 spins), with
+6.6 times fewer states than the second kT ln(1/p_cut) of the first
+version; do NOT put the second term back for a window dependence, that
+1% was the homodyne tail of (7), and the DC part moves by 1.7e-5 on a
+zoom with one term. 1000 widths made the DMRG route ask for 160 GHz of
+states at T2 = 2 ns. On DMRG the degeneracy tolerance adds
+sigma_n + sigma_m. (6) At zero tip field the S-T0 line keeps a small DC part from
 the relaxation of S and T0 to T- and T+ (1.2e-3 of the homodyne part at
 rabi = 1e-4 and V_RF/V_DC = 0.2, growing as rabi T1 over V_RF/V_DC); it is
-the model, not a bug. `tests/test_esr_stm.py`.
+the model, not a bug. (7) The homodyne part goes through
+`lineshape.homodyne_taper`: each coherence is cut smoothly between 15 and
+30 free-spin widths from its resonance, on the rates and on the Floquet
+route (element by element, which also removes the counter-rotating
+elements). Without it the 1/detuning tail of the kept lines made the
+homodyne part move by 1e-2 to 4e-2 of the DC line with the window or
+with emax; do NOT remove it to "restore" the background, which needs
+every state up to the exchange scale and the counter-rotating terms.
+`tests/test_esr_stm.py`.

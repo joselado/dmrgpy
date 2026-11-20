@@ -2106,3 +2106,23 @@ state set with `set_gs` is measured as it is. The ED correction vector
 which `lowest_energy()` assumed: a `set_gs` on an ED chain of fermions or
 spins that had not solved its ground state raised `AttributeError` in the
 KPM, CVM and ROOTN routes.
+
+## The 2026-11-21 homodyne part and kept states of the ESR-STM spectrum
+
+`get_esr_spectrum` (commit bedb9bf, not pushed) changed in two ways that
+move its numbers. The homodyne part (`vrf_over_vdc` not zero) now keeps
+each line only within 30 free-spin widths of its resonance, $30/(\pi T_2)$
+in frequency, with a smooth cut from 15 widths on, on the rate equation
+and on `method="floquet"` alike. Before, every kept line added its
+dispersive tail, which falls only as one over the detuning, so the
+homodyne part depended on which states were kept: it moved by 1e-2 (6
+spins) to 4e-2 (12 spins) of the DC line when the window was zoomed onto
+a line, and by 4e-3 of the peak as the kept states grew. It now moves by
+1e-11 to 4e-5 of the DC peak under the same zoom; the far background is
+left out. The DC part is not affected, and the default output
+(`vrf_over_vdc=0`) has no homodyne part. The kept states also end one
+$kT\ln(1/p_{\rm cut})$ above the window instead of two, so that
+`p_cut` is the accuracy of the DC part: on 10 spins (J = 240 GHz,
+T = 1.2 K) the DC part changes by 1.8e-8 of the peak at the default
+`p_cut=1e-8`, with 56 states instead of 372, and by 1.3e-4 at
+`p_cut=1e-4`. On DMRG fewer `nstates` are needed for the same call.

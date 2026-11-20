@@ -20,6 +20,8 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as sla
 
+from . import lineshape
+
 MAX_DIM = 64
 
 
@@ -86,5 +88,11 @@ def signal(lines, f, vrf_over_vdc=0., phase=0., nharm=2):
         rho1 = x[r0 + N:r0 + 2*N].reshape(d, d) # coefficient of e^{-iwt}
         dc[i] = np.real(np.trace(D @ (rho0 - rho_eq)))
         if vrf_over_vdc != 0.:
-            hom[i] = vrf_over_vdc*np.real(ph*np.trace(D @ rho1))
+            # the coherence rho1[a, b] oscillates at w_a - w_b, so the
+            # taper of the rate equation (lineshape.homodyne_taper) acts on
+            # it at the detuning w - (w_a - w_b); it removes the
+            # counter-rotating elements, at w + |w_ab|, as well
+            tap = lineshape.homodyne_taper(w - (wa[:, None] - wa[None, :]),
+                                           lines.T2)
+            hom[i] = vrf_over_vdc*np.real(ph*np.sum(D.T*(rho1*tap)))
     return dc, hom

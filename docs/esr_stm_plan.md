@@ -18,7 +18,7 @@ checked too: one spin 1/2 gives the Bloch formula to 5e-14 at a
 saturation parameter of 4.5, and the Floquet solution at finite drive
 (`method="floquet"`) agrees to 6e-5 of the peak. The MPS route agrees with
 ED to 2e-14 on a peak of 1.5e-6 on a 6-site chain, on `"python"` and v3.
-Six things differ from the plan:
+Seven things differ from the plan:
 
 - The degeneracy rule raises on an exact degeneracy only (1e-10 of the
   width of the kept spectrum) between states coupled by V, D or the
@@ -33,10 +33,20 @@ Six things differ from the plan:
   weight. A drive that connects two blocks raises.
 - The kept states end 30 free-spin widths above the window, not 1000
   (with 1000 the DMRG route asked for 160 GHz of states at $T_2$ = 2 ns),
-  plus $2kT\ln(1/p_{\rm cut})$: the populated states and the thermal
-  upward rates out of the upper state of a line, without which the width
-  of a line moved by 1% with the window. Among the kept states, pairs are
-  still taken up to 1000 widths away.
+  plus $kT\ln(1/p_{\rm cut})$, the populated states, so that $p_{\rm cut}$
+  is also the accuracy of the DC part. The first commit kept a second
+  $kT\ln(1/p_{\rm cut})$ for the thermal upward rates out of the upper
+  state of a line: 6.6 times more states at the default $p_{\rm cut}$, for
+  a window dependence that turned out to be the homodyne tail of the next
+  point. Among the kept states, pairs are still taken up to 1000 widths
+  away.
+- The homodyne part of each line is cut smoothly between 15 and 30
+  free-spin widths from its resonance (picked for the author on
+  2026-11-21). Its dispersive tail falls only as one over the detuning, so
+  without the cut it depended on which states are kept, by 1e-2 to 4e-2
+  of the DC line under a zoom of the window. The background of the far
+  lines needs every state up to the exchange scale and the counter-rotating
+  terms, and experiments subtract a smooth background.
 - `f_ref` is a required keyword (the author's pick of 2026-11-20): T1 and
   T2 are given at that frequency. The first version used the centre of the
   window, and zooming onto a line moved it by 2 to 8%.

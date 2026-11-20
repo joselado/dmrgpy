@@ -87,8 +87,13 @@ f, dI, parts = sc.get_esr_spectrum(f, tip=tip, T=1.2, f_ref=20., rabi=1e-3,
 ```
 
 `parts["dc"]` is the symmetric line of height 0.0101 and
-`parts["homodyne"]` an antisymmetric one between -0.0026 and 0.0026. The
-keywords are:
+`parts["homodyne"]` an antisymmetric one between -0.0026 and 0.0026.
+The dispersive tail of a line falls only as one over the detuning, so a
+line enters the homodyne part only within 30 free-spin widths of its
+resonance, $30/(\pi T_2)$ in frequency, with a smooth cut from 15 widths
+on. The background of the lines further away is not computed: it needs
+every state up to the exchange scale and the counter-rotating terms, and
+experiments subtract a smooth background anyway. The keywords are:
 
 - `tip`: the direction of the tip moment, which sets $D$ and the default
   $V$.
@@ -163,13 +168,11 @@ f, ied = sc.get_esr_spectrum(f, mode="ED", **kw)
 f, idm = sc.get_esr_spectrum(f, mode="DMRG", nstates=24, **kw)
 ```
 
-The two agree to $2\times10^{-7}$ of the peak. The states needed are the
-populated ones, up to $kT\ln(1/p_{\rm cut})$ above the ground state,
-those reached from them by a line in the window, and those the upper
-state of a line reaches by thermal excitation, another
-$kT\ln(1/p_{\rm cut})$ above it. When the `nstates` lowest states do not
-reach that energy the call raises and asks for more states; here
-`nstates=8` is not enough. So DMRG is the method for long
+The two agree to $7\times10^{-8}$ of the peak. The states needed are the
+populated ones, up to $kT\ln(1/p_{\rm cut})$ above the ground state, and
+those reached from them by a line in the window. When the `nstates`
+lowest states do not reach that energy the call raises and asks for more
+states; here 11 states are needed, and `nstates=8` is not enough. So DMRG is the method for long
 chains whose window holds few states, a gapped chain or a cluster in a
 field, and not for a gapless chain with an exchange of the order of $hf$,
 where the number of states grows with the length. The line positions come
@@ -180,7 +183,9 @@ otherwise. The keywords are:
 - `mode`: `"ED"` or `"DMRG"`.
 - `nstates`: the number of DMRG eigenstates.
 - `p_cut`: the relative Boltzmann weight below which a state is empty.
-  A larger value needs fewer states.
+  It is also roughly the relative accuracy of the result, since the
+  states above are left out of the relaxation too. A larger value needs
+  fewer states.
 - `method="floquet"`: the driven Lindblad equation in the same
   eigenbasis, without the secular and rotating-wave approximations, on
   `mode="ED"` with up to 64 states. It is the reference for close lines
