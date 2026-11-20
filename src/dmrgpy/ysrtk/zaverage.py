@@ -309,7 +309,8 @@ def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
     on a long chain."""
     import warnings
     from .. import taskdmrg
-    from ..ysr import tunneling_operators
+    from ..ysr import tunneling_operators, refuse_dmrg_on_paired_leads
+    refuse_dmrg_on_paired_leads(fc, where="stm_poles")
     if operators is not None and U != 0.0:
         raise ValueError("stm_poles: U is used only to build the tunneling "
             "vertices; with operators given, fold U into them")

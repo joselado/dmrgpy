@@ -707,7 +707,8 @@ run at nkry=200, which is open. On an odd chain the ground state is a
 singlet with the bath on an even spin and a triplet on an odd spin
 (S_tot^2 = 0 and 2), and most of the order comparison was on triplets; the
 screened case (spin 2 of 7) gave the same ranking. Delta != 0 is not
-offered. `docs/development.md`
+offered with an int `site`; the list form takes it per lead, see (8)
+of the next paragraph. `docs/development.md`
 4.8i, `tests/test_ysr_spin_chain_on_metal.py`.
 
 **Several spins on the metal, and an Anderson level (2026-11-18)**,
@@ -769,6 +770,29 @@ charge on every backend when there is a level (the "python" sector start
 left the frozen spin empty at Nf = n0 +- 1); `head="exact"` raises. The
 Friedel sum rule pi Gamma rho_d(0) = 1 holds to 1e-3 with two meshes
 (U = 0.5, Gamma = 0.05, Lambda = 4). `tests/test_ysr_chains_on_metal.py`.
+(8) Since 2026-11-20 `D`, `Lambda` and `Delta` are per contact on the
+list form, so `site=[0, ns-1]` is a chain between two leads that differ,
+normal or superconducting (the author's pick of the scope: "Delta per
+lead in spin_chain_on_metal"; `docs/development.md` 4.8k). Keep
+`fc.Delta_sc`, `fc.qp_gap`, `fc.dos_factor` scalars or None, never
+arrays: the consumers compare them with 0. With exchange coupling only
+the phase of a pairing is a gauge, since exchange moves no charge in or
+out of a lead (tested by its sign; a complex Delta raises), so do not add
+a complex Delta to get a Josephson effect; that needs a charge path
+through the chain. `subgap_energies` and `parity_ground_state` raise on these
+chains (`ysr.on_metal_leads`), since they seed and check the charge on
+sites 0..2S-1, which here are the left lead, and so does
+`surrogate.sector_energies`; only one spin on one lead, `site=[0]` with
+ns = 1, passes `on_metal_leads` (kondo_chain term for term, its sector
+tools and TASK checked against ED with pairing). Do NOT widen the pass to
+several spins on one lead without that measurement. With a nonzero
+Delta, `refuse_dmrg_on_paired_leads` raises unless the call resolves to
+ED, in `get_stm_spectrum`, `zaverage.stm_poles` and
+`surrogate.get_stm_spectrum` alike (stm_poles reaches TASK directly): TASK was 3e-4 to 6e-4 of
+the peak off ED with `expand_bonds` (1e-8 at Delta = 0) and 0.89 on v3
+in the linear tip-first order, with an exact ground state of definite
+parity (8 sites, 2026-11-20, not diagnosed). Do NOT lift the raise
+without a TASK or CVM route that agrees with ED there.
 
 **The NRG route to the STM spectrum (2026-11-13)**, `nrgspectral.py`
 (the complete-basis NRG with the full density matrix, and the exact first

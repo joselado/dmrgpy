@@ -1330,6 +1330,54 @@ print(didv[100]) # 0.135 at zero bias, and 0.579 with Js=0
 The `submode="NRG"` route takes one metal only.
 The example is `examples/kondo/spin_dimer_two_metals`.
 
+### A spin chain between two leads
+
+With the metal under the two end spins, `site=[0, ns-1]`, the chain sits
+between two semi-infinite leads, the geometry of a junction. Each lead
+can be a different metal, and each one can be a superconductor with the
+onsite pairing of `kondo_chain`,
+
+$$
+H_{\text{lead}}^{(j)} = \sum_m \epsilon_m N_m + \sum_m t_m \left(f^\dagger_m f_{m+1} + \text{h.c.}\right) + \Delta_j \sum_m \left(f^\dagger_{m\uparrow} f^\dagger_{m\downarrow} + \text{h.c.}\right).
+$$
+
+The leads couple to the spins by exchange only, which moves no charge
+in or out of a lead. As a result the phase of one pairing can be gauged
+away: the energy does not depend on the phase difference of the two
+leads, and there is no Josephson coupling through the spins. What the model gives is how
+each end spin is screened by its own lead, how a gap suppresses that
+screening, and the spin correlations across the junction.
+
+```python
+fc = ysr.spin_chain_on_metal(4, 8, site=[0, 3], Js=0.3, JK=0.5,
+                             Delta=[0.0, 0.5], Lambda=4.0) # normal | chain | superconductor
+fc.maxm, fc.nsweeps = 64, 16
+p, w = fc.impurities[1], fc.bath_sites[1][0] # the right spin and its lead
+print(fc.vev(fc.Sx[p]*fc.Sx[w] + fc.Sy[p]*fc.Sy[w] + fc.Sz[p]*fc.Sz[w]).real)
+```
+
+The binding $\langle \mathbf{S}_{\text{end}}\cdot\mathbf{s}_0\rangle$ of the
+right spin to its lead is -0.123 at $\Delta=0$ and -0.034 at
+$\Delta=0.5$, while that of the left spin stays at -0.122: the gap
+removes the states that screen the spin on one end only.
+
+- `Delta`, `D`, `Lambda`: a number, or one value per spin of `site`, so
+  each lead has its own gap, bandwidth and Wilson mesh. They need `site`
+  as a list.
+- `JK`: as above. On the mean mesh pass `JK*ysr.lambda_factor(Lambda)` of
+  each lead to stand for the continuum coupling.
+- The Wilson chain resolves energies down to about
+  $D\Lambda^{-n/2}$, so it must reach well below the gap and below
+  the Kondo scale of each end.
+- `subgap_energies` takes one impurity and raises on this chain.
+- With a superconducting lead, the STM spectrum runs with
+  `mode="ED", submode="CVM"` only, on short chains. The DMRG routes
+  raise there, since they do not agree with ED yet. One spin on one
+  lead, `spin_chain_on_metal(1, n, site=[0])`, is not concerned: it is
+  the chain of `kondo_chain`.
+
+The example is `examples/kondo/spin_chain_between_metal_and_superconductor`.
+
 ### An Anderson level in the chain
 
 The spin under the tip can also be an orbital with a charge, an Anderson

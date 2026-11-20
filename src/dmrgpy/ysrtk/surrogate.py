@@ -373,6 +373,12 @@ def sector_energies(fc, mode="DMRG", sectors=None, nstates=1,
     above the lowest one of its sector, the signature of a wrong impurity
     charge, raises too; on itensor_version="python" they are refused."""
     import copy
+    from .. import ysr
+    if ysr.on_metal_leads(fc):
+        raise ValueError("sector_energies is for a surrogate chain, whose "
+            "baths are one metal: on a chain of spin_chain_on_metal each "
+            "lead keeps its own fermion parity, so a 2Sz sector alone does "
+            "not fix the state")
     if getattr(fc, "Delta_sc", 0.0) == 0.0:
         raise ValueError("sector_energies needs a gap, Delta > 0")
     N = len(fc.impurities)
@@ -469,6 +475,8 @@ def get_stm_spectrum(fc, es, spin=0, parity="auto", **kwargs):
     from . import paritystate
     parity = paritystate.check_parity(parity)
     mode = kwargs.get("mode", "DMRG")
+    ysr.refuse_dmrg_on_paired_leads(fc, mode=mode,
+                                    where="surrogate.get_stm_spectrum")
     if parity == "auto": # the plain solve, the sectors only on a mixture
         ops = ysr.tunneling_operators(fc, imp=fc.impurities[spin],
                                       site=fc.bath_sites[spin][0],

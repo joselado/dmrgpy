@@ -369,9 +369,56 @@ up there are not converged by either route at these bond dimensions,
 and the differences of 6% to 46% between the routes in the Js sweep
 are in those lines.
 
-## 6. What is not in it
+## 6. A chain between two leads, normal or superconducting
+
+With `site=[0, ns-1]` in the sides order the chain sits between two
+semi-infinite leads, and since 2026-11-20 every lead can be its own
+metal: `D`, `Lambda` and `Delta` are a number or one value per spin of
+the list, `Delta` being the uniform onsite pairing of `kondo_chain` on
+every site of that lead. Exchange moves no charge in or out of a lead,
+so the phase of a pairing is a gauge and the model has no Josephson
+coupling; a complex `Delta` raises.
+
+Checks, all in `tests/test_ysr_chains_on_metal.py`: one paired lead
+under one spin is `kondo_chain` term for term, `subgap_energies` gives
+the same E_ysr on both to 1e-10, and on v3 and "python" its DMRG E_ysr,
+`parity_ground_state` and the TASK STM spectrum agree with ED (1e-7,
+1e-7 and 1e-4 of the peak), so this one layout is not refused; at JK = 0 the ED energy is the
+Heisenberg chain plus two BdG chains with different Delta, D and Lambda,
+to 1e-10, and `fc.lead_qp_gap` is the BdG gap of each; a reordered
+`site` list with its values reordered is the same model in all three
+orders (spins 0 and 1 of 3, which are not a mirror pair), and the same
+list with the values not reordered is not; Delta_R -> -Delta_R leaves
+the six lowest levels unchanged to 1e-10; DMRG against ED to 1e-7 on v3
+and "python".
+
+The STM spectrum with pairing is not verified on DMRG. On 2 spins with
+3 Wilson sites per lead (Delta = 0.15 and 0.3, JK = 1, maxm 256), TASK
+with `expand_bonds=8, expand_rounds=3` in the sides order was 3e-4 to
+6e-4 of the peak off ED on both backends, against 1e-8 at Delta = 0, and
+plain TASK with the tip first in the linear order was 1.6e-3 off on
+"python" and 0.89 on v3. The ground state was exact to 8e-13 on both,
+with an elastic weight of 1e-25 and no degeneracy, so the cause is in
+the TASK space; it was not diagnosed. All three STM entry points
+(`ysr.get_stm_spectrum`, `zaverage.stm_poles`,
+`surrogate.get_stm_spectrum`) raise on DMRG for these chains, and
+`mode="ED", submode="CVM"` runs. On ED a mirror-symmetric junction can
+have a degenerate ground level whose members differ in the parity of
+each lead, and CVM then takes one combination; this is open.
+
+The example `examples/kondo/spin_chain_between_metal_and_superconductor`
+puts a normal metal on the left and a superconductor on the right of 4
+spins (8 Wilson sites per lead, Lambda = 4, JK = 0.5, Js = 0.3). The
+binding <S_end . s_0> of the right spin to its lead goes from -0.1227 at
+Delta = 0 to -0.0338 at Delta = 0.5, and that of the left spin from
+-0.1227 to -0.1217; maxm 64 and 128 agree to five digits.
+
+## 7. What is not in it
 
 - A common metal: the baths of different spins are independent.
+- Energies resolved by the parity of each lead, and a charge path
+  through the chain (the Josephson effect).
+- The STM spectrum with superconducting leads on DMRG.
 - T > 0 with several baths: TASK is a T = 0 method, and the NRG tail
   takes one Wilson chain.
 - The NRG tail with several baths, which is the interleaved chains of

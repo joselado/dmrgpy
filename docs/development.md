@@ -7640,6 +7640,56 @@ through `handover_shell`, `head_tail_poles`, `head_task_poles` and
 measurements are in `docs/new_methods/chains_on_metal/README.md` and the
 tests in `tests/test_ysr_chains_on_metal.py`.
 
+Leads that differ, and superconducting leads (2026-11-20). With `site` a
+list, `D`, `Lambda` and `Delta` of `spin_chain_on_metal` are a number or
+one value per contact (`_per_contact`), so `site=[0, ns-1]` in the sides
+order is a spin chain between two different semi-infinite leads. Every
+contact gets `wilson_chain(n, Lambda[k], (-D[k], D[k]), z, mesh)`, one
+chain per distinct metal, and `Delta[k]` is the uniform onsite pairing of
+`kondo_chain` on every site of chain k (real only, and a complex one
+raises: exchange moves no charge in or out of a lead, so the phase of a
+pairing is a gauge, f -> exp(i phi/2) f on that lead). `anderson_spin_chain` passes no
+`Delta`. The int `site` path is untouched and raises on a nonzero `Delta`
+or a per-lead `D`/`Lambda`. Per-lead values are stored as `fc.lead_Delta`,
+`fc.lead_D`, `fc.lead_Lambda`, `fc.lead_chains` and `fc.lead_qp_gap`. The
+scalars the other tools read keep their type: `fc.Delta_sc` is the
+largest |Delta[k]| (the consumers compare it with 0), `fc.qp_gap` and
+`fc.t_last` the smallest of the leads, `fc.dos_factor` that of the leads
+when they share Lambda (it depends on Lambda and the mesh only), and
+`fc.wilson_chain` and `fc.wilson_params` those of the leads when all are
+the same metal; otherwise None (of the tools that take these chains, only
+the NRG route reads them, and it takes one chain with no pairing). `subgap_energies` and
+`paritystate.parity_ground_state` assume one impurity on the first
+sites, `ni = 2*fc.spin` of them, and seed and check the charge there;
+on a chain of `_chain_on_metal` those sites are the left lead in the
+sides order, and a 2Sz sector does not fix the parity of each lead, so
+both raise on `ysr.on_metal_leads(fc)`, as does
+`surrogate.sector_energies`, which reads any chain with `fc.impurities` as
+a surrogate one. `on_metal_leads` is true for every such chain except one Kondo spin
+with one chain after it, `spin_chain_on_metal(1, n, site=[0])`, which is
+`kondo_chain` term for term; there `subgap_energies`,
+`parity_ground_state` and the TASK STM spectrum agree with ED on v3 and
+`"python"` with pairing (1e-7, 1e-7 and 1e-4 of the peak). Several spins
+on one paired lead are not measured and stay refused, as the int `site`
+path refuses Delta. Energies resolved by the parity of each lead are not
+implemented. `ysr.refuse_dmrg_on_paired_leads` raises for
+`fc.Delta_sc != 0` on such a chain unless the call resolves to ED
+(`fc.get_mode(mode=mode)`); `ysr.get_stm_spectrum`, `zaverage.stm_poles`
+and `surrogate.get_stm_spectrum` call it before any solve, since
+`stm_poles` reaches TASK without `get_stm_spectrum` (found by the
+read-only review of 2026-11-20). The measurement: on 2 spins with 3 Wilson sites per lead at maxm 256, TASK with
+`expand_bonds=8, expand_rounds=3` was 3e-4 to 6e-4 of the peak off ED in
+the sides order on both backends (1e-8 at Delta = 0), and plain TASK with
+the tip first in the linear order 1.6e-3 on `"python"` and 0.89 on v3,
+with the ground state exact to 8e-13 and an elastic weight of 1e-25, so
+the cause is in the TASK space and not in the state. Not diagnosed.
+`tests/test_ysr_chains_on_metal.py`
+pins the refusal of the DMRG STM routes, one superconducting lead
+against `kondo_chain`, the decoupled limit
+against the Heisenberg chain plus two BdG chains with different Delta, D
+and Lambda, a reordered `site` list in every order, the sign of one
+pairing, and DMRG against ED on v3 and `"python"`.
+
 ### 4.9 TDZ / complex-time-evolution dynamical correlator
 
 `tdz.py` implements `submode="TDZ"` (Cao, Lu, Stoudenmire & Parcollet,

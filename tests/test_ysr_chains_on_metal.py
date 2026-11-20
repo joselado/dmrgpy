@@ -391,3 +391,164 @@ def test_head_state_with_a_fixed_sz_scans_the_charges_of_its_parity():
     for sz in (0, 1):
         c, e = nrgmps.head_state(fc, Sz=sz)
         assert (c.head_sector["Nf"] - sz) % 2 == 0
+
+
+# Leads that differ, and superconducting leads (Delta, D, Lambda per lead)
+
+def _bcs_lead_energy(n, Delta, D, Lambda):
+    """Ground energy of one free BCS Wilson chain with uniform onsite
+    pairing: sum over its levels xi of xi - sqrt(xi^2 + Delta^2)."""
+    eps, t = wilsonchain.wilson_chain(n, Lambda=Lambda, band=(-D, D))
+    xi = np.linalg.eigvalsh(np.diag(eps) + np.diag(t, 1) + np.diag(t, -1))
+    return float(np.sum(xi - np.sqrt(xi**2 + Delta**2)))
+
+
+def _leads(site=(0, 1), Delta=(0.15, 0.3), D=(1.0, 0.7), Lambda=(2.0, 3.0),
+           JK=(0.6, 0.4), ns=2, n=2, **kwargs):
+    return ysr.spin_chain_on_metal(ns, n, site=list(site), Js=0.5, JK=JK,
+                                   Delta=Delta, D=D, Lambda=Lambda, Upen=6.0,
+                                   **kwargs)
+
+
+def test_one_superconducting_lead_is_the_kondo_chain():
+    a = ysr.spin_chain_on_metal(1, 3, site=[0], JK=0.4, Delta=0.2,
+                                Lambda=3.0, Upen=5.0)
+    b = ysr.kondo_chain(3, J=0.4, Delta=0.2, Lambda=3.0, Upen=5.0)
+    assert (a.hamiltonian - b.hamiltonian).is_zero()
+    assert a.Delta_sc == 0.2 and a.qp_gap == pytest.approx(b.qp_gap)
+
+
+def _bcs_lead_gap(n, Delta, D, Lambda):
+    eps, t = wilsonchain.wilson_chain(n, Lambda=Lambda, band=(-D, D))
+    xi = np.linalg.eigvalsh(np.diag(eps) + np.diag(t, 1) + np.diag(t, -1))
+    return float(np.min(np.sqrt(xi**2 + Delta**2)))
+
+
+def test_decoupled_leads_are_heisenberg_plus_two_bcs_chains():
+    fc = _leads(JK=0.0, n=3)
+    e = -0.75*0.5 + _bcs_lead_energy(3, 0.15, 1.0, 2.0) \
+        + _bcs_lead_energy(3, 0.3, 0.7, 3.0)
+    assert fc.gs_energy(mode="ED") == pytest.approx(e, abs=1e-10)
+    assert fc.dos_factor is None and fc.wilson_chain is None
+    gaps = [_bcs_lead_gap(3, 0.15, 1.0, 2.0), _bcs_lead_gap(3, 0.3, 0.7, 3.0)]
+    assert np.allclose(fc.lead_qp_gap, gaps, atol=1e-12)
+    assert fc.Delta_sc == 0.3 and fc.qp_gap == pytest.approx(min(gaps))
+    same_mesh = _leads(Lambda=2.0) # only D differs: one dos factor
+    assert same_mesh.dos_factor == ysr.lambda_factor(2.0)
+    assert same_mesh.wilson_chain is None
+
+
+@pytest.mark.parametrize("order", ["sides", "linear", "comb"])
+def test_values_follow_the_spin_not_the_position(order):
+    """A reordered site list with its values reordered is the same
+    model, in every order of the sites, and swapping only the values is
+    another model. Spins 0 and 1 of 3 are not a mirror pair, so a swap
+    of the leads cannot hide behind the reflection of the chain."""
+    a = _leads(site=(0, 1), ns=3, order=order)
+    b = _leads(site=(1, 0), ns=3, order=order, Delta=(0.3, 0.15),
+               D=(0.7, 1.0), Lambda=(3.0, 2.0), JK=(0.4, 0.6))
+    c = _leads(site=(1, 0), ns=3, order=order) # values not reordered
+    ea, eb, ec = (x.gs_energy(mode="ED") for x in (a, b, c))
+    assert ea == pytest.approx(eb, abs=1e-10)
+    assert abs(ea - ec) > 1e-3
+
+
+def test_the_sign_of_one_pairing_does_not_matter():
+    """Exchange keeps the parity of each lead, so the phase of one pairing
+    is a gauge: no Josephson coupling through the spins."""
+    a = _leads()
+    b = _leads(Delta=(0.15, -0.3))
+    ea, eb = (np.sort(np.real(c.get_excited(n=6, mode="ED")))
+              for c in (a, b))
+    assert np.allclose(ea, eb, atol=1e-10)
+    off = _leads(Delta=(0.15, 0.0)) # the pairing does enter
+    assert abs(off.gs_energy(mode="ED") - ea[0]) > 1e-2
+    with pytest.raises(ValueError, match="must be real"):
+        _leads(Delta=(0.15, 0.3j))
+
+
+@pytest.mark.parametrize("version", [3, "python"])
+def test_superconducting_leads_dmrg_against_ed(version):
+    fc = _leads(ns=3, site=(0, 2), n=2, itensor_version=version)
+    fc.maxm, fc.nsweeps = 64, 16
+    assert fc.gs_energy() == pytest.approx(fc.gs_energy(mode="ED"), abs=1e-7)
+
+
+def test_leads_without_delta_are_the_old_chain():
+    a = ysr.spin_chain_on_metal(3, 2, site=[0, 2], JK=0.5)
+    b = ysr.spin_chain_on_metal(3, 2, site=[0, 2], JK=0.5, Delta=0.0,
+                                D=[1.0, 1.0], Lambda=[2.0, 2.0])
+    assert (a.hamiltonian - b.hamiltonian).is_zero()
+    assert a.Delta_sc == 0.0 and a.dos_factor == ysr.lambda_factor(2.0)
+
+
+def test_lead_arguments_raise_where_they_cannot_apply():
+    with pytest.raises(ValueError, match="site as a list"):
+        ysr.spin_chain_on_metal(3, 2, site=2, Delta=0.1)
+    with pytest.raises(ValueError, match="site as a list"):
+        ysr.spin_chain_on_metal(3, 2, D=[1.0, 0.5])
+    with pytest.raises(ValueError, match="one value per spin"):
+        ysr.spin_chain_on_metal(3, 2, site=[0, 2], Delta=[0.1, 0.2, 0.3])
+    eps, t = wilsonchain.wilson_chain(2)
+    with pytest.raises(ValueError, match="must be numbers"):
+        ysr.spin_chain_on_metal(3, 2, site=[0, 2], wilson=(eps, t),
+                                D=[1.0, 0.5])
+
+
+def test_sector_tools_refuse_a_chain_between_leads():
+    from dmrgpy.ysrtk import paritystate
+    fc = _leads()
+    with pytest.raises(ValueError, match="spin_chain_on_metal"):
+        ysr.subgap_energies(fc, mode="ED")
+    with pytest.raises(ValueError, match="spin_chain_on_metal"):
+        paritystate.parity_ground_state(fc, mode="ED")
+    from dmrgpy.ysrtk import surrogate
+    with pytest.raises(ValueError, match="spin_chain_on_metal"):
+        surrogate.sector_energies(fc, mode="ED")
+
+
+@pytest.mark.parametrize("version", [3, "python"])
+def test_one_spin_on_one_paired_lead_is_not_refused(version):
+    """site=[0] on one spin is kondo_chain term for term, so the sector
+    tools and the DMRG STM routes take it, and agree with ED."""
+    from dmrgpy.ysrtk import paritystate
+    kw = dict(site=[0], JK=0.4, Delta=0.2, Upen=5.0)
+    ref = ysr.spin_chain_on_metal(1, 3, **kw)
+    fc = ysr.spin_chain_on_metal(1, 3, itensor_version=version, **kw)
+    fc.maxm, fc.nsweeps = 64, 16
+    assert not ysr.on_metal_leads(fc)
+    assert ysr.on_metal_leads(ysr.spin_chain_on_metal(2, 3, site=[1],
+                                                      Delta=0.2))
+    k = ysr.subgap_energies(ysr.kondo_chain(3, J=0.4, Delta=0.2, Upen=5.0),
+                            mode="ED")
+    e = ysr.subgap_energies(ref, mode="ED")
+    d = ysr.subgap_energies(fc)
+    assert e["E_ysr"] == pytest.approx(k["E_ysr"], abs=1e-10)
+    assert d["E_ysr"] == pytest.approx(e["E_ysr"], abs=1e-7)
+    p = paritystate.parity_ground_state(fc)[1]
+    assert min(p["sectors"].values()) == pytest.approx(
+        min(e["sectors"].values()), abs=1e-7)
+    x = ysr.get_stm_spectrum(ref, _ES, **_ED)[1]
+    y = ysr.get_stm_spectrum(fc, _ES, delta=_DELTA)[1]
+    assert np.max(np.abs(x - y)) < 1e-4*np.max(x)
+
+
+def test_nrg_refuses_a_superconducting_lead():
+    fc = ysr.spin_chain_on_metal(1, 3, site=[0], JK=0.4, Delta=0.2)
+    with pytest.raises(ValueError, match="Delta"):
+        ysr.get_stm_spectrum(fc, np.linspace(-1, 1, 5), submode="NRG")
+
+
+def test_stm_on_superconducting_leads_takes_ed_only():
+    """TASK with pairing on these chains was 0.89 of the peak off ED on v3
+    (8 sites, exact ground state), so the DMRG routes raise; ED runs."""
+    from dmrgpy.ysrtk import surrogate, zaverage
+    fc = _leads()
+    with pytest.raises(ValueError, match="not verified"):
+        ysr.get_stm_spectrum(fc, _ES, imp=fc.impurities[0], **_EXPAND)
+    with pytest.raises(ValueError, match="stm_poles: the DMRG routes"):
+        zaverage.stm_poles(fc, imp=fc.impurities[0], nkry=10)
+    with pytest.raises(ValueError, match="surrogate.get_stm_spectrum"):
+        surrogate.get_stm_spectrum(fc, _ES, spin=0)
+    e, d = ysr.get_stm_spectrum(fc, _ES, imp=fc.impurities[0], **_ED)
+    assert np.all(np.isfinite(d)) and np.max(d) > 0

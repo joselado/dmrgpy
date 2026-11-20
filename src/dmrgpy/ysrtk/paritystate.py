@@ -272,6 +272,13 @@ def parity_ground_state(fc, sectors=None, mode="DMRG"):
     (module docstring). Raises at Delta = 0, where an Sz sector does not
     fix the particle number, and on a backend with no sectors
     (itensor_version 2, "julia_live")."""
+    from .. import ysr
+    if ysr.on_metal_leads(fc):
+        raise ValueError("parity_ground_state takes one impurity on the "
+            "first sites (kondo_chain, island_chain, a surrogate chain): on "
+            "a chain of spin_chain_on_metal the spins sit between the "
+            "Wilson chains, and each lead keeps its own fermion parity, so "
+            "a 2Sz sector alone does not fix the state")
     if getattr(fc, "Delta_sc", 0.0) == 0.0:
         raise ValueError("parity_ground_state needs a gap, Delta > 0: at "
             "Delta = 0 the particle number is conserved too, so an Sz "

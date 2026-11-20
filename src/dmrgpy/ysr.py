@@ -287,6 +287,12 @@ def subgap_energies(fc, mode="DMRG", nrestart=1, sectors=None,
     |E_ysr| can exceed Delta in the exact answer. Sectors of one parity are
     split by Dz and B, so their differences are not bounded by Delta."""
     import warnings
+    if on_metal_leads(fc):
+        raise ValueError("subgap_energies is for one gapped bath with the "
+            "impurity on the first sites (kondo_chain): on a chain of "
+            "spin_chain_on_metal the spins sit between the Wilson chains, "
+            "and with several leads each lead keeps its own fermion "
+            "parity, so a 2Sz sector alone does not fix the state")
     if hasattr(fc, "island"):
         raise ValueError("subgap_energies is for a gapped bath "
             "(kondo_chain): on an island_chain the bath is a metal, the two "
@@ -625,7 +631,7 @@ def island_spin_correlations(fc, mode="DMRG"):
 
 def spin_chain_on_metal(ns, n, site=None, Js=0.5, JK=0.5, Lambda=2.0, D=1.0,
                         B=0.0, z=0.0, Upen=None, mesh="mean", wilson=None,
-                        order=None, **kwargs):
+                        order=None, Delta=0.0, **kwargs):
     """A Heisenberg chain of ns spins 1/2 on a normal metal: the spin
     site (any of 0..ns-1, default the end spin ns-1) is Kondo coupled by
     JK to the first site of a Wilson chain of n sites, the metal under
@@ -711,11 +717,49 @@ def spin_chain_on_metal(ns, n, site=None, Js=0.5, JK=0.5, Lambda=2.0, D=1.0,
     puts the tip on spin fc.contacts[k] and takes the electron at the
     first site of its own chain; a tip on a spin with no chain raises.
     submode="NRG" takes one chain only. A list of one spin with
-    order="linear" is the chain above, up to the order of the terms."""
+    order="linear" is the chain above, up to the order of the terms.
+
+    Leads that differ, and superconducting leads. With site a list, D,
+    Lambda and Delta are a number or one value per spin of the list, as
+    JK, so every Wilson chain can be a different metal: wilson_chain(n,
+    Lambda[k], (-D[k], D[k]), z, mesh) plus the uniform onsite pairing
+    Delta[k] sum_m (f^dag_{m up} f^dag_{m dn} + h.c.) of kondo_chain on
+    every site of chain k. site=[0, ns-1] (order "sides") is a spin chain
+    between two semi-infinite leads, the left one reversed on the left end
+    of the MPS and the right one on the right end. The leads couple to the
+    spins by exchange only, which moves no charge in or out of a lead, so
+    a phase of one pairing can be gauged away (f -> exp(i phi/2) f on that
+    lead): the energy does not depend on it (Delta[k] -> -Delta[k] leaves
+    the spectrum unchanged), and there is no Josephson coupling through
+    the spins. Delta is real, and a complex one raises. Each lead keeps
+    its own fermion parity. With JK on the mean mesh, pass JK[k]*lambda_factor(
+    Lambda[k]). The chain stores fc.lead_Delta, fc.lead_D, fc.lead_Lambda
+    (one value per spin of the list), fc.lead_chains (the (eps, t) of
+    every chain) and fc.lead_qp_gap (the lowest Bogoliubov level of every
+    chain alone); fc.Delta_sc is the largest |Delta[k]|, fc.qp_gap the
+    smallest gap, fc.t_last the smallest last hopping, fc.dos_factor that
+    of the leads when they share Lambda (None otherwise), and
+    fc.wilson_chain and fc.wilson_params those of the leads when all are
+    the same metal (None otherwise). With several leads the sector tools
+    (subgap_energies, ysrtk.paritystate.parity_ground_state,
+    ysrtk.surrogate.sector_energies) raise (see on_metal_leads), and with
+    a nonzero Delta the STM spectrum takes get_stm_spectrum(mode="ED",
+    submode="CVM") only: the DMRG routes raise, also through
+    zaverage.stm_poles and surrogate.get_stm_spectrum (see
+    refuse_dmrg_on_paired_leads for the measurement). One spin with one
+    lead, spin_chain_on_metal(1, n, site=[0]), is kondo_chain term for
+    term and is not refused. D, Lambda and Delta per lead need
+    site as a list, and wilson= by hand takes D and Lambda as numbers."""
     if np.ndim(site) == 1:
         return _chain_on_metal(ns, n, site, order, Js=Js, B=B, Lambda=Lambda,
                                D=D, z=z, Upen=Upen, mesh=mesh, wilson=wilson,
-                               JK=JK, kwargs=kwargs)
+                               JK=JK, kwargs=kwargs, Delta=Delta)
+    if np.any(np.asarray(Delta) != 0.0) or np.ndim(D) > 0 or \
+            np.ndim(Lambda) > 0:
+        raise ValueError("Delta, and D or Lambda per lead, need site as a "
+                         "list: pass site=[%s] for one spin on the metal, "
+                         "or site=[0, ns-1] for a chain between two leads"
+                         % ("ns-1" if site is None else site))
     if order is not None:
         raise ValueError("order= places several Wilson chains; with one "
                          "spin on the metal (site an int) the chain always "
@@ -809,7 +853,9 @@ def anderson_spin_chain(ns, n, site=None, Js=0.5, ed=None, U=1.0, tD=0.2,
 
     site may be a list: every spin of it is then an Anderson level with
     its own Wilson chain, and ed, U and tD are numbers or one value per
-    spin of the list; order is as in spin_chain_on_metal. The STM vertex
+    spin of the list, and so are D and Lambda, the bandwidth and the mesh
+    of each chain, as in spin_chain_on_metal (no pairing here); order is
+    as in spin_chain_on_metal. The STM vertex
     of a tip on an Anderson site is d^dag_s (plus q f^dag_{0 s} for the
     direct path into the metal, get_stm_spectrum(q=)), so dI/dV is the
     spectral function of the level summed over spin, the ideal STM limit
@@ -894,7 +940,7 @@ def _per_contact(name, x, nc):
 
 
 def _chain_on_metal(ns, n, site, order, Js, B, Lambda, D, z, Upen, mesh,
-                    wilson, kwargs, JK=None, anderson=None):
+                    wilson, kwargs, JK=None, anderson=None, Delta=0.0):
     """The builder behind spin_chain_on_metal with a list of spins and
     behind anderson_spin_chain: ns spins 1/2, the spins of site on the
     metal, each with its own Wilson chain, Kondo coupled by JK or, with
@@ -929,14 +975,31 @@ def _chain_on_metal(ns, n, site, order, Js, B, Lambda, D, z, Upen, mesh,
     if order not in METAL_ORDERS:
         raise ValueError("order must be one of %s, got %r"
                          % (METAL_ORDERS, order))
+    Dl = _per_contact("D", D, nc)
+    Ll = _per_contact("Lambda", Lambda, nc)
+    if np.iscomplexobj(Delta):
+        raise ValueError("Delta must be real: with exchange coupling only, "
+            "no term moves charge in or out of a lead, so the phase of its "
+            "pairing is a gauge")
+    Pl = _per_contact("Delta", Delta, nc)
     if wilson is None:
-        eps, t = wilsonchain.wilson_chain(n, Lambda=Lambda, band=(-D, D),
-                                          z=z, mesh=mesh)
+        made = {} # one chain per distinct metal
+        for k in range(nc):
+            key = (Dl[k], Ll[k])
+            if key not in made:
+                made[key] = wilsonchain.wilson_chain(n, Lambda=Ll[k],
+                                                     band=(-Dl[k], Dl[k]),
+                                                     z=z, mesh=mesh)
+        chains = [made[(Dl[k], Ll[k])] for k in range(nc)]
     else:
+        if np.ndim(D) > 0 or np.ndim(Lambda) > 0:
+            raise ValueError("wilson=(eps, t) by hand is one chain for "
+                             "every lead, so D and Lambda must be numbers")
         eps, t = (np.asarray(x, dtype=float) for x in wilson)
         if len(eps) != n or len(t) != n - 1:
             raise ValueError("wilson=(eps, t) needs %d energies and %d "
                              "hoppings" % (n, n - 1))
+        chains = [(eps, t)]*nc
     spins, baths = _metal_layout(ns, n, contacts, order)
     level = [spins[c] for c in contacts]
     if anderson is None:
@@ -962,7 +1025,7 @@ def _chain_on_metal(ns, n, site, order, Js, B, Lambda, D, z, Upen, mesh,
                       "default)", RuntimeWarning, stacklevel=3)
     penalized = [p for p in spins if p not in andersons]
     if Upen is None:
-        Upen = 2.0*(D + scale + abs(Js) + abs(B))
+        Upen = 2.0*(np.max(Dl) + scale + abs(Js) + abs(B))
     fc = fermionchain.Spinful_Fermionic_Chain_Native(ns + n*nc, **kwargs)
     def dot(a, b):
         return fc.Sx[a]*fc.Sx[b] + fc.Sy[a]*fc.Sy[b] + fc.Sz[a]*fc.Sz[b]
@@ -985,10 +1048,14 @@ def _chain_on_metal(ns, n, site, order, Js, B, Lambda, D, z, Upen, mesh,
     for p in penalized: # one electron on every charge-frozen spin
         q = fc.Nup[p] + fc.Ndn[p] - 1
         h = h + Upen*q*q
-    for w in baths: # the Wilson chains
+    for k, w in enumerate(baths): # the Wilson chains
+        eps, t = chains[k]
         for m in range(n):
             if eps[m] != 0.0:
                 h = h + eps[m]*(fc.Nup[w[m]] + fc.Ndn[w[m]])
+            if Pl[k] != 0.0: # onsite pairing, as in kondo_chain
+                h = h + Pl[k]*(fc.Cdagup[w[m]]*fc.Cdagdn[w[m]]
+                               + fc.Cdn[w[m]]*fc.Cup[w[m]])
             if m < n - 1:
                 h = h + t[m]*_hop(fc, w[m], w[m+1])
     fc.set_hamiltonian(h)
@@ -1005,7 +1072,11 @@ def _chain_on_metal(ns, n, site, order, Js, B, Lambda, D, z, Upen, mesh,
     fc.anderson = andersons
     fc.spin = fractions.Fraction(ns, 2)
     fc.tip_spin = level[0]
-    fc.Delta_sc = 0.0
+    fc.lead_Delta, fc.lead_D, fc.lead_Lambda = Pl, Dl, Ll
+    fc.lead_chains = [(np.array(e), np.array(x)) for e, x in chains]
+    fc.lead_qp_gap = np.array([bath_quasiparticle_gap(e, x, Pl[k])
+                               for k, (e, x) in enumerate(chains)])
+    fc.Delta_sc = float(np.max(np.abs(Pl)))
     fc.Dz = 0.0
     fc.B_imp = B
     if anderson is None:
@@ -1016,14 +1087,64 @@ def _chain_on_metal(ns, n, site, order, Js, B, Lambda, D, z, Upen, mesh,
     fc.Js = Js
     fc.Upen = Upen
     fc.mesh = mesh
-    fc.dos_factor = lambda_factor(Lambda) if mesh == "mean" else 1.0
-    fc.t_last = abs(t[-1]) if n > 1 else D
-    fc.wilson_chain = (np.array(eps), np.array(t))
-    fc.wilson_params = (None if wilson is not None
-                        else dict(Lambda=Lambda, D=D, z=z, mesh=mesh))
-    fc.qp_gap = bath_quasiparticle_gap(eps, t, 0.0)
-    fc.reaches_gap = False
+    same = bool(np.all(Dl == Dl[0]) and np.all(Ll == Ll[0]))
+    one_mesh = mesh != "mean" or bool(np.all(Ll == Ll[0]))
+    fc.dos_factor = None # the factor depends on Lambda and the mesh only
+    if one_mesh:
+        fc.dos_factor = lambda_factor(Ll[0]) if mesh == "mean" else 1.0
+    if same: # one metal for every lead: the attributes of one chain
+        eps, t = chains[0]
+        fc.wilson_chain = (np.array(eps), np.array(t))
+        fc.wilson_params = (None if wilson is not None else
+                            dict(Lambda=float(Ll[0]), D=float(Dl[0]), z=z,
+                                 mesh=mesh))
+    else: # no single value; the per-lead ones are fc.lead_*
+        fc.wilson_chain = fc.wilson_params = None
+    fc.t_last = float(min(abs(x[-1]) if n > 1 else Dl[k]
+                          for k, (e, x) in enumerate(chains)))
+    fc.qp_gap = float(np.min(fc.lead_qp_gap))
+    fc.reaches_gap = bool(np.any(Pl != 0.0) and all(
+        n > 1 and abs(x[-1]) < 0.1*abs(Pl[k])
+        for k, (e, x) in enumerate(chains) if Pl[k] != 0.0))
     return fc
+
+
+def on_metal_leads(fc):
+    """True for a chain of _chain_on_metal (spin_chain_on_metal with a
+    list of spins, anderson_spin_chain) other than one Kondo spin with one
+    Wilson chain after it, spin_chain_on_metal(1, n, site=[0]), which is
+    kondo_chain term for term. The sector tools of one impurity seed and
+    check the charge of the sites 0..2S-1 and solve a total 2Sz sector,
+    which takes the wrong sites when a chain sits before or between the
+    spins and does not fix the parity of each lead when there are
+    several. One spin with one lead is measured against ED with pairing
+    (subgap_energies, parity_ground_state and the TASK STM spectrum on v3
+    and "python"); several spins on one paired lead are not, and are
+    refused as the int site path refuses Delta."""
+    if getattr(fc, "order", None) not in METAL_ORDERS:
+        return False
+    return not (len(getattr(fc, "bath_sites", None) or ()) == 1
+                and not getattr(fc, "anderson", None)
+                and list(getattr(fc, "spin_sites", None) or ()) == [0])
+
+
+def refuse_dmrg_on_paired_leads(fc, mode="DMRG", where="get_stm_spectrum"):
+    """Raise when the STM spectrum of a chain of spin_chain_on_metal with
+    pairing (on_metal_leads and a nonzero fc.Delta_sc) is asked of a DMRG
+    route. Measured on 2 spins with 3 Wilson sites per lead at
+    saturation: sides with expand_bonds 3e-4 to 6e-4 of the peak off ED
+    (1e-8 at Delta = 0), linear tip-first plain TASK 1.6e-3 on "python"
+    and 0.89 on v3, with the ground state exact and of definite parity.
+    Called before any solve by ysr.get_stm_spectrum, zaverage.stm_poles
+    and surrogate.get_stm_spectrum."""
+    if (on_metal_leads(fc) and getattr(fc, "Delta_sc", 0.0) != 0.0
+            and fc.get_mode(mode=mode) != "ED"):
+        raise ValueError("%s: the DMRG routes are not verified on a chain "
+            "of spin_chain_on_metal with pairing other than one spin on one "
+            "lead (TASK "
+            "was measured 0.89 of the peak off ED on v3 on 8 sites, with "
+            "an exact ground state); use ysr.get_stm_spectrum with "
+            "mode=\"ED\", submode=\"CVM\" on a short chain" % where)
 
 
 def _tip_position(fc, imp):
@@ -1214,6 +1335,7 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0, q=0.0,
                              % len(fc.bath_sites))
         from . import nrgmps
         return nrgmps.get_stm_spectrum(fc, es, U=U, q=q, **kwargs)
+    refuse_dmrg_on_paired_leads(fc, mode=mode)
     if delta is None:
         delta = 0.02*(np.max(es) - np.min(es))
     Jc = getattr(fc, "J_chain", None) # a number, or one per spin (surrogate)
@@ -1239,7 +1361,8 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0, q=0.0,
                 "and 3e-2 to 1e-1 of the peak against ED on short chains "
                 "for the other tips). Build the chain again with "
                 "site=[tip, others...] and order=\"linear\" (reorder a "
-                "per-spin JK with it), or pass expand_bonds=8, "
+                "per-spin JK, D, Lambda and Delta with it), or pass "
+                "expand_bonds=8, "
                 "expand_rounds=3 and check the result against a stronger "
                 "expansion or submode=\"CVM\" with "
                 "fc.cvm_solver=\"variational\"" % nbath)
