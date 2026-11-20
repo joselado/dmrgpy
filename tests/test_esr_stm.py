@@ -423,3 +423,24 @@ def test_homodyne_part_does_not_depend_on_the_window():
     pk = np.max(np.abs(a["dc"]))
     assert abs(b["homodyne"][1] - a["homodyne"][k]) < 1e-8*pk
     assert abs(b["dc"][1] - a["dc"][k]) < 1e-4*pk
+
+
+def test_krylov_route_matches_ed():
+    """submode="KRYLOV": the populated eigenstates and one block Krylov
+    space from V|m>, against the eigenbasis; with too few blocks the final
+    states of the window lines are not converged and the call raises"""
+    _, a = chain(8).get_esr_spectrum(F, **KW)
+    _, b = chain(8).get_esr_spectrum(F, submode="KRYLOV", nkry=60, **KW)
+    assert np.max(np.abs(a - b)) < 1e-8*np.max(np.abs(a))
+    with pytest.raises(ValueError, match="raise nkry"):
+        chain(8).get_esr_spectrum(F, submode="KRYLOV", nkry=3, **KW)
+
+
+def test_krylov_route_inputs():
+    sc = chain(4)
+    with pytest.raises(ValueError, match="submode"):
+        sc.get_esr_spectrum(F, submode="TASK", **KW)
+    with pytest.raises(ValueError, match="ED"):
+        sc.get_esr_spectrum(F, submode="KRYLOV", mode="DMRG", **KW)
+    with pytest.raises(ValueError, match="nkry"):
+        sc.get_esr_spectrum(F, submode="KRYLOV", nkry=0, **KW)

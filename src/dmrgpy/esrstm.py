@@ -22,6 +22,10 @@ H_EV_GHZ = 4.135667696e-6 # Planck's constant in eV/GHz
 KB_EV_K = 8.617333262e-5 # Boltzmann's constant in eV/K
 # The relative Boltzmann weight below which a state is not populated
 P_CUT = 1e-8
+# submode="KRYLOV" keeps a Ritz state when its residual is below RITZ_TOL of
+# the half width 1/(2 pi T2) of a free-spin line (in energy, h/(2 pi T2)):
+# its energy is then within that of an eigenvalue
+RITZ_TOL = 0.1
 
 
 def _tip_operator(chain, site, tip):
@@ -40,12 +44,19 @@ def _tip_operator(chain, site, tip):
 def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
                      T=1.0, T1=100., T2=50., f_ref=None, rabi=1e-3,
                      vrf_over_vdc=0.,
-                     phase=0., site_weights=None, mode="ED", nstates=16,
-                     method="rates", nharm=2, p_cut=P_CUT, h=H_EV_GHZ,
-                     kB=KB_EV_K, return_parts=False, return_poles=False):
+                     phase=0., site_weights=None, mode="ED", submode=None,
+                     nstates=16, nkry=100, method="rates", nharm=2,
+                     p_cut=P_CUT, h=H_EV_GHZ, kB=KB_EV_K, return_parts=False,
+                     return_poles=False):
     """See ESRSpectrumMixin.get_esr_spectrum"""
     if mode not in ("ED", "DMRG"):
         raise ValueError("mode must be \"ED\" or \"DMRG\"")
+    if submode not in (None, "KRYLOV"):
+        raise ValueError("submode must be None or \"KRYLOV\"")
+    if submode == "KRYLOV" and mode != "ED":
+        raise ValueError("submode=\"KRYLOV\" runs on mode=\"ED\" only")
+    if isinstance(nkry, bool) or not isinstance(nkry, (int, np.integer)) or nkry < 1:
+        raise ValueError("nkry must be a positive integer, got %r" % (nkry,))
     if method not in ("rates", "floquet"):
         raise ValueError("method must be \"rates\" or \"floquet\"")
     if method == "floquet" and mode != "ED":
@@ -108,7 +119,13 @@ def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
         emax += kT*np.log(1./p_cut)
     if mode == "DMRG":
         mode = chain.get_mode(mode="DMRG") # the automatic fallbacks to ED
-    if mode == "ED":
+    if mode == "ED" and submode == "KRYLOV":
+        epop = kT*np.log(1./p_cut) if kT > 0. else 0.
+        ritz_tol = RITZ_TOL*h/(2.*np.pi*T2)
+        window = (h*(np.min(f) - margin), h*(np.max(f) + margin))
+        spec = spectrum.ed_krylov_spectrum(chain, V, D, emax, epop, window,
+                                           kT, nkry, ritz_tol, site_weights)
+    elif mode == "ED":
         spec = spectrum.ed_spectrum(chain, V, D, emax, site_weights)
     else:
         spec = spectrum.mps_spectrum(chain, V, D, emax, nstates, site_weights)
@@ -132,7 +149,8 @@ class ESRSpectrumMixin():
                          detection=None, T=1.0, T1=100., T2=50., f_ref=None,
                          rabi=1e-3, vrf_over_vdc=0., phase=0.,
                          site_weights=None,
-                         mode="ED", nstates=16, method="rates", nharm=2,
+                         mode="ED", submode=None, nstates=16, nkry=100,
+                         method="rates", nharm=2,
                          p_cut=P_CUT, h=H_EV_GHZ, kB=KB_EV_K,
                          return_parts=False, return_poles=False):
         """ESR-STM spectrum: the DC change of the current under a CW RF
@@ -177,6 +195,12 @@ class ESRSpectrumMixin():
               window and the temperature need, and warns when the energy
               variance of a strong line's states bounds its position only to
               more than its half width).
+          submode: None, or "KRYLOV" on mode="ED": the populated
+              eigenstates and one block Krylov space of nkry blocks from
+              V|m> for every populated m. Faster than the eigenbasis when few
+              states are populated and many lie in the window, slower when
+              most are populated; raises when nkry is too small to converge
+              the final states of the lines in the window.
           method: "rates" (the rate equation, default) or "floquet" (the
               driven Lindblad equation in the same eigenbasis without the
               secular and rotating-wave approximations, nharm harmonics,
@@ -198,7 +222,8 @@ class ESRSpectrumMixin():
                                 detection=detection, T=T, T1=T1, T2=T2,
                                 f_ref=f_ref, rabi=rabi, vrf_over_vdc=vrf_over_vdc,
                                 phase=phase, site_weights=site_weights,
-                                mode=mode, nstates=nstates, method=method,
+                                mode=mode, submode=submode, nstates=nstates,
+                                nkry=nkry, method=method,
                                 nharm=nharm, p_cut=p_cut, h=h, kB=kB,
                                 return_parts=return_parts,
                                 return_poles=return_poles)

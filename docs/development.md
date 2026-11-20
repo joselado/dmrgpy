@@ -7768,6 +7768,23 @@ The pieces:
   author on 2026-11-21): it needs every state up to the exchange scale and
   the counter-rotating terms, and experiments subtract a smooth
   background.
+- `submode="KRYLOV"` (`spectrum.ed_krylov_spectrum`, ED only, opt-in)
+  takes as eigenstates only the populated ones, up to kT ln(1/p_cut), and
+  one block Krylov space from V|m> for every populated m, with H
+  diagonalized in the span (the pattern of `krylovkondo.block_krylov`).
+  The relaxation needs one common basis: a two-level Bloch line per
+  transition, which separate spaces would give, was 46 to 61% of the peak
+  off. The final states of the lines in the window (|V_nm|^2 p_m above
+  `LINE_TOL` of the strongest, |E_n - E_m| in the window) must have a
+  residual below `RITZ_TOL` of a free-spin half width or the call raises;
+  the other Ritz states are kept as relaxation partners, which halves the
+  space against asking every state below emax to converge. Measured
+  against the eigsh route: 3.2 times faster on 16 spins at J = 30 GHz,
+  T = 0.05 K (5 to 10 populated states of about 100 kept), but 0.45 times
+  on 16 spins at J = 240 GHz, T = 1.2 K (80% of the kept states
+  populated, each one seeding a block), hence opt-in, not a default
+  (picked for the author on 2026-11-21). A full MPS Krylov space does not
+  carry over: it needs 3 to 4 vectors per eigenstate it replaces.
 - `esrtk/rates.py`: the Korringa rates, their scale from `T1` (a free spin
   1/2 at `f_ref`), the pure dephasing from `T2`, and the
   resolvent G of the relaxation. G is block diagonal over the blocks the

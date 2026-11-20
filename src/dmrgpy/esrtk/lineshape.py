@@ -270,9 +270,10 @@ class Lines():
         if np.any(bad):
             i = np.flatnonzero(bad)[np.argmax((bound/hw)[bad])]
             warnings.warn(
-                "get_esr_spectrum(mode=\"DMRG\"): the position of the line at "
-                "%.6g GHz is bounded only to %.3g GHz by the energy variance "
-                "of its two states, more than its half width %.3g GHz; "
-                "converge the states further (maxm, nsweeps) before reading "
-                "line positions at that level" % (self.f_p[i], bound[i], hw[i]),
+                "get_esr_spectrum(%s): the position of the line at %.6g GHz is "
+                "bounded only to %.3g GHz by the error of the energies of its "
+                "two states, more than its half width %.3g GHz; converge the "
+                "states further (maxm, nsweeps or nkry) before reading line "
+                "positions at that level" % (self.spec.route, self.f_p[i],
+                                             bound[i], hw[i]),
                 RuntimeWarning, stacklevel=4)

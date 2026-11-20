@@ -186,6 +186,14 @@ otherwise. The keywords are:
   It is also roughly the relative accuracy of the result, since the
   states above are left out of the relaxation too. A larger value needs
   fewer states.
+- `submode="KRYLOV"`, `nkry` (`mode="ED"` only): the populated eigenstates
+  and one block Krylov space of `nkry` blocks started from $V|m\rangle$ for
+  every populated state $m$, instead of every eigenstate up to the top of
+  the window. It pays when few states are populated and many lie in the
+  window: 3 times faster on 16 spins with an exchange of 30 GHz at 50 mK.
+  When most of the needed states are populated it is slower. The call
+  raises when `nkry` is too small to converge the final states of the
+  lines.
 - `method="floquet"`: the driven Lindblad equation in the same
   eigenbasis, without the secular and rotating-wave approximations, on
   `mode="ED"` with up to 64 states. It is the reference for close lines

@@ -20,6 +20,20 @@ them and diagonalizes H in their span) and reads every matrix element as
 <a|O|b> between them. Both keep the states up to emax above the lowest one,
 and the MPS route raises when its states do not reach emax, since a state
 missing below emax would be a missing line or a missing population.
+
+ed_krylov_spectrum (submode="KRYLOV") needs as eigenstates only the
+populated ones, up to epop = kT ln(1/p_cut) above the lowest state. The
+final states come from one block Krylov space started from V|m> for every
+populated m, and H is diagonalized in the span of the populated states and
+that space. This follows the pattern of kondospectrumtk/krylovkondo.py, with
+one difference that is measured: the relaxation needs one common basis. A
+two-level Bloch line per transition, as separate Krylov spaces would give,
+was 46 to 61% of the peak off the full rate equation on 8 and 10 spins,
+while the full rate equation restricted to the populated states and the
+final states with |V_nm|^2 above 1e-2 of the largest was within 4e-7 to
+2e-4 of it. The final states of the lines in the window must converge
+(ed_krylov_spectrum); the other Ritz states are kept as relaxation
+partners.
 """
 import numpy as np
 import scipy.sparse as sp
@@ -37,10 +51,22 @@ K0 = 32
 DENSE_MAX = 16384
 
 
+# A direction of a Krylov block is kept when its singular value, after the
+# projection on the space so far, is above DROP_TOL of the largest column
+# norm of the block (krylovkondo.DROP_TOL)
+DROP_TOL = 1e-9
+# The Ritz vectors are formed and tested in chunks of this many columns
+CHUNK = 64
+# submode="KRYLOV": a line out of a populated state m into n counts as a line
+# of the window when |V_nm|^2 p_m is above LINE_TOL of the strongest
+LINE_TOL = 1e-6
+
+
 class ESRSpectrum():
     """Energies (relative to the lowest state), V, D and K in the basis of
-    the kept eigenstates. sigma is sqrt(<H^2> - <H>^2) of each state on the
-    MPS route (None on ED, where the states are exact to rounding)."""
+    the kept eigenstates. sigma bounds the error of each energy: the square
+    root of <H^2> - <H>^2 on the MPS route, the Ritz residual on the Krylov
+    route (None on ED, where the states are exact to rounding)."""
     def __init__(self, e, V, D, K, sigma=None, route="ED", reached=None):
         self.e = np.asarray(e, dtype=float)
         self.dim = len(self.e)
@@ -226,3 +252,103 @@ def mps_spectrum(chain, V, D, emax, nstates, site_weights=None):
         K += w[k]*(z2 + 0.5*(p2 + p2.T))
     return ESRSpectrum(e[keep], Vm, Dm, K, sigma=sigma, route="DMRG",
                        reached=e[-1])
+
+
+def _orth(B, Q):
+    """B projected twice on the complement of the columns of Q, and an
+    orthonormal basis of what is left above DROP_TOL"""
+    scale = float(np.max(np.linalg.norm(B, axis=0))) if B.size else 0.
+    if scale == 0.:
+        return B[:, :0]
+    for _ in range(2):
+        B = B - Q @ (Q.conj().T @ B)
+    U, sv, _ = np.linalg.svd(B, full_matrices=False)
+    return U[:, sv > DROP_TOL*scale]
+
+
+def ed_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
+                       site_weights=None):
+    """ESRSpectrum from the populated eigenstates (up to epop above the
+    lowest) and the Ritz states of one block Krylov space started from V|m>
+    for every populated m, up to nkry blocks, kept up to emax above the
+    lowest state. window = (elo, ehi) is the energy range of the lines that
+    are read (the frequency window and its margin, times h).
+
+    The final states of the lines in the window, those n with
+    |V_nm|^2 p_m above LINE_TOL of the strongest for a populated m and
+    |E_n - E_m| in the window, must be converged: their residual
+    ||(H - theta)|u>|| below ritz_tol, so that an eigenvalue lies within
+    it, or the call raises and asks for more nkry. The other Ritz states
+    are kept as they are, as relaxation partners, whose energies and spin
+    matrix elements are then approximate; this needs about half the Krylov
+    space of asking every state below emax to converge (measured on 10 and
+    12 spins), and their sigma is set to 0."""
+    w = _weights(chain, site_weights)
+    edobj = chain.get_ED_obj()
+    Hs = sp.csr_matrix(edobj.get_hamiltonian())
+    if edkondo._imag_is_zero(Hs):
+        Hs = _part(Hs, np.real)
+    dim = Hs.shape[0]
+    if dim <= algebra.maxsize:
+        emu, vs = np.linalg.eigh(Hs.toarray())
+    else:
+        emu, vs = _low_states(Hs, epop)
+    pop = emu - emu[0] <= epop
+    P = np.ascontiguousarray(vs[:, pop])
+    Vs = sp.csr_matrix(edobj.get_operator(V))
+    if not edkondo._imag_is_zero(Vs) or np.iscomplexobj(P):
+        Vs = sp.csr_matrix(Vs, dtype=complex)
+        P = P.astype(complex)
+        Hs = sp.csr_matrix(Hs, dtype=complex)
+    else:
+        Vs = _part(Vs, np.real)
+    # the block Krylov space of V|m>, orthogonal to the populated states
+    Q = P
+    B = _orth(Vs @ P, Q)
+    for _ in range(int(nkry)):
+        if B.shape[1] == 0: break # the space is exhausted
+        Q = np.hstack([Q, B])
+        B = _orth(Hs @ B, Q)
+    HQ = Hs @ Q
+    Hk = Q.conj().T @ HQ
+    theta, y = np.linalg.eigh(0.5*(Hk + Hk.conj().T))
+    cand = np.flatnonzero(theta - theta[0] <= emax)
+    res = np.empty(len(cand))
+    for c0 in range(0, len(cand), CHUNK):
+        yc = y[:, cand[c0:c0 + CHUNK]]
+        R = HQ @ yc - (Q @ yc)*theta[cand[c0:c0 + CHUNK]][None, :]
+        res[c0:c0 + CHUNK] = np.linalg.norm(R, axis=0)
+    del HQ
+    U = Q @ y[:, cand]
+    del Q
+    e = theta[cand] - theta[cand[0]]
+    Vm = _transform(Vs, U)
+    # the lines in the window out of the populated states
+    popm = e <= epop
+    p = np.zeros(len(e))
+    p[popm] = np.exp(-e[popm]/kT) if kT > 0. else (e[popm] == 0.)
+    strength = np.abs(Vm)**2*p[None, :] # zero unless m is populated
+    de = np.abs(e[:, None] - e[None, :])
+    inwin = (de + res[:, None] >= window[0]) & (de - res[:, None] <= window[1])
+    smax = np.max(strength*inwin) if strength.size else 0.
+    line = inwin & (strength > LINE_TOL*smax) & (smax > 0.)
+    need = np.any(line, axis=1)
+    bad = need & (res > ritz_tol)
+    if np.any(bad):
+        raise ValueError(
+            "get_esr_spectrum(submode=\"KRYLOV\"): %d of the %d final states "
+            "of the lines in the window are not converged (largest residual "
+            "%.3g, ritz_tol %.3g); raise nkry (%d)"
+            % (np.sum(bad), np.sum(need), np.max(res[bad]), ritz_tol, nkry))
+    Dm = _transform(edobj.get_operator(D), U)
+    K = np.zeros((len(e), len(e)))
+    Sz, Sp = site_operators(chain)
+    for k in range(len(w)):
+        if w[k] == 0.: continue
+        z = _transform(edobj.get_operator(Sz[k]), U)
+        pk = _transform(edobj.get_operator(Sp[k]), U)
+        p2 = np.abs(pk)**2
+        K += w[k]*(np.abs(z)**2 + 0.5*(p2 + p2.T))
+    sigma = np.where(need | popm, res, 0.)
+    return ESRSpectrum(e, Vm, Dm, K, sigma=sigma, route="KRYLOV",
+                       reached=theta[-1] - theta[0])
