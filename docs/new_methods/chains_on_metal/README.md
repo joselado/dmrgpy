@@ -403,8 +403,11 @@ the TASK space; it was not diagnosed. All three STM entry points
 (`ysr.get_stm_spectrum`, `zaverage.stm_poles`,
 `surrogate.get_stm_spectrum`) raise on DMRG for these chains, and
 `mode="ED", submode="CVM"` runs. On ED a mirror-symmetric junction can
-have a degenerate ground level whose members differ in the parity of
-each lead, and CVM then takes one combination; this is open.
+have a degenerate ground level whose members give different spectra (3
+spins between two equal leads with Delta = 0.3 at JK = 2: the tips on
+the two end spins were 0.13 of the peak apart with one member), and
+`get_stm_spectrum` averages over the level, after which they agree to
+below 1e-8 of the peak.
 
 The example `examples/kondo/spin_chain_between_metal_and_superconductor`
 puts a normal metal on the left and a superconductor on the right of 4

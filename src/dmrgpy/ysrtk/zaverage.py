@@ -310,7 +310,10 @@ def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
     import warnings
     from .. import taskdmrg
     from ..ysr import tunneling_operators, refuse_dmrg_on_paired_leads
+    from ..ysr import bath_task_guard, check_missing_weight
     refuse_dmrg_on_paired_leads(fc, where="stm_poles")
+    check = pad_bonds != "full" and bath_task_guard(
+        fc, imp, expand_bonds is None, "stm_poles")
     if operators is not None and U != 0.0:
         raise ValueError("stm_poles: U is used only to build the tunneling "
             "vertices; with operators given, fold U into them")
@@ -326,7 +329,7 @@ def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
         fc, pinfo = paritystate.parity_ground_state(fc)
     if operators is None:
         operators = tunneling_operators(fc, U=U, **where)
-    om, wt, missing, elastic = [], [], 0.0, 0.0
+    om, wt, missing, elastic, rule = [], [], 0.0, 0.0, 0.0
     for X in operators:
         Xd = X.get_dagger()
         for pair, sign in (((Xd, X), 1.0), ((X, Xd), -1.0)):
@@ -338,6 +341,10 @@ def stm_poles(fc, imp=None, site=None, U=0.0, nkry=300, operators=None,
             wt.append(np.real(p["weight"]))
             missing += abs(p["missing_weight"])
             elastic += abs(p["elastic"])
+            rule += abs(p["missing_weight"] + p["elastic"]
+                        + complex(np.sum(p["weight"])))
+    if check: # several Kondo baths, as in ysr.get_stm_spectrum
+        check_missing_weight(missing, rule, "stm_poles")
     om, wt = np.concatenate(om), np.concatenate(wt)
     if elastic > 1e-6*max(np.sum(np.abs(wt)), 1e-300):
         warnings.warn("stm_poles: elastic weight %.3g, but a tunneling "

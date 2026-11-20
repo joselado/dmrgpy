@@ -1014,10 +1014,12 @@ def _chain_on_metal(ns, n, site, order, Js, B, Lambda, D, z, Upen, mesh,
         scale = max(np.max(np.abs(ed)), np.max(np.abs(Ud)),
                     np.max(np.abs(tD)))
     weak = Jc if anderson is None else tD
-    if order == "comb" and nc > 1 and np.any(weak == 0.0):
+    inner = np.array(contacts) < ns - 1 # a chain followed by a spin
+    if order == "comb" and np.any((weak == 0.0) & inner):
         import warnings
         warnings.warn("order=\"comb\" with a spin of zero coupling to its "
-                      "metal: a Heisenberg bond that jumps an uncoupled "
+                      "metal before the last spin: a Heisenberg bond that "
+                      "jumps an uncoupled "
                       "Wilson chain is not built by two-site DMRG, and the "
                       "solve can stop far above the ground state (0.36 on "
                       "4 chains at JK = 0). comb was measured to lead only "
@@ -1283,7 +1285,8 @@ def tunneling_operators(fc, imp=None, site=None, U=0.0, q=0.0):
 
 
 def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0, q=0.0,
-                     submode="TASK", mode="DMRG", **kwargs):
+                     submode="TASK", mode="DMRG", ground_level=None,
+                     **kwargs):
     """dI/dV(eV) at the energies es, with a normal tip at T=0, in units of
     2 pi T0^2 per unit of tip density of states: A(w) of the module
     docstring, each pole broadened into a Lorentzian of half-width delta.
@@ -1314,7 +1317,18 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0, q=0.0,
     site (head="exact", up to nrgspectral.MAX_START_SPINS spins), with
     the poles broadened on a logarithmic mesh rather than by delta; T > 0
     is allowed there. The tip is on fc.tip_spin and the first Wilson
-    site, so imp and site must be None. See nrgmps.get_stm_spectrum."""
+    site, so imp and site must be None. See nrgmps.get_stm_spectrum.
+
+    ground_level: on ED (None, the default, or True) a degenerate lowest
+    level is averaged over with equal weights, the T = 0 limit, which does
+    not depend on the basis of the level; ED otherwise hands back one
+    arbitrary member, and on a mirror-symmetric junction of 3 spins
+    between two superconducting leads (JK = 2) the tip on the left and on
+    the right spin then differed by 0.13 of the peak. A level degenerate
+    only by spin rotation gives the same curve for every member, so the
+    average changes it at roundoff only. False takes the ground state of
+    the chain as it is, and so does ED after set_gs. On DMRG, True raises
+    (use get_kondo_spectrum's n_gs for a manifold there)."""
     es = np.asarray(es, dtype=float)
     if submode == "NRG":
         if imp is not None or site is not None:
@@ -1328,6 +1342,10 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0, q=0.0,
         if delta is not None:
             raise ValueError("get_stm_spectrum: submode=\"NRG\" broadens on "
                              "a logarithmic mesh, with b=, not delta=")
+        if ground_level is not None:
+            raise ValueError("get_stm_spectrum: submode=\"NRG\" takes the "
+                             "density matrix of its own shells, not "
+                             "ground_level=")
         if len(getattr(fc, "bath_sites", None) or ()) > 1:
             raise ValueError("get_stm_spectrum: submode=\"NRG\" runs one "
                              "Wilson chain, and this chain has %d (one per "
@@ -1336,6 +1354,29 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0, q=0.0,
         from . import nrgmps
         return nrgmps.get_stm_spectrum(fc, es, U=U, q=q, **kwargs)
     refuse_dmrg_on_paired_leads(fc, mode=mode)
+    ed = fc.get_mode(mode=mode) == "ED"
+    if ground_level not in (None, True, False):
+        raise ValueError("ground_level must be None, True or False, got %r"
+                         % (ground_level,))
+    if ground_level and not ed:
+        raise ValueError("get_stm_spectrum: ground_level=True averages the "
+                         "lowest level on ED only; this call runs DMRG")
+    injected = getattr(getattr(fc, "ED_obj", None), "_injected_state", False)
+    if ed and ground_level is not False and not injected:
+        members = _ed_ground_level(fc)
+        if len(members) > 1: # the T = 0 average over the level
+            c, out = copy.deepcopy(fc), 0.0
+            for wf in members:
+                c.set_gs(wf)
+                out = out + get_stm_spectrum(c, es, delta=delta, imp=imp,
+                        site=site, U=U, q=q, submode=submode, mode=mode,
+                        ground_level=False, **kwargs)[1]
+            return es, out/len(members)
+    for k in ("return_poles", "variance"):
+        if k in kwargs:
+            raise ValueError("get_stm_spectrum returns the curve only, so "
+                             "%s= is not taken; zaverage.stm_poles gives the "
+                             "poles of the same vertices" % k)
     if delta is None:
         delta = 0.02*(np.max(es) - np.min(es))
     Jc = getattr(fc, "J_chain", None) # a number, or one per spin (surrogate)
@@ -1345,44 +1386,10 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0, q=0.0,
     on_task = (submode == "TASK" and mode != "ED"
                and getattr(fc, "mode", None) != "ED"
                and kwargs.get("pad_bonds") != "full")
-    kondo_baths = nbath > 1 and not getattr(fc, "anderson", None)
     plain = kwargs.get("expand_bonds") is None
-    if on_task and kondo_baths and plain:
-        import warnings
-        p = _tip_position(fc, imp)
-        if not (getattr(fc, "order", None) == "linear"
-                and p == fc.impurities[0]):
-            raise ValueError("get_stm_spectrum: plain TASK on a chain with "
-                "%d Wilson chains misses most of the spectrum unless the "
-                "tip spin is the first of site= in order=\"linear\": each "
-                "chain keeps its own charge, and the one-site tangent space "
-                "of any other layout cannot hold X^dag|GS> (62%% to 95%% of "
-                "its weight missing with 15 and 21 Wilson sites in sides, "
-                "and 3e-2 to 1e-1 of the peak against ED on short chains "
-                "for the other tips). Build the chain again with "
-                "site=[tip, others...] and order=\"linear\" (reorder a "
-                "per-spin JK, D, Lambda and Delta with it), or pass "
-                "expand_bonds=8, "
-                "expand_rounds=3 and check the result against a stronger "
-                "expansion or submode=\"CVM\" with "
-                "fc.cvm_solver=\"variational\"" % nbath)
-        warnings.warn("get_stm_spectrum: TASK with the tip spin first in "
-            "order=\"linear\" was measured on two chains of up to 15 "
-            "Wilson sites (nothing of X^dag|GS> missing, 1.7e-4 of the peak "
-            "against ED on 3 sites); check it against a stronger expansion "
-            "or submode=\"CVM\" with fc.cvm_solver=\"variational\". With "
-            "three chains or more the linear order also costs about 1e-2 "
-            "in the energy at maxm 128 (docs/new_methods/chains_on_metal)",
-            RuntimeWarning)
-    elif on_task and nbath > 1 and plain: # Anderson levels: not measured
-        import warnings
-        warnings.warn("get_stm_spectrum: this chain has %d Wilson chains, "
-            "one per level on the metal; on several Kondo baths the "
-            "one-site tangent space of TASK misses part of X^dag|GS>, and "
-            "levels were not measured. Pass expand_bonds=8, "
-            "expand_rounds=3 and check the result against a stronger "
-            "expansion or against submode=\"CVM\" with "
-            "fc.cvm_solver=\"variational\"" % nbath, RuntimeWarning)
+    # with several Kondo baths the poles come back with their missing
+    # weight, and a TASK space that lost a tenth of the sum rule raises
+    check = on_task and bath_task_guard(fc, imp, plain, "get_stm_spectrum")
     if (on_task and nbath <= 1
             and Jc is not None and np.all(np.asarray(Jc) == 0)
             and not (kwargs.get("expand_bonds") is not None
@@ -1397,9 +1404,6 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0, q=0.0,
             "mode=\"ED\" on a short chain, or use the BdG density of states "
             "of zaverage.bdg_chain_dos, for J = 0",
             RuntimeWarning)
-    # with several Kondo baths the poles come back with their missing
-    # weight, and a TASK space that lost a tenth of the sum rule raises
-    check = on_task and kondo_baths
     extra = dict(return_poles=True, variance=False) if check else {}
     out, lost, rule = np.zeros(len(es)), 0.0, 0.0
     for X in tunneling_operators(fc, imp=imp, site=site, U=U, q=q):
@@ -1415,14 +1419,90 @@ def get_stm_spectrum(fc, es, delta=None, imp=None, site=None, U=0.0, q=0.0,
                 lost += m
                 rule += abs(info["missing_weight"] + info["elastic"]
                             + complex(np.sum(info["weight"])))
-    if check and lost > MISSING_RAISE*rule:
-        raise ValueError("get_stm_spectrum: the TASK space misses %.3g of "
+    if check:
+        check_missing_weight(lost, rule, "get_stm_spectrum")
+    return es, out
+
+
+GROUND_LEVEL_TOL = 1e-9 # relative width of the lowest ED level
+
+
+def _ed_ground_level(fc):
+    """The ED states of the lowest level of fc, the ones within
+    GROUND_LEVEL_TOL max(1, |E0|) of E0, asking for more states until the
+    level is closed."""
+    n = 4
+    while True:
+        es, ws = fc.get_excited_states(mode="ED", n=n)
+        es = np.real(np.asarray(es))
+        tie = GROUND_LEVEL_TOL*max(1.0, abs(es[0]))
+        k = int(np.sum(es <= es[0] + tie))
+        if k < len(es) or len(es) < n:
+            return list(ws[:k])
+        n *= 2
+
+
+def bath_task_guard(fc, imp, plain, where):
+    """The checks of a TASK solve of the tip vertices on a chain of
+    _chain_on_metal with several Wilson chains, made before any solve by
+    get_stm_spectrum and zaverage.stm_poles alike. Plain TASK (plain, no
+    expand_bonds) on several Kondo baths raises unless the tip spin is
+    the first of site= in order="linear", and warns there; on several
+    Anderson levels it warns. Returns True on several Kondo baths, where
+    the caller reads the missing weight of every vertex and passes it to
+    check_missing_weight."""
+    import warnings
+    nbath = len(getattr(fc, "contacts", None) or ())
+    kondo_baths = nbath > 1 and not getattr(fc, "anderson", None)
+    if kondo_baths and plain:
+        p = _tip_position(fc, imp)
+        if not (getattr(fc, "order", None) == "linear"
+                and p == fc.impurities[0]):
+            raise ValueError("%s: plain TASK on a chain with "
+                "%d Wilson chains misses most of the spectrum unless the "
+                "tip spin is the first of site= in order=\"linear\": each "
+                "chain keeps its own charge, and the one-site tangent space "
+                "of any other layout cannot hold X^dag|GS> (62%% to 95%% of "
+                "its weight missing with 15 and 21 Wilson sites in sides, "
+                "and 3e-2 to 1e-1 of the peak against ED on short chains "
+                "for the other tips). Build the chain again with "
+                "site=[tip, others...] and order=\"linear\" (reorder a "
+                "per-spin JK, D, Lambda and Delta with it), or pass "
+                "expand_bonds=8, expand_rounds=3 and check the result "
+                "against a stronger expansion or submode=\"CVM\" with "
+                "fc.cvm_solver=\"variational\"" % (where, nbath))
+        warnings.warn("%s: TASK with the tip spin first in "
+            "order=\"linear\" was measured on two chains of up to 15 "
+            "Wilson sites (nothing of X^dag|GS> missing, 1.7e-4 of the peak "
+            "against ED on 3 sites); check it against a stronger expansion "
+            "or submode=\"CVM\" with fc.cvm_solver=\"variational\". With "
+            "three chains or more the linear order also costs about 1e-2 "
+            "in the energy at maxm 128 (docs/new_methods/chains_on_metal)"
+            % where, RuntimeWarning, stacklevel=3)
+    elif nbath > 1 and plain: # Anderson levels: not measured
+        warnings.warn("%s: this chain has %d Wilson chains, "
+            "one per level on the metal; on several Kondo baths the "
+            "one-site tangent space of TASK misses part of X^dag|GS>, and "
+            "levels were not measured. Pass expand_bonds=8, "
+            "expand_rounds=3 and check the result against a stronger "
+            "expansion or against submode=\"CVM\" with "
+            "fc.cvm_solver=\"variational\"" % (where, nbath),
+            RuntimeWarning, stacklevel=3)
+    return kondo_baths
+
+
+def check_missing_weight(lost, rule, where):
+    """Raise when the TASK space of the tip vertices on several Kondo
+    baths misses more than MISSING_RAISE of their sum rule; lost is the
+    summed |missing_weight| and rule the summed |missing + elastic +
+    sum of weights| of every vertex."""
+    if lost > MISSING_RAISE*rule:
+        raise ValueError("%s: the TASK space misses %.3g of "
                          "the sum rule %.3g of the tip vertices on this "
                          "chain with several Wilson chains, above %g of it; "
                          "raise expand_bonds or fc.maxm, or use the linear "
                          "order with the tip spin first"
-                         % (lost, rule, MISSING_RAISE))
-    return es, out
+                         % (where, lost, rule, MISSING_RAISE))
 
 
 def bcs_dos(e, Delta, gamma=0.0):

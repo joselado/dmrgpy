@@ -7683,6 +7683,22 @@ the sides order on both backends (1e-8 at Delta = 0), and plain TASK with
 the tip first in the linear order 1.6e-3 on `"python"` and 0.89 on v3,
 with the ground state exact to 8e-13 and an elastic weight of 1e-25, so
 the cause is in the TASK space and not in the state. Not diagnosed.
+The same review found five older defects, fixed the same day. (1)
+`zaverage.stm_poles` skipped the several-bath TASK rules of
+`get_stm_spectrum` also at Delta = 0; both now call
+`ysr.bath_task_guard` before any solve and `ysr.check_missing_weight`
+after. (2) The comb warning fired only with several contacts and also
+for an uncoupled chain after the last spin, which no bond jumps; it
+fires now for any uncoupled contact before the last spin. (3)
+`get_stm_spectrum` passed `return_poles=`/`variance=` twice into the
+correlator (a `TypeError`); it returns the curve only and refuses both
+by name. (4) The ED correction vector solved the same system at +delta
+and -delta; `edtk/dynamics.py::solve_cv_pair` solves it once, the same
+to the last bit. (5) On ED a degenerate lowest level was represented by
+one arbitrary member; `get_stm_spectrum(ground_level=None)` averages
+over it (`_ed_ground_level`, `GROUND_LEVEL_TOL` = 1e-9 relative), which
+also needed `EDchain.e0 = None` at construction, since `lowest_energy()`
+read an attribute the fermion and spin ED objects never set.
 `tests/test_ysr_chains_on_metal.py`
 pins the refusal of the DMRG STM routes, one superconducting lead
 against `kondo_chain`, the decoupled limit

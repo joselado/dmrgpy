@@ -574,14 +574,33 @@ def dynamical_correlator_inv(h0,wf0,e0,A,B,es=np.linspace(-1,10,600),
           op = A@g@B # operator
           o = algebra.braket_wAw(wf0,op) # correlator
       elif mode=="cv": # correction vector algorithm
-          o1 = solve_cv(h0,wf0,A,B,e+e0,delta=delta,**kwargs) # conjugate gradient
-          o2 = solve_cv(h0,wf0,A,B,e+e0,delta=-delta,**kwargs) # conjugate gradient
+          o1,o2 = solve_cv_pair(h0,wf0,A,B,e+e0,delta=delta,**kwargs)
           o = 1j*(o1 - o2)/2. # substract
       else: raise ValueError("dynamical_correlator_inv: unknown mode %r, "
                              "use \"full\" or \"cv\"" % (mode,))
       out.append(o)
   return es,np.array(out)/np.pi # return result
 
+
+
+def solve_cv_pair(h0,wf0,si,sj,w,delta=0.0,rtol=1e-6):
+    """solve_cv at +delta and at -delta from one conjugate gradient solve.
+    The two systems have the same matrix, since (h0-w)^2 + delta^2 is even
+    in delta, and right-hand sides of opposite sign, and CG from the zero
+    start is odd in b step by step (r, p, q and x change sign, rho, alpha,
+    beta and the residual norm do not), so the -delta solve is exactly
+    minus the +delta one, and (h0-w)(-x)/(-delta) is exactly the +delta
+    term. The two values are those of two solve_cv calls to the last bit
+    (tests/test_ed_cvm_pair.py), at half the cost."""
+    from scipy.sparse import identity
+    iden = identity(h0.shape[0],dtype=np.complex128) # matrix to use
+    b = -delta*sj@wf0 # create the b vector
+    A = (h0 - w*iden)@(h0-w*iden) + iden*delta*delta # define A matrix
+    x,info = slg.cg(A,b,rtol=rtol) # solve the equation
+    y = (h0 - w*iden)@x/delta # the same at -delta, with -x
+    o1 = np.dot(np.conjugate(wf0),si@(1j*x + y)) # +delta
+    o2 = np.dot(np.conjugate(wf0),si@(1j*(-x) + y)) # -delta
+    return o1,o2
 
 
 def solve_cv(h0,wf0,si,sj,w,delta=0.0,rtol=1e-6):

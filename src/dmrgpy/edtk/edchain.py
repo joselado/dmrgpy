@@ -54,6 +54,7 @@ class EDchain():
         self.operators = dict() # empty dictionary
         self.localdim = [] # empty list
         self.computed_gs = False
+        self.e0 = None # the solved ground energy; lowest_energy() reads it
         self.Identity = None # placeholder for identity
         self.EDHamiltonian = None # initialize as None
         self.Diagonalized_Hamiltonian = None # initialize as None

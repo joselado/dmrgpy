@@ -54,14 +54,21 @@ def test_layouts():
 
 def test_comb_with_an_uncoupled_spin_warns():
     """At JK = 0 a comb solve can stop far above the ground state (0.36
-    on four chains), so asking for it warns; sides does not."""
+    on four chains), since the Heisenberg bond that jumps an uncoupled
+    chain is not built, so asking for it warns, with one contact too; an
+    uncoupled chain after the last spin is jumped by no bond and does not
+    warn, and neither does sides."""
     with pytest.warns(RuntimeWarning, match="zero coupling"):
-        ysr.spin_chain_on_metal(3, 2, site=[0, 2], JK=[0.5, 0.0],
+        ysr.spin_chain_on_metal(3, 2, site=[0, 2], JK=[0.0, 0.5],
                                 order="comb")
+    with pytest.warns(RuntimeWarning, match="zero coupling"):
+        ysr.spin_chain_on_metal(3, 2, site=[1], JK=0.0, order="comb")
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        ysr.spin_chain_on_metal(3, 2, site=[0, 2], JK=[0.5, 0.0])
+        ysr.spin_chain_on_metal(3, 2, site=[0, 2], JK=[0.5, 0.0],
+                                order="comb")
+        ysr.spin_chain_on_metal(3, 2, site=[0, 2], JK=[0.0, 0.5])
         ysr.spin_chain_on_metal(3, 2, site=[0, 2], JK=0.5, order="comb")
 
 
@@ -552,3 +559,44 @@ def test_stm_on_superconducting_leads_takes_ed_only():
         surrogate.get_stm_spectrum(fc, _ES, spin=0)
     e, d = ysr.get_stm_spectrum(fc, _ES, imp=fc.impurities[0], **_ED)
     assert np.all(np.isfinite(d)) and np.max(d) > 0
+
+
+def test_stm_poles_takes_the_bath_rules_of_get_stm_spectrum():
+    """zaverage.stm_poles reaches TASK without get_stm_spectrum, so it
+    makes the same refusal before any solve on several Kondo baths."""
+    from dmrgpy.ysrtk import zaverage
+    fc = ysr.spin_chain_on_metal(2, 3, site=[0, 1], JK=1.0)
+    with pytest.raises(ValueError, match="stm_poles: plain TASK"):
+        zaverage.stm_poles(fc, imp=fc.impurities[0], nkry=10)
+
+
+def test_get_stm_spectrum_refuses_pole_keywords():
+    fc = ysr.spin_chain_on_metal(2, 3, site=[0, 1], JK=1.0)
+    for k in ("return_poles", "variance"):
+        with pytest.raises(ValueError, match="returns the curve only"):
+            ysr.get_stm_spectrum(fc, _ES, **{k: True}, **_EXPAND)
+
+
+def test_a_degenerate_ground_level_is_averaged_on_ed():
+    """3 spins between two equal superconducting leads at JK = 2 have a
+    twofold lowest level that spin rotation does not connect; one member
+    gave the tip on the left and on the right spin curves 0.13 of the
+    peak apart, and the average is the mirror image of itself."""
+    fc = ysr.spin_chain_on_metal(3, 2, site=[0, 2], Js=0.5, JK=2.0,
+                                 Delta=0.3, Upen=6.0)
+    assert len(ysr._ed_ground_level(fc)) == 2
+    a, b = (ysr.get_stm_spectrum(fc, _ES, imp=p, **_ED)[1]
+            for p in fc.impurities)
+    assert np.max(np.abs(a - b)) < 1e-8*np.max(a)
+    normal = ysr.spin_chain_on_metal(2, 3, site=[0, 1], JK=1.0)
+    with pytest.raises(ValueError, match="ED only"):
+        ysr.get_stm_spectrum(normal, _ES, ground_level=True, **_EXPAND)
+
+
+def test_a_spin_doublet_gives_the_same_curve_with_and_without_the_average():
+    fc = ysr.spin_chain_on_metal(3, 2, site=[0, 2], Js=0.5, JK=1.0,
+                                 Delta=0.3, Upen=6.0)
+    a = ysr.get_stm_spectrum(fc, _ES, imp=fc.impurities[0], **_ED)[1]
+    b = ysr.get_stm_spectrum(fc, _ES, imp=fc.impurities[0],
+                             ground_level=False, **_ED)[1]
+    assert np.max(np.abs(a - b)) < 1e-8*np.max(a)

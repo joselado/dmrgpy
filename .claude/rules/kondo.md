@@ -792,7 +792,16 @@ ED, in `get_stm_spectrum`, `zaverage.stm_poles` and
 the peak off ED with `expand_bonds` (1e-8 at Delta = 0) and 0.89 on v3
 in the linear tip-first order, with an exact ground state of definite
 parity (8 sites, 2026-11-20, not diagnosed). Do NOT lift the raise
-without a TASK or CVM route that agrees with ED there.
+without a TASK or CVM route that agrees with ED there. (9) The review of
+2026-11-20: `zaverage.stm_poles` takes the several-bath TASK rules
+through `ysr.bath_task_guard` and `check_missing_weight`, shared with
+`get_stm_spectrum`, so keep any new rule there and not in one caller;
+the comb warning fires for an uncoupled contact before the last spin,
+with one contact too; and on ED `get_stm_spectrum` averages over a
+degenerate lowest level (`ground_level=None`), since one member picked
+by a random eigensolver start gave the two tips of a mirror-symmetric
+junction curves 0.13 of the peak apart. Do NOT go back to the single
+member.
 
 **The NRG route to the STM spectrum (2026-11-13)**, `nrgspectral.py`
 (the complete-basis NRG with the full density matrix, and the exact first

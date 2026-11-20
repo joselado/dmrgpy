@@ -1375,6 +1375,10 @@ removes the states that screen the spin on one end only.
   raise there, since they do not agree with ED yet. One spin on one
   lead, `spin_chain_on_metal(1, n, site=[0])`, is not concerned: it is
   the chain of `kondo_chain`.
+- `ground_level` (in `get_stm_spectrum`, ED only): by default a
+  degenerate ground level is averaged with equal weights, the limit
+  $T\to 0$. On a symmetric junction the two members of a level can give
+  different spectra under one tip.
 
 The example is `examples/kondo/spin_chain_between_metal_and_superconductor`.
 

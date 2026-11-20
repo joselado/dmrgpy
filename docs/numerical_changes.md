@@ -2083,3 +2083,26 @@ a Kondo chain too, as it does for an Anderson chain; before, a chain
 built with its own `Upen` got twins with the default one, which leaves
 the states of one electron per spin site, and so the spectrum, as they
 were.
+
+## The 2026-11-20 degenerate ground level of the ED STM spectrum
+
+`ysr.get_stm_spectrum` on ED (and so `surrogate.get_stm_spectrum` on ED)
+averages over a degenerate lowest level with equal weights
+(`ground_level=None`, the default), the T = 0 limit. Before, ED handed
+the correlator one member of the level, picked by the eigensolver from a
+random start, so the curve depended on the run when the members give
+different spectra: on 3 spins between two equal superconducting leads at
+JK = 2 the tip on the left and on the right spin differed by 0.13 of the
+peak, and they now agree to below 1e-8 of it (the bound of the test). A level degenerate only by spin
+rotation (a Kramers doublet, a multiplet at zero field) gives the same
+spin-summed curve for every member, so there the curve moves by the
+tolerance of the correction vector only (below 1e-8 of the peak on the
+chains of `tests/test_ysr_chains_on_metal.py`) and the call costs one
+spectrum per member. `ground_level=False` is the old behaviour, and a
+state set with `set_gs` is measured as it is. The ED correction vector
+(`edtk/dynamics.py`) solves each frequency once instead of twice
+(`solve_cv_pair`), with the same numbers to the last bit
+(`tests/test_ed_cvm_pair.py`). The ED objects start with `e0 = None`,
+which `lowest_energy()` assumed: a `set_gs` on an ED chain of fermions or
+spins that had not solved its ground state raised `AttributeError` in the
+KPM, CVM and ROOTN routes.
