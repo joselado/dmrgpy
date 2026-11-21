@@ -602,6 +602,9 @@ def handover_shell(fc, k0, U=0.0, imp=None, export=None, pad_bonds=None,
 MIN_HANDOVER = 100 # a hand-over basis below this warns (README section 5)
 N_MAX = 120 # the longest Wilson chain the tail is given, before its stop rule
 OMEGA_MIN = 1e-30 # and the chain ends before its hoppings fall below this
+# times the band D (relative: wilson_chain breaks at the same site at any D)
+PREFIX_TOL = 1e-12 # the tail starts with the head chain to this, relative to
+# the largest hopping of the head
 JOINS = ("cut", "fade") # how head_tail_poles joins the tail and TASK at w_join
 
 
@@ -626,25 +629,50 @@ def join_share(omega, w_join, window, join="cut"):
     return 0.5*(1.0 + np.cos(np.pi*np.clip(x, 0.0, 1.0)))
 
 
+def _relative_sites(Lambda):
+    """The number of sites at which the scale Lambda^(-n/2) of a Wilson
+    chain, in units of its band D, reaches OMEGA_MIN."""
+    return int(2.0*np.log(1.0/OMEGA_MIN)/np.log(Lambda))
+
+
 def max_sites(Lambda, D=1.0):
     """The longest tail chain: N_MAX sites, or fewer, so that its scale
-    D Lambda^(-n/2) stays above OMEGA_MIN. wilsonchain.wilson_chain loses
-    its precision below a scale of about 1e-35 (at Lambda = 4 the
-    120-site chain is broken from site 113 on, |eps|/t grows to 8e8)."""
-    return int(min(N_MAX, 2.0*np.log(D/OMEGA_MIN)/np.log(Lambda)))
+    D Lambda^(-n/2) stays above OMEGA_MIN D. OMEGA_MIN is relative to the
+    band: wilsonchain.wilson_chain is a Lanczos on levels proportional to
+    D, so it loses its precision at a scale of about 1e-35 D, at the same
+    site whatever D is (at Lambda = 4 the 120-site chain is broken from
+    site 114 on, where |eps|/t passes 1e-3, and |eps|/t grows to 8e8 at
+    its end). So the count is the same
+    at every D, 99 sites at Lambda = 4, and D does not enter; it stays in
+    the signature for the callers that pass it."""
+    return int(min(N_MAX, _relative_sites(Lambda)))
 
 
 def tail_chain(fc, n_tail=None):
-    """The Wilson chain the tail runs on: n_tail sites (default N_MAX) of
-    the mesh of fc (fc.wilson_params), whose first sites must be the
-    Wilson chain of fc itself. The default is max_sites(Lambda, D)."""
+    """The Wilson chain the tail runs on: n_tail sites of the mesh of fc
+    (fc.wilson_params), whose first sites must be the Wilson chain of fc
+    itself. The default is max_sites(Lambda), the same number of sites at
+    every band D. An explicit n_tail whose scale goes below OMEGA_MIN D
+    warns, since the end of such a chain is near the sites where
+    wilson_chain loses its precision."""
+    import warnings
     from . import wilsonchain
     wp = getattr(fc, "wilson_params", None)
     eps_h, t_h = wilson_parameters(fc)
     if wp is None:
         raise ValueError("the head was built with wilson= by hand; pass the "
                          "tail chain as wilson_tail=(eps, t)")
-    n = max_sites(wp["Lambda"], wp["D"]) if n_tail is None else int(n_tail)
+    if n_tail is None:
+        n = max_sites(wp["Lambda"])
+    else:
+        n = int(n_tail)
+        cap = _relative_sites(wp["Lambda"])
+        if n > cap:
+            warnings.warn("tail_chain: n_tail=%d goes past %d sites, where the "
+                          "scale of the Wilson chain falls below %.0e of the "
+                          "band D; wilson_chain loses its precision near 1e-35 "
+                          "D, so the end of this chain may be broken"
+                          % (n, cap, OMEGA_MIN), RuntimeWarning, stacklevel=2)
     if n < len(eps_h):
         raise ValueError("n_tail=%d is shorter than the head (%d Wilson sites)"
                          % (n, len(eps_h)))
@@ -688,11 +716,20 @@ def lost_wilson_bonds(fc):
 
 
 def _check_prefix(eps, t, eps_h, t_h):
-    if len(eps) < len(eps_h) or \
-            np.max(np.abs(eps[:len(eps_h)] - eps_h), initial=0.0) > 1e-12 or \
-            np.max(np.abs(t[:len(t_h)] - t_h), initial=0.0) > 1e-12:
+    """Raise unless the tail chain (eps, t) starts with the Wilson chain
+    of the head (eps_h, t_h), to PREFIX_TOL of the largest hopping of the
+    head: two chains of one mesh agree to about 1e-16 D, so the check is
+    the same at every band D."""
+    if len(eps) < len(eps_h) or len(t) < len(t_h):
         raise ValueError("the tail chain does not start with the Wilson chain "
-                         "of the head")
+                         "of the head: it is shorter than the head")
+    tol = PREFIX_TOL*np.max(np.abs(t_h), initial=0.0)
+    off = max(np.max(np.abs(eps[:len(eps_h)] - eps_h), initial=0.0),
+              np.max(np.abs(t[:len(t_h)] - t_h), initial=0.0))
+    if off > tol:
+        raise ValueError("the tail chain does not start with the Wilson chain "
+                         "of the head: off by %.2e, against %.0e of its "
+                         "largest hopping" % (off, PREFIX_TOL))
 
 
 class HeadTailSpectrum(object):
@@ -729,8 +766,11 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     the Wilson site k0 (default the m-th site before the last one of fc)
     becomes the start shell of an NRG (handover_shell), which runs on the
     Wilson sites after k0 of the same mesh (tail_chain: up to n_tail
-    sites, default N_MAX, or wilson_tail=(eps, t)) with keep states per
-    shell. At T = 0 it stops stop_extra shells after the fixed point
+    sites, default max_sites(Lambda), the same at every band D, or
+    wilson_tail=(eps, t)) with keep states per shell. The tail must start
+    with the Wilson chain of fc (_check_prefix), and k0 and the tail are
+    checked before the head is solved. At T = 0 it stops stop_extra
+    shells after the fixed point
     (stop_tol, nrgspectral.iterate); at T > 0 at the first shell below
     T/100. task=True adds the TASK poles of the head state
     (head_task_poles, nkry blocks of four) above w_join (default omega_k0,
@@ -769,6 +809,22 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
     if join not in JOINS:
         raise ValueError("join must be one of %s, got %r" % (JOINS, join))
     tunneling_operators(fc, U=U, q=q, site=_layout(fc)[0]) # U, q before any solve
+    # k0 and the tail from fc, before the solve, so that a refused hand-over
+    # does not pay for a DMRG solve (the solved copy keeps fc's Wilson chain)
+    eps_h, t_h = wilson_parameters(fc)
+    nh = len(eps_h)
+    if k0 is None:
+        k0 = nh - 1 - int(m)
+    if not 0 <= k0 < nh - 1:
+        raise ValueError("k0 = %r: the hand-over needs a Wilson site of the "
+                         "head before its last one (0..%d)" % (k0, nh - 2))
+    if wilson_tail is None:
+        eps, t = tail_chain(fc, n_tail)
+    else:
+        eps, t = (np.asarray(x, dtype=float) for x in wilson_tail)
+    _check_prefix(eps, t, eps_h, t_h)
+    wp = getattr(fc, "wilson_params", None) or {}
+    Lambda = wp.get("Lambda", abs(t[0]/t[2]) if len(t) > 2 else 4.0)
     if solved:
         c, e0 = fc, float(np.real(fc.gs_energy()))
     else:
@@ -779,20 +835,6 @@ def head_tail_poles(fc, m=4, k0=None, n_tail=None, keep=800, T=0.0, U=0.0,
             Sz_tot = sum(c.Sz[i] for i in range(c.ns))
             s2 = int(round(2*float(np.real(c.vev(Sz_tot)))))
         symmetric = getattr(c, "B_imp", 0.0) == 0.0 and s2 != 0
-    eps_h, t_h = wilson_parameters(c)
-    nh = len(eps_h)
-    if k0 is None:
-        k0 = nh - 1 - int(m)
-    if not 0 <= k0 < nh - 1:
-        raise ValueError("k0 = %r: the hand-over needs a Wilson site of the "
-                         "head before its last one (0..%d)" % (k0, nh - 2))
-    if wilson_tail is None:
-        eps, t = tail_chain(c, n_tail)
-    else:
-        eps, t = (np.asarray(x, dtype=float) for x in wilson_tail)
-    _check_prefix(eps, t, eps_h, t_h)
-    wp = getattr(c, "wilson_params", None) or {}
-    Lambda = wp.get("Lambda", abs(t[0]/t[2]) if len(t) > 2 else 4.0)
     sh, ex = handover_shell(c, k0, U=U, Lambda=Lambda, pad_bonds=pad_bonds,
                             symmetric=symmetric, q=q)
     omega_k0 = sh.omega
@@ -959,7 +1001,8 @@ def get_stm_spectrum(fc, es, U=0.0, head="dmrg", nz=1, b=None, omega0=None,
     spins and the first Wilson site are the exact start shell
     (nrgspectral.spin_cluster_shell with fc's Js, J_chain, B_imp and
     tip_spin) and the NRG runs on the Wilson chain continued to n_tail
-    sites, with the same stop rule. The poles are broadened by
+    sites (tail_chain, default max_sites(Lambda)), with the same stop
+    rule. The poles are broadened by
     nrgspectral.curve with b (default 0.8 for one mesh at Lambda = 4, 0.4
     for nz of 4 or more, 0.6 in between) and omega0 (default: the last
     shell's scale at T = 0), all meshes read with one floor. At T > 0
