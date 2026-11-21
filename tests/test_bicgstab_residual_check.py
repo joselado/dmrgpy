@@ -35,9 +35,11 @@ def heisenberg(n, iv, maxm):
 @pytest.mark.parametrize("iv", WITH_JULIA)
 def test_diverged_solve_raises(iv):
     """z - H under truncation (maxm=12 on 10 sites): the recurrence leaves
-    the solution, and after 20 iterations x is worse than x = 0"""
+    the solution, and after 100 iterations x is worse than x = 0 (relative
+    residual 2.6e2 to 2e13 in five "python" runs, whose random start makes
+    the path differ; after 20 it was 0.94 to 23, across the threshold)"""
     sc, h, e0, b = heisenberg(10, iv, 12)
-    sc.cvm_nit = 20
+    sc.cvm_nit = 100
     A = (e0 + 1. + 0.1j)*multioperator.identity() - h
     with pytest.raises(RuntimeError, match="worse than x = 0"):
         sc.applyinverse(A, b)

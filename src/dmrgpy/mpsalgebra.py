@@ -429,14 +429,16 @@ BICGSTAB_RAISE = 1.
 
 def check_bicgstab(self,A,x,wf,norm,delta):
     """The true relative residual ||A x - wf||/||wf|| of a BiCGSTAB solve,
-    with A applied and the difference summed with the maxm cap lifted (as
-    vev.energy_variance does), so that only the cutoff acts, relative to
-    the residual itself. Warns above BICGSTAB_WARN*delta, raises
-    RuntimeError above BICGSTAB_RAISE or when it is not finite. Returns it."""
+    with A applied and the difference summed exactly: the maxm cap lifted
+    (as vev.energy_variance does) and the cutoff at 0, since a cutoff acts
+    relative to ||A x||, about ||wf||, and its floor sqrt(cutoff) would
+    reach 10*delta for a tight cvm_tol. Warns above BICGSTAB_WARN*delta,
+    raises RuntimeError above BICGSTAB_RAISE or when it is not finite.
+    Returns it."""
     from . import vev
     julia = _is_julia(wf)
-    old = self.maxm
-    self.maxm = vev._UNCAPPED
+    old, oldcut = self.maxm, self.cutoff
+    self.maxm, self.cutoff = vev._UNCAPPED, 0.
     try:
         if not julia:
             self._session.set_sweep_params(self.maxm,self.nsweeps,
@@ -446,7 +448,7 @@ def check_bicgstab(self,A,x,wf,norm,delta):
         r = summps_dmrg(self,ax,wf*(-1.))
         res = np.sqrt(abs(r.dot(r)))/norm
     finally:
-        self.maxm = old
+        self.maxm, self.cutoff = old, oldcut
         if not julia:
             self._session.set_sweep_params(self.maxm,self.nsweeps,
                     self.cutoff,self.noise)

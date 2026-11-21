@@ -2111,9 +2111,10 @@ KPM, CVM and ROOTN routes.
 
 `get_esr_spectrum` (commit bedb9bf, not pushed) changed in two ways that
 move its numbers. The homodyne part (`vrf_over_vdc` not zero) now keeps
-each line only within 30 free-spin widths of its resonance, $30/(\pi T_2)$
-in frequency, with a smooth cut from 15 widths on, on the rate equation
-and on `method="floquet"` alike. Before, every kept line added its
+each line only within 30 widths of its resonance, with a smooth cut from
+15 widths on, the width being that of the line with its power
+broadening and at least $1/(\pi T_2)$, on the rate equation and on
+`method="floquet"` alike. Before, every kept line added its
 dispersive tail, which falls only as one over the detuning, so the
 homodyne part depended on which states were kept: it moved by 1e-2 (6
 spins) to 4e-2 (12 spins) of the DC line when the window was zoomed onto

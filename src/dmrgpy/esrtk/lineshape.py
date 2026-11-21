@@ -63,12 +63,19 @@ HOMODYNE_INNER = 15.
 READ_MARGIN = 5.
 
 
-def homodyne_taper(det, T2):
+def homodyne_taper(det, T2, unit=None):
     """The factor of a coherence at a detuning |det| (rad/ns) from its
-    resonance: 1 up to HOMODYNE_INNER full widths 2/T2 of a free spin, 0
-    beyond WINDOW_MARGIN, and a smoothstep in between"""
-    x1 = HOMODYNE_INNER*2./T2
-    x2 = WINDOW_MARGIN*2./T2
+    resonance: 1 up to HOMODYNE_INNER widths, 0 beyond WINDOW_MARGIN, and a
+    smoothstep in between. The width is unit (rad/ns, full width, a number
+    or an array like det), by default 2/T2, that of a free spin; Lines
+    passes the larger of that and the power-broadened width of each line,
+    so that a saturated line is not cut inside itself (a review of
+    2026-11-21: at xi = 22 on one spin the Bloch homodyne part is still 65%
+    of its peak 30 free-spin widths out)."""
+    if unit is None:
+        unit = 2./T2
+    x1 = HOMODYNE_INNER*unit
+    x2 = WINDOW_MARGIN*unit
     t = np.clip((np.abs(det) - x1)/(x2 - x1), 0., 1.)
     return 1. - t*t*(3. - 2.*t)
 # Pairs with a saturation parameter above SAT_TOL at a frequency are solved
@@ -166,6 +173,14 @@ class Lines():
             self.d = gD[self.u] - gD[self.l] # D^T G a_p
             self.Kdiag = (G[self.u, self.u] - G[self.u, self.l]
                           - G[self.l, self.u] + G[self.l, self.l])
+            # the full width of each line at resonance with power
+            # broadening, 2 gamma sqrt(1 + s) with the saturation parameter
+            # s = -w_p K_pp (xi^2 of the Bloch formula for one spin), and the
+            # width the homodyne taper counts in: never below a free spin's
+            sres = np.maximum(-0.5*self.Omega**2*self.v2/self.gam*self.Kdiag,
+                              0.)
+            self.hom_unit = np.maximum(2.*self.gam*np.sqrt(1. + sres),
+                                       2./self.T2)
 
     def _check_degenerate(self, u, l, pop):
         """Raise on two degenerate states that V, D or the relaxation couple,
@@ -245,7 +260,8 @@ class Lines():
             dc[i] = np.sum(wp*y*self.d)
             if vrf_over_vdc != 0.:
                 rho = -0.5*self.Omega*self.Vul*y/(w - self.w_p + 1j*self.gam)
-                rho = rho*homodyne_taper(w - self.w_p, self.T2)
+                rho = rho*homodyne_taper(w - self.w_p, self.T2,
+                                         self.hom_unit)
                 hom[i] = vrf_over_vdc*np.real(ph*np.sum(rho*self.Dlu))
         return dc, hom
 
@@ -257,8 +273,8 @@ class Lines():
                    form_factor=D[self.u] - D[self.l],
                    population_difference=-self.y0,
                    width=self.gam/np.pi) # FWHM in GHz at weak drive
-        if self.spec.sigma is not None:
-            s = self.spec.sigma
+        s = getattr(self.spec, "sigma_measured", self.spec.sigma)
+        if s is not None: # the measured errors, partners included
             out["position_bound"] = (s[self.u] + s[self.l])/h
         return out
 

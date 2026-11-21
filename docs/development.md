@@ -4312,8 +4312,10 @@ stopped at once on its truncated recurrence with a true relative residual
 of $10^{-2}$. Since 2026-11-21 every BiCGSTAB solve of `applyinverse` on
 DMRG measures its true relative residual $\lVert Ax-b\rVert/\lVert
 b\rVert$ once (`mpsalgebra.check_bicgstab`, $A$ applied and the
-difference summed with the `maxm` cap lifted, one MPO application next to
-the two of every iteration), warns above `BICGSTAB_WARN` = 10 times the
+difference summed exactly, the `maxm` cap lifted and the cutoff at 0,
+since a cutoff acts relative to $\lVert Ax\rVert$ and its floor would
+reach a tight tolerance; one MPO application next to the two of every
+iteration), warns above `BICGSTAB_WARN` = 10 times the
 requested `delta`, and raises above `BICGSTAB_RAISE` = 1, where $x$ is
 worse than $x=0$ (picked for the author). A converged solve measured
 $1.1\times10^{-5}$ at `delta` = $10^{-5}$. The recurrence itself is
@@ -7782,10 +7784,16 @@ The pieces:
   sum over the kept states depends on where `emax` ends: it moved by 1e-2
   (6 spins) to 4e-2 (12 spins) of the DC line when the window was zoomed
   onto a line. `lineshape.homodyne_taper` multiplies every coherence by 1
-  up to `HOMODYNE_INNER` = 15 free-spin widths from its resonance and 0
-  beyond `WINDOW_MARGIN`, a smoothstep in between, on the rates and on
-  the Floquet route alike (there element by element at the detuning
-  w - (w_a - w_b), which also removes the counter-rotating elements).
+  up to `HOMODYNE_INNER` = 15 widths from its resonance and 0 beyond
+  `WINDOW_MARGIN`, a smoothstep in between, on the rates and on the
+  Floquet route alike (there element by element at the detuning
+  w - (w_a - w_b), which also removes the counter-rotating elements and,
+  at the detuning w, the population oscillations of the diagonal, a
+  third-order term). The width is `Lines.hom_unit`, the larger of a free
+  spin's 2/T2 and the power-broadened width 2 gamma sqrt(1 + s) of the
+  line, s = -w_p K_pp at resonance (xi^2 of the Bloch formula): in
+  free-spin widths, a line at xi = 22 was cut where its Bloch homodyne
+  part is still 65% of its peak (a review of 2026-11-21).
   The zoom then moves the homodyne part by 1e-11 to 4e-5 of the DC peak.
   The far dispersive background is left out by choice (picked for the
   author on 2026-11-21): it needs every state up to the exchange scale and
@@ -7825,13 +7833,23 @@ The pieces:
   matrix (linearly dependent directions, from two populated states
   reaching one final state, dropped at 1e-10), and the eigenstates up to
   `emax` are formed as MPS sums and read by `_states_spectrum`, the code
-  of the eigenstate route. Their energy errors sigma are kept for the
+  of the eigenstate route. The basis also holds the converged Ritz
+  states between the window bottom and `emax`, as relaxation partners:
+  with the window-line states alone a chain without a tip field in H, where
+  V never reaches the singlets and quintets, was 4.3e-5 of the peak off on
+  10 spins, and 1.1e-6 with them, for 15% more time (on 14 spins with a
+  tip field 1.1e-6 in 488 s against 3.3e-7 in 328 s). The populated states
+  are handled one at a time, so only one Krylov store, about 0.5 GB on 14
+  spins at `nkry`=600, is alive. Their energy errors sigma are kept for the
   states below the window and the final states of lines read in the window
   (`lineshape.READ_MARGIN` half widths around it, reached give or take
   the error): above the margin the basis does not span every eigenstate,
   and those eigenstates are mixtures with errors of 0.1 to 2 GHz on 12
   spins, which in the degeneracy tolerance made a "level crossing". The
-  position warning reads the same lines on every route. A drive with terms
+  position warning reads the same lines on every route, and `return_poles`
+  reports the measured errors of every state (`sigma_measured`). On ED the
+  Ritz states above `emax` whose residual reaches below it are tested and
+  kept as well. A drive with terms
   on two MPS sites is refused here (P V|m> would be a projection). On 14
   spins at J = 30 GHz, T = 0.05 K it agrees with ED to 3e-7 of the peak;
   the speed against the eigenstate route is in the plan's Krylov

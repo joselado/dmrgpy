@@ -1005,7 +1005,10 @@ in the window (`lineshape.READ_MARGIN`, give or take the error): above
 the margin the basis does not span every eigenstate and its eigenstates
 are mixtures (0.1 to 2 GHz of error on 12 spins, not noise: the same at
 cutoff 1e-14 and at any overlap cut). A drive on two MPS sites is
-refused on that route.
+refused on that route. Its basis also holds the converged Ritz states
+between the window bottom and emax as partners: do NOT drop them for
+speed, without them a chain with no tip field in H (V never reaches its
+singlets and quintets) was 4.3e-5 off instead of 1.1e-6.
 (3) The relaxation is block diagonal over what S connects (the charge
 sectors of a fermion chain), each block at its thermal weight; a drive
 across two blocks raises. (4) Only an exact degeneracy coupled by V, D or K
@@ -1026,9 +1029,11 @@ the relaxation of S and T0 to T- and T+ (1.2e-3 of the homodyne part at
 rabi = 1e-4 and V_RF/V_DC = 0.2, growing as rabi T1 over V_RF/V_DC); it is
 the model, not a bug. (7) The homodyne part goes through
 `lineshape.homodyne_taper`: each coherence is cut smoothly between 15 and
-30 free-spin widths from its resonance, on the rates and on the Floquet
-route (element by element, which also removes the counter-rotating
-elements). Without it the 1/detuning tail of the kept lines made the
+30 widths from its resonance, on the rates and on the Floquet route
+(element by element, which also removes the counter-rotating elements),
+the width being `Lines.hom_unit`, the power-broadened width of the line
+and at least a free spin's (in free-spin widths a saturated line was cut
+inside itself). Without it the 1/detuning tail of the kept lines made the
 homodyne part move by 1e-2 to 4e-2 of the DC line with the window or
 with emax; do NOT remove it to "restore" the background, which needs
 every state up to the exchange scale and the counter-rotating terms.

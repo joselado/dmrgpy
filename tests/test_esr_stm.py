@@ -58,6 +58,19 @@ def test_single_spin_is_bloch(rabi, r):
     assert np.max(np.abs(dI - ref)) < 1e-10*np.max(np.abs(ref))
 
 
+def test_strongly_saturated_homodyne_is_bloch():
+    """xi = 12 (rabi = 0.05): the line is 12 free-spin widths wide and the
+    window reaches 31 of them, past the homodyne taper in free-spin widths;
+    the taper counts in the power-broadened width of the line instead"""
+    th, f = 0.7, np.linspace(19.8, 20.2, 81)
+    _, dI = free_spin().get_esr_spectrum(f, tip=[np.sin(th), 0, np.cos(th)],
+                                         T=1.2, T1=100., T2=50., f_ref=20.,
+                                         rabi=0.05, vrf_over_vdc=0.3,
+                                         phase=0.4)
+    ref = bloch(f, 20.0, th, 1.2, 100., 50., 0.05, 0.3, 0.4)
+    assert np.max(np.abs(dI - ref)) < 1e-10*np.max(np.abs(ref))
+
+
 def test_single_spin_power_broadened_width():
     """FWHM = (1/pi T2) sqrt(1 + xi^2) of the DC line"""
     th, T1, T2, rabi = np.pi/2 - 0.3, 100., 50., 5e-3

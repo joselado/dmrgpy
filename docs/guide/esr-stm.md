@@ -89,9 +89,9 @@ f, dI, parts = sc.get_esr_spectrum(f, tip=tip, T=1.2, f_ref=20., rabi=1e-3,
 `parts["dc"]` is the symmetric line of height 0.0101 and
 `parts["homodyne"]` an antisymmetric one between -0.0026 and 0.0026.
 The dispersive tail of a line falls only as one over the detuning, so a
-line enters the homodyne part only within 30 free-spin widths of its
-resonance, $30/(\pi T_2)$ in frequency, with a smooth cut from 15 widths
-on. The background of the lines further away is not computed: it needs
+line enters the homodyne part only within 30 widths of its resonance,
+with a smooth cut from 15 widths on; the width is that of the line with
+its power broadening, and at least $1/(\pi T_2)$, that of a free spin. The background of the lines further away is not computed: it needs
 every state up to the exchange scale and the counter-rotating terms, and
 experiments subtract a smooth background anyway. The keywords are:
 

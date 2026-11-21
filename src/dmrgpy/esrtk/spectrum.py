@@ -70,7 +70,11 @@ class ESRSpectrum():
     """Energies (relative to the lowest state), V, D and K in the basis of
     the kept eigenstates. sigma bounds the error of each energy: the square
     root of <H^2> - <H>^2 on the MPS route, the Ritz residual on the Krylov
-    route (None on ED, where the states are exact to rounding)."""
+    route (None on ED, where the states are exact to rounding). The Krylov
+    routes set it to 0 for relaxation partners, so that it takes part in the
+    degeneracy rule and the position warning for the lines that are read
+    only; sigma_measured keeps the measured one for every state, which
+    return_poles reports."""
     def __init__(self, e, V, D, K, sigma=None, route="ED", reached=None):
         self.e = np.asarray(e, dtype=float)
         self.dim = len(self.e)
@@ -78,6 +82,7 @@ class ESRSpectrum():
         self.D = np.asarray(D)
         self.K = np.asarray(K, dtype=float)
         self.sigma = None if sigma is None else np.asarray(sigma, dtype=float)
+        self.sigma_measured = self.sigma
         self.route = route
         # the highest energy the builder solved for, relative to the lowest
         # state (the MPS route keeps fewer states than it solves)
@@ -469,8 +474,10 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
     Ws = _mpo_site_arrays(chain, s.H if chain.itensor_version == "python"
                           else s.hamiltonian_mpo())
     Wv = _mpo_site_arrays(chain, s.build_operator(V.to_terms()))
-    # the tangent-space Krylov space of every populated state
-    spaces = []
+    # the tangent-space Krylov space of every populated state, one at a
+    # time: a store of nkry steps is about 0.5 GB on 14 spins at maxm=64,
+    # so each is dropped before the next is built
+    finals, nbad, nneed, worst = [], 0, 0, 0.
     for m, x in zip(low, elow):
         if x > epop: continue
         ts = task.TangentSpace(s.mps_site_arrays(m.cpp_handle), Ws)
@@ -487,9 +494,7 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
         strength = np.abs(U.conj().T @ ov)**2
         inwin = ((np.abs(th) + res >= window[0])
                  & (np.abs(th) - res <= window[1]))
-        spaces.append((ts, store, cnt, U, res, strength*inwin))
-    finals, nbad, nneed, worst = [], 0, 0, 0.
-    for ts, store, cnt, U, res, strength in spaces:
+        strength = strength*inwin
         # relative to the strongest line of this populated state, so that
         # the final states of a weakly populated one are kept as well: they
         # are relaxation partners too (relative to the strongest line of
@@ -501,12 +506,20 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
         if np.any(bad):
             nbad += int(np.sum(bad))
             worst = max(worst, float(np.max(res[bad])))
-            continue
-        for k in np.flatnonzero(line):
-            T = task.ritz_vector((ts, store, cnt), U[:, k])
-            h = s.mps_from_site_arrays(_tangent_to_mps(ts, T))
-            h = s.sum_mps_weighted([h, h], [0.5, 0.5]) # truncated to maxm
-            finals.append(MPS(chain, cpp_handle=h))
+        elif not nbad:
+            # the converged Ritz states between the window bottom and emax
+            # too, as relaxation partners: with the window lines alone a
+            # chain without a tip field in H was 4.3e-5 of the peak off on
+            # 10 spins (the states V never reaches), 1.1e-6 with them, for
+            # 15% more time (a review of 2026-11-21)
+            keep = line | ((res <= ritz_tol) & (x + th <= emax)
+                           & (x + th > ecut))
+            for k in np.flatnonzero(keep):
+                T = task.ritz_vector((ts, store, cnt), U[:, k])
+                h = s.mps_from_site_arrays(_tangent_to_mps(ts, T))
+                h = s.sum_mps_weighted([h, h], [0.5, 0.5]) # truncated to maxm
+                finals.append(MPS(chain, cpp_handle=h))
+        del ts, store, b
     if nbad:
         raise ValueError(
             "get_esr_spectrum(mode=\"DMRG\", submode=\"KRYLOV\"): %d of the "
@@ -560,6 +573,7 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
         col = v2[:, m]*inwin[:, m]
         if np.max(col) > 0.:
             line |= col > LINE_TOL*np.max(col)
+    spec.sigma_measured = spec.sigma
     spec.sigma = np.where(line | (ee <= ecut), spec.sigma, 0.)
     return spec
 
@@ -622,12 +636,17 @@ def ed_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
     HQ = Hs @ Q
     Hk = Q.conj().T @ HQ
     theta, y = np.linalg.eigh(0.5*(Hk + Hk.conj().T))
-    cand = np.flatnonzero(theta - theta[0] <= emax)
+    # the Ritz states up to emax, and those above whose residual reaches
+    # below it (an eigenvalue lies within the residual), tested up to one
+    # window width above emax
+    cand = np.flatnonzero(theta - theta[0] <= emax + (window[1] - window[0]))
     res = np.empty(len(cand))
     for c0 in range(0, len(cand), CHUNK):
         yc = y[:, cand[c0:c0 + CHUNK]]
         R = HQ @ yc - (Q @ yc)*theta[cand[c0:c0 + CHUNK]][None, :]
         res[c0:c0 + CHUNK] = np.linalg.norm(R, axis=0)
+    inside = theta[cand] - theta[0] - res <= emax
+    cand, res = cand[inside], res[inside]
     del HQ
     U = Q @ y[:, cand]
     del Q
@@ -660,5 +679,7 @@ def ed_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
         p2 = np.abs(pk)**2
         K += w[k]*(np.abs(z)**2 + 0.5*(p2 + p2.T))
     sigma = np.where(need | popm, res, 0.)
-    return ESRSpectrum(e, Vm, Dm, K, sigma=sigma, route="KRYLOV",
-                       reached=theta[-1] - theta[0])
+    out = ESRSpectrum(e, Vm, Dm, K, sigma=sigma, route="KRYLOV",
+                      reached=theta[-1] - theta[0])
+    out.sigma_measured = res
+    return out

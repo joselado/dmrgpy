@@ -65,6 +65,12 @@ def signal(lines, f, vrf_over_vdc=0., phase=0., nharm=2):
         row[[a*d + a for a in idx]] = 1.
         constraints.append((idx[0]*d + idx[0], row, np.sum(lines.p0[idx])))
     rho_eq = np.diag(lines.p0)
+    # the width the taper counts in, element by element: that of the line
+    # for a driven pair (lineshape.Lines.hom_unit), a free spin's otherwise
+    unit = np.full((d, d), 2./lines.T2)
+    if lines.npairs:
+        unit[lines.u, lines.l] = lines.hom_unit
+        unit[lines.l, lines.u] = lines.hom_unit
     dc = np.zeros(len(f))
     hom = np.zeros(len(f))
     ph = np.exp(1j*phase)
@@ -93,6 +99,6 @@ def signal(lines, f, vrf_over_vdc=0., phase=0., nharm=2):
             # it at the detuning w - (w_a - w_b); it removes the
             # counter-rotating elements, at w + |w_ab|, as well
             tap = lineshape.homodyne_taper(w - (wa[:, None] - wa[None, :]),
-                                           lines.T2)
+                                           lines.T2, unit)
             hom[i] = vrf_over_vdc*np.real(ph*np.sum(D.T*(rho1*tap)))
     return dc, hom

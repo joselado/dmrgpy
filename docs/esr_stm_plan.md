@@ -115,6 +115,18 @@ measured and built:
   error of a pair misread. A drive with terms on two MPS sites (the spin
   of a spinful fermion) is refused on this route, since its start in the
   tangent space would only be a projection.
+- A read-only review of the night's diff found a silent gap: states that
+  V never reaches (on a chain without a tip field in H, the singlets and
+  quintets when the drive starts from a singlet) were missing as
+  relaxation partners. On ED the Krylov route keeps every Ritz state
+  below emax and agreed with ED to 1e-12 on 8 and 10 spins with or
+  without the tip field; on DMRG the window-line states alone gave 4.3e-5
+  of the peak on 10 spins without the tip field, and with every converged
+  Ritz state between the window bottom and emax as a partner 1.1e-6
+  (1.2e-7 with the tip field), for 15% more time. On 14 spins with the tip
+  field the partners cost 488 s against 328 s, at 1.1e-6 against 3.3e-7.
+  The same review found the homodyne cut inside a power-broadened line;
+  it now counts in the width of the line.
 - Left open: the crossover between the routes, as a function of the
   populated fraction; chains above 14 spins; the MPS sums that form the
   eigenstates of the common basis, a third of the time; how nkry has to
