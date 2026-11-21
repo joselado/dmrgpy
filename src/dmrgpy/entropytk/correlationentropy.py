@@ -79,20 +79,24 @@ def get_correlation_matrix_zeroT(self,operators=None,
     if dmmode=="full" and basis=="Nambu":
         dmmode="fast"
         print("C++ mode not implemented with Nambu basis")
+    if dmmode=="full" and operators is not None and \
+            not _is_own_C(self,operators):
+        # "full" is the matrix <Cdag_i C_j> of the chain's own C and never
+        # reads operators=, so it would answer for other operators than
+        # the ones passed; checked before get_gs(), like the typo above
+        raise ValueError("get_correlation_matrix: dmmode=\"full\" computes "
+                "<Cdag_i C_j> of the chain's own C operators only, and the "
+                "operators= passed are not those; use dmmode=\"explicit\", "
+                "or leave dmmode unset")
 #    print(dmmode)
     if wf is None: wf = self.get_gs(**kwargs) # compute ground state
     wf = wf.normalize() # normalize wavefunction
     # the default is resolved *after* the wavefunction exists, because it
     # is resolved against what that wavefunction can actually do (see
     # _default_dmmode) rather than against which backend this chain was
-    # built with
+    # built with, and against the operators= it is asked for
     if dmmode is None:
-        dmmode = _default_dmmode(self,wf,basis)
-        # the session matrix is that of the chain's own C operators, so
-        # operators= of the caller keep the route that reads them
-        if dmmode=="full" and operators is not None and \
-                not getattr(self,"conserved_sector",None):
-            dmmode = "fast"
+        dmmode = _default_dmmode(self,wf,basis,operators)
     if operators is None: # no operators provided
         if fermionchain.isfermion(self):
             if basis=="Nambu":
@@ -279,65 +283,76 @@ def cpp_correlation_matrix(wf):
     return session.correlation_matrix(wf.cpp_handle)
 
 
-def _default_dmmode(self,wf,basis):
+def _default_dmmode(self,wf,basis,operators=None):
     """Pick the dmmode for get_correlation_matrix_zeroT() when the caller
     didn't request one explicitly. `self` is the chain that was asked (it
     is the one carrying the sector), `wf` the state to be measured (it is
     the one carrying the backend handle -- the two are not the same object
-    on the ED route, and need not even be the same class).
+    on the ED route, and need not even be the same class), `operators` the
+    caller's operators= (None for the chain's own C).
 
-    Without a conserved sector this is "fast", the historical hardcoded
-    default: it applies each single-fermion operator to the state on its
-    own and overlaps the results, which is the cheapest route by a wide
-    margin. That same step changes the particle number, so under a
-    conserved sector it raises before computing anything and something
-    else has to answer (2026-08 audit, finding #11).
+    "full", the one-sweep matrix of the chain's own C, whenever
+    _full_applies() says it answers for this state and these operators,
+    with or without a sector. Otherwise "fast" without a sector: it
+    applies each operator to the state on its own and overlaps the
+    results, the cheapest route that reads operators=. That same step
+    changes the particle number, so under a conserved sector it raises
+    before computing anything (2026-08 audit, finding #11), and
+    "explicit" answers there: it builds each product X_i^dagger X_j
+    before applying it, which conserves the sector, and it works on every
+    backend, ED included, exact against "full" and against ED to 1e-12.
 
-    Which something else is decided *here*, from what this particular
-    wavefunction can actually do, rather than from which backend the chain
-    was built with. The 2026-08 fix hardcoded "full" for the sector case
-    under the premise that only DMRG could reach it ("a sector-mode chain
-    deliberately refuses to fall back to ED"); d62a306 then gave ED its
-    own sector implementation and made that premise false, at which point
-    "full" -- which is `wf.MBO._session.correlation_matrix(wf.cpp_handle)`,
-    session-only -- died with AttributeError on every ED-answered
-    sector chain (2026-09 audit, finding #17). So test the handle and the
-    session that `cpp_correlation_matrix` actually uses, on `wf.MBO` (an
-    ED wavefunction's MBO is an edtk/pyfermion object, not the chain that
-    was asked), and fall back to the backend-agnostic "explicit"
-    otherwise. "explicit" is what mpsjulialive/mps.py hardcodes for the
-    same reason, and it is exact against "full" and against ED to 1e-12.
+    Both branches read the one predicate, so that a condition "full"
+    needs (a session, spinless sites, no foreign operators=) cannot hold
+    in one branch and be missing from the other."""
+    if _full_applies(self,wf,basis,operators):
+        return "full"
+    if getattr(self,"conserved_sector",None):
+        return "explicit" # always correct, backend-agnostic
+    return "fast"
 
-    basis="Nambu" never picks "full": the C++ correlation_matrix has no
-    Nambu form (see get_correlation_matrix_zeroT's own downgrade of an
-    explicitly-requested one)."""
-    if not getattr(self,"conserved_sector",None):
-        # no sector: the one-sweep session matrix of "python"
-        # (pyitensor/chain.py's correlation_matrix_sweep, exact, 17x faster
-        # than "fast" at 32 sites; the author's pick of 2026-11-15) and of
-        # v3 (Chain::correlation_matrix_sweep, 0.37 s against 19 s for
-        # "fast" at 64 sites), and "fast" everywhere else
-        mbo = getattr(wf,"MBO",None)
-        sites = getattr(self,"sites",None)
-        spinless = sites is not None and len(sites)>0 and \
-                all(str(c)=="0" for c in sites) # Cdag/C on every site
-        if basis!="Nambu" and spinless and \
-                getattr(wf,"cpp_handle",None) is not None and \
-                getattr(mbo,"itensor_version",None) in ("python",3) and \
-                hasattr(getattr(mbo,"_session",None),"correlation_matrix_sweep"):
-            return "full"
-        # julia_live: ITensorMPS's correlation_matrix (correlations.jl), one
-        # sweep, 0.09 s against 14 s for "fast" at 32 sites
-        if basis!="Nambu" and _julia_spinless(wf):
-            return "full"
-        return "fast"
-    if basis!="Nambu" and _julia_spinless(wf):
-        return "full" # julia_live, mpsjulialive/correlations.jl
-    session = getattr(getattr(wf,"MBO",None),"_session",None)
-    if basis!="Nambu" and getattr(wf,"cpp_handle",None) is not None \
-            and hasattr(session,"correlation_matrix"):
-        return "full" # a live DMRG session that can answer directly
-    return "explicit" # always correct, backend-agnostic
+
+def _full_applies(self,wf,basis,operators=None):
+    """True when dmmode="full", cpp_correlation_matrix(wf), is the matrix
+    the caller asks for and the state can compute it: basis="electron";
+    no operators= or exactly the chain's own C in order (the session
+    matrix is <Cdag_i C_j> of those and reads nothing else); and either a
+    "python" or v3 session on a chain of spinless fermion sites that has
+    the one-sweep method, or a julia_live state on spinless fermion sites.
+
+    The session test is on `wf.MBO` (an ED wavefunction's MBO is an
+    edtk/pyfermion object with no session, not the chain that was asked),
+    and the site test on `self`, the chain whose C the matrix is of.
+
+    "python": pyitensor/chain.py's correlation_matrix_sweep, exact, 17x
+    faster than "fast" at 32 sites (the author's pick of 2026-11-15). v3:
+    Chain::correlation_matrix_sweep, 0.37 s against 19 s for "fast" at 64
+    sites. julia_live: ITensorMPS's correlation_matrix (correlations.jl),
+    one sweep, 0.09 s against 14 s for "fast" at 32 sites. v2 has no
+    one-sweep method, so its default stays "fast"."""
+    if basis=="Nambu": return False # the session matrix has no Nambu form
+    if operators is not None and not _is_own_C(self,operators):
+        return False
+    mbo = getattr(wf,"MBO",None)
+    sites = getattr(self,"sites",None)
+    spinless = sites is not None and len(sites)>0 and \
+            all(str(c)=="0" for c in sites) # Cdag/C on every site
+    if spinless and getattr(wf,"cpp_handle",None) is not None and \
+            getattr(mbo,"itensor_version",None) in ("python",3) and \
+            hasattr(getattr(mbo,"_session",None),"correlation_matrix_sweep"):
+        return True
+    return _julia_spinless(wf) # julia_live, mpsjulialive/correlations.jl
+
+
+def _is_own_C(self,operators):
+    """True when `operators` is exactly the chain's own C list, in order,
+    read term by term (a rebuilt fc.C[i] is a new object). A subset, a
+    reordering, a rescaling or a linear combination is not."""
+    own = _single_factor_modes(getattr(self,"C",[]))
+    if not own: return False
+    try: modes = _single_factor_modes(operators)
+    except (TypeError,ValueError): return False # not a list of operators
+    return modes==own
 
 
 def _julia_spinless(wf):
