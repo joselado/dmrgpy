@@ -46,12 +46,43 @@ class Thermal_Spin_Chain():
         self.Sy = Sy
         self.Sz = Sz
         self.wf0 = None
+        self._gs_key = None # what wf0 was purified under, see get_gs()
         self.mode = mode
     def get_gs(self):
-        """Compute the ground state"""
-        if self.computed_gs: 
+        """The purified thermal state, at the temperature T and the
+        settings the object holds when it is called.
+
+        The state is stored with the key it was purified under
+        (purification_key()), and the stored state is returned only while
+        that key is still the current one. A new T, anneal_* setting, mode
+        or backend, or a new solver setting of MBChain (maxm, nsweeps,
+        ...), purifies again; set_hamiltonian() drops the stored state.
+        T and the anneal_* settings are checked first, so an invalid
+        setting raises on a solved object as on a fresh one."""
+        # float() so that a numpy scalar T (an np.linspace element)
+        # takes exactly the path a Python float does
+        T = float(self.T)
+        if not T>=0.: # the setter bypasses __init__'s check
+            raise ValueError("Thermal_Spin_Chain: T must be >= 0, got "
+                             +repr(self.T))
+        method = self.anneal_method # checked before any solve
+        if method not in (None,"taylor","implicit"):
+            raise ValueError("Thermal_Spin_Chain: anneal_method must be "
+                             "None, 'taylor' or 'implicit', got "
+                             +repr(method))
+        if method!="implicit" and self.anneal_options:
+            raise ValueError("Thermal_Spin_Chain: anneal_options is "
+                             "used only with anneal_method='implicit'")
+        # read before anything below touches MBChain
+        key = purification_key(self,T)
+        if self.computed_gs and getattr(self,"_gs_key",None)==key:
             return self.wf0
         else:
+            # not current until the solve below has finished: a solve that
+            # raises half way leaves the singlet Hamiltonian on MBChain,
+            # and the old state must not be returned over it
+            self.computed_gs = False
+            self._gs_key = None
             def terms():
                 for i in range(len(self.Sx)):
                     yield self.all_Sx[2*i]*self.all_Sx[2*i+1]
@@ -60,24 +91,10 @@ class Thermal_Spin_Chain():
             h = multioperator.msum(terms()) # initialize
             self.MBChain.mode = self.mode # overwrite the mode
 #            wf = self.MBChain.random_mps()
-            # float() so that a numpy scalar T (an np.linspace element)
-            # takes exactly the path a Python float does
-            T = float(self.T)
-            if not T>=0.: # the setter bypasses __init__'s check
-                raise ValueError("Thermal_Spin_Chain: T must be >= 0, got "
-                                 +repr(self.T))
             # The switch to the plain ground state is in units of the
             # spectral width W, which anneal() needs anyway: it used to be
             # an absolute T>1e-5, so a Hamiltonian written below about
             # 1e-5 in absolute units got its ground state at every T
-            method = self.anneal_method # checked before any solve
-            if method not in (None,"taylor","implicit"):
-                raise ValueError("Thermal_Spin_Chain: anneal_method must be "
-                                 "None, 'taylor' or 'implicit', got "
-                                 +repr(method))
-            if method!="implicit" and self.anneal_options:
-                raise ValueError("Thermal_Spin_Chain: anneal_options is "
-                                 "used only with anneal_method='implicit'")
             erange = None
             if 0.<T<np.inf: erange = band_edges(self.MBChain,self.hamiltonian)
             if T>0. and (erange is None or T>1e-5*(erange[1]-erange[0])):
@@ -117,6 +134,7 @@ class Thermal_Spin_Chain():
                 wf0 = wf0.normalize()
             self.computed_gs = True
             self.wf0 = wf0 # store
+            self._gs_key = key # ...with what it was purified under
             return wf0
     # The imaginary-time stepper get_gs() hands to anneal(): the largest
     # dimensionless step dtau*W (W the spectral width of the Hamiltonian)
@@ -142,7 +160,36 @@ class Thermal_Spin_Chain():
         self.hamiltonian = (h + h.get_dagger())/2.
         self.computed_gs = False
 
-                
+
+def purification_key(tc,T):
+    """What the purified state of tc depends on, besides its Hamiltonian
+    (whose set_hamiltonian() drops the state): the temperature T (a float),
+    the anneal_* settings, whether anneal_step and anneal_order are set on
+    the instance (auto_anneal_method() reads that, not their values), the
+    mode, the backend of MBChain and its solver settings
+    (groundstate.solver_key()). anneal_options enters as a frozen copy, so
+    that an edit of the dict in place is a new key."""
+    from . import groundstate
+    sc = tc.MBChain
+    configured = tuple(k in vars(tc) for k in ("anneal_step","anneal_order"))
+    return (float(T),tc.anneal_step,tc.anneal_order,configured,
+            tc.anneal_method,_frozen(dict(tc.anneal_options or {})),tc.mode,
+            sc.itensor_version,groundstate.solver_key(sc))
+
+
+def _frozen(x):
+    """A copy of x for ==, which an edit of x in place does not change:
+    a dict as its items sorted by key, a list or tuple as a tuple and an
+    array as its shape and its entries, recursively"""
+    if isinstance(x,dict):
+        items = sorted(x.items(),key=lambda kv: repr(kv[0]))
+        return ("dict",)+tuple((k,_frozen(v)) for k,v in items)
+    if isinstance(x,(list,tuple)): return tuple(_frozen(v) for v in x)
+    if isinstance(x,np.ndarray):
+        return ("array",x.shape,_frozen(x.tolist()))
+    return x
+
+
 
                 
 def band_edges(sc,h):
