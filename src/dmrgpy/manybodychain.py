@@ -1003,7 +1003,9 @@ class Many_Body_Chain():
   def metts_vev(self,MO,T,**kwargs):
       """Finite-temperature <MO> via METTS sampling (White & Stoudenmire,
       arXiv:1002.1305) -- see vevtk/mettsvev.py. Implemented for
-      itensor_version='python' and 3 (not 2, which has no TDVP). MO may
+      itensor_version='python', 3 and 'julia_live' (not 2, which has no
+      TDVP). A collapse basis whose samples cannot leave a symmetry sector
+      of H is refused (vevtk/mettsvev.py's _check_basis). MO may
       also be a list/tuple of MultiOperators, measured together on one
       shared METTS sample chain (returns a list of (mean,stderr) pairs
       instead of a single pair) -- much cheaper than one metts_vev call
@@ -1015,9 +1017,9 @@ class Many_Body_Chain():
       C_AB(t) = <A(t)B>_T via dynamical METTS sampling (Wang, McClarty,
       Dankova, Honecker & Wietek, arXiv:2405.18484, Sec. II) -- see
       vevtk/mettsdynamicalcorrelator.py. Implemented for
-      itensor_version='python' and 3 (not 2, which has no TDVP), same
-      restriction as metts_vev. Validate against
-      self.get_dynamical_correlator(mode="ED", submode="ED", T=T,
+      itensor_version='python', 3 and 'julia_live' (not 2, which has no
+      TDVP), with the same collapse basis check as metts_vev. Validate
+      against self.get_dynamical_correlator(mode="ED", submode="ED", T=T,
       name=name) (edtk/dynamics.py's dynamical_correlator_finite_T), the
       exact Lehmann-sum reference for small systems."""
       from .vevtk.mettsdynamicalcorrelator import metts_dynamical_correlator as _mdc

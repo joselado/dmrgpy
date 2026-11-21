@@ -147,6 +147,10 @@ def metts_dynamical_correlator(MB, name, T, nt=200, dt=0.1, nsamples=100,
             "metts_dynamical_correlator: tdvp_cutoff/tdvp_maxdim are only "
             "implemented for itensor_version='python' or 'julia_live' so "
             "far (got itensor_version=%r)" % (MB.itensor_version,))
+    # the collapse basis guard of metts_vev, since the same Markov chain
+    # freezes the same way here; before str2MO, which builds operators
+    from .mettsvev import _check_basis
+    _check_basis(MB, basis_ops, caller="metts_dynamical_correlator")
 
     resolved = operatornames.str2MO(MB, name,
             require_symbolic_for="the METTS dynamical correlator")

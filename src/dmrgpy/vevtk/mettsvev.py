@@ -25,56 +25,198 @@ small even at low temperature (no ancilla doubling).
 
 import random
 
+import numpy as np
 
-def _check_basis(MB, basis_ops):
-    """Refuse a collapse basis METTS cannot sample the thermal state with.
 
-    Each name must be Hermitian, since the collapse diagonalizes it with
-    eigh. And when every name is diagonal (N, Sz, ...) the collapsed product
-    states carry a definite value of each Q = sum_i O_i, so if H conserves
-    one of those Q the Markov chain never leaves the sector it started in:
-    on a 4-site hopping chain basis_ops=("N",) returned <Ntot> = 3, 1, 1, 4
-    by seed, with stderr 0, for an exact thermal 1.7811 (2026-10-23 hole
-    hunt, finding 1). Conservation is tested on a random witness state, as
-    mpsalgebra.is_hermitian does, since the canonical form cannot prove
-    [H,Q]=0 when it rests on a same-site identity such as N C = 0. A name
-    the sites do not know is left to the backend, which raises on it.
+_MATRIX_TOL = 1e-12 # relative, for the one-site matrix tests of _check_basis
 
-    The charges tested are the basis names' own sums and the chain's
-    conserved quantities (get_sector_charge_operators), since a diagonal
-    name collapses to computational states whatever its own sum does:
-    ("Nupdn",) and ("F",) on a Hubbard chain and ("N2",) on a Bose-Hubbard
-    chain gave <Ntot> 6, 4, 2 by seed, stderr 0, for an exact 2.74
-    (2026-10-23 hole hunt, leads, finding 10)."""
+
+def _site_types(MB):
+    """The pyitensor site type of every site of MB, from its site-type
+    codes, or None when a code has no table there. _check_basis reads its
+    one-site matrices from these tables on every backend: a name is the
+    same operator on v3 and julia_live, and every test made on the
+    matrices (Hermiticity, commutation, squares) is unchanged by a common
+    change of basis and by a transpose."""
+    from ..pyitensor.sites.siteset import _site_class
+    try: return [_site_class(code) for code in MB.sites]
+    except (ValueError, TypeError): return None
+
+
+def _matrix(t, name):
+    """The matrix of a one-site name on site type t, or None if t does
+    not know the name."""
+    try: return np.asarray(t.matrix(name), dtype=complex)
+    except (ValueError, KeyError, TypeError): return None
+
+
+def _commutes(A, B, sign=-1.):
+    """A B + sign B A vanishes, relative to ||A|| ||B|| (sign=+1 tests
+    anticommutation)"""
+    return np.linalg.norm(A @ B + sign*(B @ A)) <= \
+            _MATRIX_TOL*np.linalg.norm(A)*np.linalg.norm(B)
+
+
+def _is_scalar(q):
+    """True if every one-site matrix of q is a multiple of the identity,
+    so that its sum labels no sector"""
+    return all(np.linalg.norm(m - np.trace(m)/len(m)*np.eye(len(m)))
+               <= _MATRIX_TOL*np.linalg.norm(m) for m in q)
+
+
+def _one_site_parts(types, Q):
+    """[q_k] with Q = sum_k q_k, read off the one-factor terms of Q, or
+    None when a term acts on more than one site or names an operator the
+    site tables do not know"""
+    q = [np.zeros((t.dim, t.dim), dtype=complex) for t in types]
+    for term in Q.op:
+        factors = [f for f in term[1:] if f[0] != "Id"]
+        if term[0] == 0 or not factors: continue # a constant
+        if len(factors) != 1: return None
+        name, k = factors[0]
+        if not 0 <= k < len(types): return None
+        m = _matrix(types[k], name)
+        if m is None: return None
+        q[k] = q[k] + term[0]*m
+    return q
+
+
+def _parity_conserved(H, types, p):
+    """True if every term of H commutes with P = prod_k p_k, decided
+    factor by factor: a factor that anticommutes with p_k on its own site
+    flips the sign of its term under P, one that commutes keeps it. A term
+    with an odd number of flips, or with a factor that does neither, and
+    the parity is not proven conserved. For the fermion parity the names
+    are the raw C, Cdag, ..., whose Jordan-Wigner strings commute with P,
+    so the local matrix of each factor is all that matters."""
+    for term in H.op:
+        if term[0] == 0: continue
+        flips = 0
+        for (name, k) in term[1:]:
+            if name == "Id": continue
+            if not 0 <= k < len(types): return False
+            m = _matrix(types[k], name)
+            if m is None: return False
+            if _commutes(m, p[k]): continue
+            if not _commutes(m, p[k], sign=1.): return False
+            flips += 1
+        if flips % 2: return False
+    return True
+
+
+def _check_basis(MB, basis_ops, caller="metts_vev"):
+    """Refuse a collapse basis METTS cannot sample the thermal state with,
+    on every backend and for both metts_vev and metts_dynamical_correlator
+    (caller names the call in the message).
+
+    Each name must be Hermitian, since the collapse diagonalizes it, and
+    each backend reads a different triangle of the matrix. Then the
+    Markov chain freezes when every basis name commutes, on each site,
+    with the one-site part q_k of a charge that H conserves: the collapse
+    then gives eigenstates of the charge and e^{-beta H/2} keeps them in
+    their sector. On a 4-site hopping chain basis_ops=("N",) returned
+    <Ntot> = 3, 1, 1, 4 by seed, with stderr 0, for an exact thermal
+    1.7811 (2026-10-23 hole hunt, finding 1), and ("Sx",) on a Heisenberg
+    chain froze the same way although Sx is not diagonal (2026-11-21 hole
+    hunt, finding 7). The charges tested are:
+
+    - the chain's conserved quantities (get_sector_charge_operators) and
+      each basis name's own sum, Q = sum_k q_k: ("Nupdn",) and ("F",) on
+      a Hubbard chain and ("N2",) on a Bose-Hubbard chain gave <Ntot> 6,
+      4, 2 by seed (2026-10-23, leads, finding 10). [H,Q] = 0 is proven
+      by the canonical form or tested on a random witness state, as
+      mpsalgebra.is_hermitian does, since the canonical form cannot prove
+      it when it rests on a same-site identity such as N C = 0;
+    - for a name O with (2O)^2 = 1 on every site, the parity prod_k 2O_k:
+      ("Sx",) on the transverse-field Ising chain with its field along x
+      gave <Px> = -1 at stderr 0 for 0.038;
+    - on a chain with fermion sites, the fermion parity (-1)^N. Every
+      Hermitian one-site operator of a fermion site keeps it, so on a
+      chain whose H does not conserve N every basis is frozen in one
+      parity: ("N",) on a Kitaev chain gave <(-1)^N> = -1 at stderr 0 for
+      0.043. This one is refused, by the author's pick.
+
+    A parity is proven conserved term by term (_parity_conserved). The
+    one-site matrices come from the pyitensor site tables, so a name they
+    do not know is left to the backend, which raises on it."""
     from ..multioperator import obj2MO
-    from ..multioperatortk.canonical import is_diagonal
+    types = _site_types(MB)
+    mats = {}
     for name in basis_ops:
-        try: op = obj2MO([[name, 0]])
-        except Exception: return
-        if not MB.is_hermitian(op):
-            raise ValueError("metts_vev: basis operator %r is not Hermitian, "
-                    "the collapse needs a Hermitian one" % (name,))
-    if not all(is_diagonal(name) for name in basis_ops): return
+        m = None if types is None else [_matrix(t, name) for t in types]
+        if m is None or any(M is None for M in m):
+            # not in the tables: the backend's own probe, which raises on
+            # a name the backend does not know either
+            if not MB.is_hermitian(obj2MO([[name, 0]])):
+                raise ValueError("%s: basis operator %r is not Hermitian, "
+                        "the collapse needs a Hermitian one" % (caller, name))
+            mats = None
+            continue
+        if any(np.linalg.norm(M - M.conj().T) > _MATRIX_TOL*np.linalg.norm(M)
+               for M in m):
+            raise ValueError("%s: basis operator %r is not Hermitian, the "
+                    "collapse needs a Hermitian one" % (caller, name))
+        if mats is not None: mats[name] = m
+    if mats is None: return
+    from ..groundstate import require_hamiltonian
+    require_hamiltonian(MB) # refused by name, as metts_plan would
     H = MB.hamiltonian
     cmax = max([abs(t[0]) for t in H.op]+[0.])
     if cmax == 0.: return
     H = H*(1./cmax)
-    wf = MB.random_state()
-    charges = [("sum_i %s_i" % name, sum(obj2MO([[name, i]]) for i in range(MB.ns)))
-               for name in basis_ops]
-    try: charges += sorted(MB.get_sector_charge_operators().items())
-    except NotImplementedError: pass
-    for name, Q in charges:
-        c = (H*Q - Q*H)*wf
-        hq = (H*Q)*wf
-        if c is None or hq is None: continue
-        if abs(c.dot(c)) <= 1e-20*abs(hq.dot(hq)):
-            raise ValueError("metts_vev: H conserves %s and every "
-                    "basis operator is diagonal, so the samples never leave "
-                    "the charge sector of the first one and the average is "
-                    "not thermal. Add a basis operator that changes the "
-                    "charge (e.g. basis_ops=(\"Sz\",\"Sx\") on spins), or "
-                    "use mode=\"ED\"." % (name,))
+    def frozen_by(q): # every basis name commutes with q on every site
+        return all(_commutes(m[k], q[k]) for m in mats.values()
+                   for k in range(len(q)))
+    charges = []
+    try: sector = sorted(MB.get_sector_charge_operators().items())
+    except (NotImplementedError, AttributeError): sector = []
+    for label, Q in sector:
+        charges.append(("the charge %s" % label, Q, _one_site_parts(types, Q)))
+    for name in basis_ops:
+        charges.append(("sum_i %s_i" % name,
+                        sum(obj2MO([[name, i]]) for i in range(MB.ns)),
+                        mats[name]))
+    wf = None # the random witness, drawn only when a charge needs it
+    for label, Q, q in charges:
+        if q is None or _is_scalar(q) or not frozen_by(q): continue
+        C = H*Q - Q*H
+        if not C.is_zero(): # not proven by the canonical form
+            if wf is None: wf = MB.random_state()
+            c = C*wf
+            hq = (H*Q)*wf
+            if c is None or hq is None: continue
+            # written so that a norm that is not a number does not refuse
+            if not abs(c.dot(c)) <= 1e-20*abs(hq.dot(hq)): continue
+        raise ValueError("%s: H conserves %s and every basis operator "
+                "commutes with it on each site, so the samples never leave "
+                "the charge sector of the first one and the average is not "
+                "thermal. Add a basis operator that changes the charge "
+                "(e.g. basis_ops=(\"Sz\",\"Sx\") on spins), or use "
+                "mode=\"ED\"." % (caller, label))
+    for name in basis_ops:
+        p = [2.*M for M in mats[name]]
+        if not all(np.linalg.norm(pk @ pk - np.eye(len(pk)))
+                   <= _MATRIX_TOL*len(pk) for pk in p): continue
+        if not frozen_by(p) or not _parity_conserved(H, types, p): continue
+        raise ValueError("%s: H conserves the parity prod_i 2%s_i and every "
+                "basis operator commutes with it on each site, so the "
+                "samples never leave the parity sector of the first one and "
+                "the average is not thermal. Add a basis operator that "
+                "anticommutes with it (e.g. basis_ops=(\"Sz\",\"Sx\") on "
+                "spins), or use mode=\"ED\"." % (caller, name))
+    if not any("Nf" in t.qn_names() for t in types): return
+    p = [np.diag([(-1.)**c for c in t.charges("Nf")]).astype(complex)
+         if "Nf" in t.qn_names() else np.eye(t.dim, dtype=complex)
+         for t in types]
+    if frozen_by(p) and _parity_conserved(H, types, p):
+        raise ValueError("%s: H conserves the fermion parity (-1)^N and "
+                "every basis operator keeps it on each site, so the samples "
+                "never leave the parity sector of the first one and the "
+                "average is not thermal. METTS needs a collapse basis that "
+                "mixes the parity, which the fermion sites do not offer: "
+                "write the model as a spin chain through the Jordan-Wigner "
+                "transformation and take basis_ops=(\"Sz\",\"Sx\"), or use "
+                "mode=\"ED\"." % (caller,))
 
 
 def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
@@ -191,8 +333,7 @@ def metts_vev(MB, Op, T, nsamples=200, nwarmup=20, dbeta_half_step=0.05,
             "metts_vev: njobs>1 (parallel independent Markov chains) is "
             "only implemented for itensor_version='python' so far (got "
             "itensor_version=%r)" % (MB.itensor_version,))
-    if MB.itensor_version in ("python", 3):
-        _check_basis(MB, basis_ops)
+    _check_basis(MB, basis_ops)
     single = not isinstance(Op, (list, tuple))
     ops = [Op] if single else list(Op)
     if not ops:

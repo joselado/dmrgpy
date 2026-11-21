@@ -89,9 +89,15 @@ def _site_operator_matrix(sites, opname, i):
 def _eigenbasis(sites, opname, i):
     """(eigvals, eigvecs) of the named single-site Hermitian operator at
     site i, eigvecs as columns expressed in the site's native
-    (computational) basis -- np.linalg.eigh, since every physical
-    operator dmrgpy's site tables define (Sz, Sx, N, ...) is Hermitian."""
+    (computational) basis, by np.linalg.eigh. A name that is not
+    Hermitian (S+, C, ...) raises, since eigh reads only one triangle of
+    the matrix and would collapse onto the eigenbasis of another
+    operator."""
     M = _site_operator_matrix(sites, opname, i)
+    if np.linalg.norm(M - M.conj().T) > 1e-12*np.linalg.norm(M):
+        raise ValueError("METTS collapse basis operator %r is not Hermitian "
+                         "at site %d, the collapse needs a Hermitian one"
+                         % (opname, i))
     return np.linalg.eigh(M)
 
 

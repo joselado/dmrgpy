@@ -46,11 +46,15 @@ end
 
 # (evals, U) for the named single-site Hermitian operator at site s: evals
 # ascending, U's columns the corresponding eigenvectors expressed in the
-# site's native (computational) basis -- every physical operator dmrgpy's
-# site tables define (Sz, Sx, N, ...) is Hermitian, so eigen(Hermitian(.))
-# is exact (not merely a numerically-stable approximation).
+# site's native (computational) basis. A name that is not Hermitian (S+,
+# C, ...) raises, since eigen(Hermitian(M)) reads only the upper triangle
+# of M and would collapse onto the eigenbasis of another operator.
 function metts_eigenbasis(s, opname)
 	M = metts_site_operator_matrix(s, opname)
+	if norm(M - M') > 1e-12 * norm(M)
+		error("METTS collapse basis operator $opname is not Hermitian, " *
+		      "the collapse needs a Hermitian one")
+	end
 	F = eigen(Hermitian(M))
 	return F.values, F.vectors
 end
