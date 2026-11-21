@@ -40,12 +40,36 @@ V_TOL = 1e-20
 # than MARGIN of its full widths; the tail of a Lorentzian at MARGIN widths
 # is 1/(4 MARGIN^2) of its peak.
 MARGIN = 1000.
-# The states kept are those up to WINDOW_MARGIN full widths of a free spin
-# (1/(pi T2) GHz) above the top of the window, plus kT ln(1/p_cut) at T > 0
-# (the populated states): a line further out than that is dropped, and its
-# DC tail inside the window is below 1/(4 WINDOW_MARGIN^2) = 3e-4 of its own
-# peak. Among the kept states, pairs are kept up to MARGIN widths.
+# The states kept end WINDOW_MARGIN full widths above the top of the window,
+# counted from the highest state that can carry population (esrstm). A line
+# just above a band of WINDOW_MARGIN free-spin widths 1/(pi T2) leaves a DC
+# tail inside the window of (1 + xi^2)/(4 WINDOW_MARGIN^2) of its own peak,
+# xi^2 its saturation parameter (5.0e-2 at xi = 14 on one spin at T = 0), so
+# mode="ED" counts the band in the power-broadened width of the strongest
+# line instead (band_margin), which brings the tail back to about
+# 1/(4 WINDOW_MARGIN^2) = 3e-4. Among the kept states, pairs are kept up to
+# MARGIN widths.
 WINDOW_MARGIN = 30.
+# mode="DMRG" keeps the band of free-spin widths, and warns when it keeps
+# less than BAND_WARN of band_margin above the window, counted from the
+# highest state that can carry population: a line just above the kept band
+# then leaves up to 1/(4 (BAND_WARN WINDOW_MARGIN)^2) = 1.1e-3 of its peak in
+# the window, four times the bound above, and when the kept part is
+# negative a whole line out of a populated state can be missing.
+BAND_WARN = 0.5
+
+
+def band_margin(T1, T2, rabi, vnorm):
+    """The band kept above the window, in GHz: WINDOW_MARGIN full widths of
+    the strongest line with its power broadening, sqrt(1 + xi^2)/(pi T2),
+    with xi^2 = (4 pi rabi vnorm)^2 T1 T2 the saturation parameter of a
+    two-level line with |V_nm| = vnorm, the operator norm of V. It is an
+    estimate: a line whose states relax more slowly than the tip spin
+    (a slow relaxation path) has a larger xi."""
+    xi2 = (4.*np.pi*rabi*vnorm)**2*T1*T2
+    return WINDOW_MARGIN*np.sqrt(1. + xi2)/(np.pi*T2)
+
+
 # The homodyne part of a line is dispersive, with a tail 1/detuning that
 # a sum over the kept states cuts off wherever emax happens to end: it
 # moved by 1e-2 to 4e-2 of the DC line when the window was zoomed onto a
@@ -94,8 +118,12 @@ WARN_WEIGHT = 1e-3
 
 class Lines():
     """Everything about the kept spectrum that does not depend on the
-    frequency: rates, populations, pairs, resolvent."""
-    def __init__(self, spec, f, h, kT, T1, T2, rabi, p_cut, f_ref):
+    frequency: rates, populations, pairs, resolvent. tip_weight is the
+    weight of the tip site in the Korringa kernel spec.K, by which the scale
+    of the rates is divided, so that T1 and T2 are those of the tip spin
+    (rates.korringa_scale)."""
+    def __init__(self, spec, f, h, kT, T1, T2, rabi, p_cut, f_ref,
+                 tip_weight=1.):
         f = np.asarray(f, dtype=float)
         if f.ndim != 1 or len(f) == 0:
             raise ValueError("f must be a one-dimensional array of frequencies")
@@ -106,7 +134,7 @@ class Lines():
         self.fmin, self.fmax = float(np.min(f)), float(np.max(f))
         # f_ref: the frequency at which a free spin 1/2 relaxes in T1
         self.f_ref = float(f_ref)
-        self.g = rates.korringa_scale(T1, h*self.f_ref, kT)
+        self.g = rates.korringa_scale(T1, h*self.f_ref, kT, weight=tip_weight)
         self.gphi = rates.dephasing_rate(T1, T2)
         self.Gamma = rates.rate_matrix(e, spec.K, self.g, kT)
         self.R = rates.generator(self.Gamma)
@@ -179,8 +207,37 @@ class Lines():
             # width the homodyne taper counts in: never below a free spin's
             sres = np.maximum(-0.5*self.Omega**2*self.v2/self.gam*self.Kdiag,
                               0.)
+            self.sres = sres
             self.hom_unit = np.maximum(2.*self.gam*np.sqrt(1. + sres),
                                        2./self.T2)
+        self.carry = self._carrying(p_cut)
+        # the energy of the highest of them, relative to the lowest state
+        self.carry_top = float(np.max(e[self.carry]))
+
+    def _carrying(self, p_cut):
+        """The kept states that can carry a population above p_cut of the
+        largest one under the drive: the populated ones, and those a driven
+        pair reaches from a state that carries some, followed pair by pair.
+        A pair moves s/(2(1 + s)) of the population of the state it comes
+        from, s its saturation parameter at the frequency of the window
+        closest to its resonance (the two-level value, half of it at full
+        saturation). An estimate, which decides how far the kept band must
+        reach (esrstm); the result does not use it."""
+        pe = self.p0/np.max(self.p0)
+        if self.npairs:
+            dw = 2.*np.pi*np.maximum(np.maximum(self.fmin - self.f_p,
+                                                self.f_p - self.fmax), 0.)
+            s = self.sres*self.gam**2/(self.gam**2 + dw**2)
+            t = 0.5*s/(1. + s)
+            # a product of factors below 1/2 along each path, so this ends
+            # after at most one pass per state
+            for _ in range(len(pe)):
+                new = pe.copy()
+                np.maximum.at(new, self.u, pe[self.l]*t)
+                np.maximum.at(new, self.l, pe[self.u]*t)
+                if np.array_equal(new, pe): break
+                pe = new
+        return pe > p_cut
 
     def _check_degenerate(self, u, l, pop):
         """Raise on two degenerate states that V, D or the relaxation couple,

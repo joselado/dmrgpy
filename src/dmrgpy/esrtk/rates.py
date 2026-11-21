@@ -7,10 +7,15 @@ The rate from n to m is the Korringa rate of eq. 42 of arXiv:2606.27830,
 so phi(x) = x for x >> kT (emission), x exp(-|x|/kT) for absorption, and
 kT at x = 0. It obeys detailed balance at T, so the stationary populations
 without drive are the Boltzmann ones. The scale g is fixed by T1, the
-relaxation time a free spin 1/2 on the tip site would have at the energy
-eps0 = h f_ref: for that spin K = 1/2 between its two states, and
+relaxation time of the tip spin, a free spin 1/2 on the tip site at the
+energy eps0 = h f_ref: for that spin K = w/2 between its two states, w the
+weight of the tip site in K (site_weights), and
 
-    1/T1 = Gamma_up + Gamma_down = (g/2) eps0 coth(eps0/2kT).
+    1/T1 = Gamma_up + Gamma_down = (g w/2) eps0 coth(eps0/2kT).
+
+So T1 is that of the tip spin whatever its weight, and only the ratios of
+the weights matter. A tip site of weight 0 relaxes only through the others,
+and g is then fixed for a site of weight 1.
 
 Every coherence rho_nm decays at gamma_nm = (Gamma_n + Gamma_m)/2 +
 1/Tphi, Gamma_n the total rate out of n and Tphi the pure dephasing time,
@@ -36,13 +41,18 @@ def phi(x, kT):
     return out
 
 
-def korringa_scale(T1, eps0, kT):
-    """g such that a free spin 1/2 with splitting eps0 relaxes in T1"""
+def korringa_scale(T1, eps0, kT, weight=1.):
+    """g such that a free spin 1/2 with splitting eps0, on a site of weight
+    `weight` in the Korringa kernel, relaxes in T1. A weight of 0 leaves g
+    as for a site of weight 1."""
     if not eps0 > 0.:
         raise ValueError("the reference energy h*f_ref must be above zero, "
                          "got %r" % (eps0,))
     c = 1. if kT == 0. else 1./np.tanh(eps0/(2.*kT))
-    return 2./(T1*eps0*c)
+    g = 2./(T1*eps0*c)
+    if weight > 0.:
+        g = g/weight
+    return g
 
 
 def dephasing_rate(T1, T2):

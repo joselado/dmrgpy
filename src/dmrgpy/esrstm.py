@@ -14,6 +14,8 @@ formula with the asymmetry of eq. 12 of the review of Delgado and Lorente
 (arXiv:2208.14105). The derivation and the choice of the method are in
 docs/esr_stm_plan.md.
 """
+import warnings
+
 import numpy as np
 
 from .esrtk import floquet, lineshape, spectrum
@@ -31,6 +33,97 @@ P_CUT = 1e-6
 # the half width 1/(2 pi T2) of a free-spin line (in energy, h/(2 pi T2)):
 # its energy is then within that of an eigenvalue
 RITZ_TOL = 0.1
+# The operator norm of the drive, for the estimate of the saturation of the
+# strongest line (lineshape.band_margin), is taken from NORM_ITER steps of
+# power iteration on its ED matrix
+NORM_ITER = 50
+
+
+def _ed_operator_norm(chain, V):
+    """An estimate of ||V||, the largest |eigenvalue| of the Hermitian V, by
+    power iteration on its ED matrix from a fixed random start: from below,
+    and exact after two steps for m.S of a spin 1/2 or a spin 1"""
+    import scipy.sparse as sp
+    M = chain.get_ED_obj().get_operator(V)
+    if not sp.issparse(M):
+        M = np.asarray(M)
+    x = np.random.default_rng(0).standard_normal(M.shape[0])
+    x = x/np.linalg.norm(x)
+    nv = 0.
+    for _ in range(NORM_ITER):
+        y = M @ x
+        nv = float(np.linalg.norm(y))
+        if nv == 0.: break
+        x = y/nv
+    return nv
+
+
+def _mps_operator_norm(chain, V, spec):
+    """||V|| on the DMRG route: from the local matrix of a one-site V
+    (spectrum.local_operator, v3 and "python"), otherwise the largest
+    |V_nm| between the kept states, which is only a lower estimate"""
+    loc = spectrum.local_operator(chain, V)
+    if loc is not None:
+        return float(np.linalg.norm(loc[1], 2))
+    Vm = np.abs(np.asarray(spec.V))
+    return float(np.max(Vm)) if Vm.size else 0.
+
+
+def _ed_band(chain, V, D, f, h, kT, T1, T2, rabi, p_cut, f_ref, tip_weight,
+             ethermal, site_weights):
+    """(spec, lines) on mode="ED" with the kept band following the drive.
+    The first cut keeps the states up to h(f_max + band) above the
+    populated ones (ethermal above the lowest), band the power-broadened
+    margin of lineshape.band_margin. Under a saturating drive the upper
+    state of a line carries population too, and a second photon reaches
+    from it a state above that cut (on a spin 1 at 50 mK that cut leaves
+    out the rung |0> to |+1>, and the line is 4.3e-2 low at the default
+    drive, 50% at rabi=0.05), so emax is set again to h(f_max + band)
+    above the highest state that can carry population (Lines.carry_top),
+    and the spectrum is rebuilt until that state stops rising, one pass
+    per photon. It ends:
+    each pass needs a higher state of the spectrum, and it stops once every
+    state the builder solved for is kept."""
+    band = lineshape.band_margin(T1, T2, rabi, _ed_operator_norm(chain, V))
+    fmax = float(np.max(f))
+    emax = h*(fmax + band) + ethermal
+    while True:
+        spec = spectrum.ed_spectrum(chain, V, D, emax, site_weights)
+        lines = lineshape.Lines(spec, f, h, kT, T1, T2, rabi, p_cut, f_ref,
+                                tip_weight=tip_weight)
+        if spec.reached <= emax: # every state is kept
+            break
+        need = lines.carry_top + h*(fmax + band)
+        # the tolerance is that of a degeneracy, above the rounding of the
+        # energies between two eigsh calls on the sparse route
+        if not need > emax + lines.deg:
+            break
+        emax = need
+    return spec, lines
+
+
+def _warn_band(chain, V, spec, lines, emax, f, h, T1, T2, rabi):
+    """On mode="DMRG" the kept band is not grown, since more states cost
+    more solves: warn when it holds less than lineshape.BAND_WARN of the
+    band the drive needs above the highest state that can carry
+    population, the band _ed_band keeps on ED"""
+    band = lineshape.band_margin(T1, T2, rabi,
+                                 _mps_operator_norm(chain, V, spec))
+    fmax = float(np.max(f))
+    top = lines.carry_top/h # GHz above the lowest state
+    kept = emax/h - top - fmax # GHz kept above the window, from top
+    if kept >= lineshape.BAND_WARN*band:
+        return
+    warnings.warn(
+        "get_esr_spectrum(mode=\"DMRG\"): the states up to %.4g GHz above the "
+        "lowest can take part under this drive (%.4g GHz above the highest "
+        "state the drive and the temperature populate, %.4g GHz, an "
+        "estimate with the power broadening of the lines), but the states "
+        "kept end at %.4g GHz, so the lines into the states above them, and "
+        "their tails in the window, are left out. mode=\"ED\" keeps them; a "
+        "weaker drive (rabi) needs fewer" % (top + fmax + band, fmax + band,
+                                              top, emax/h),
+        RuntimeWarning, stacklevel=4)
 
 
 def _tip_operator(chain, site, tip):
@@ -115,9 +208,17 @@ def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
     # kT ln(1/p_cut) kept at the default p_cut. The 1% window dependence
     # that second term was added for was the homodyne tail of far lines
     # (lineshape.homodyne_taper), not the relaxation: zooming onto a line
-    # moves the DC part by 1.7e-5 on 6 spins with one term.
+    # moves the DC part by 1.7e-5 on 6 spins with one term. This is the
+    # band the DMRG and the two Krylov routes keep. On mode="ED" the margin
+    # is the power-broadened one and the band follows the drive (_ed_band),
+    # and the DMRG eigenstate route warns when its band is short of that
+    # (_warn_band).
     if not (T1 > 0. and T2 > 0.):
         raise ValueError("T1 and T2 must be positive, got %r and %r" % (T1, T2))
+    # T1 and T2 are those of the tip spin: the Korringa scale is divided by
+    # the weight of the tip site (rates.korringa_scale); this also checks
+    # site_weights
+    tip_weight = float(spectrum._weights(chain, site_weights)[site])
     margin = lineshape.WINDOW_MARGIN/(np.pi*T2)
     emax = h*(np.max(f) + margin)
     if kT > 0.:
@@ -133,7 +234,10 @@ def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
         spec = spectrum.ed_krylov_spectrum(chain, V, D, emax, epop, window,
                                            kT, nkry, ritz_tol, site_weights)
     elif mode == "ED":
-        spec = spectrum.ed_spectrum(chain, V, D, emax, site_weights)
+        spec, lines = _ed_band(chain, V, D, f, h, kT, T1, T2, rabi, p_cut,
+                               f_ref, tip_weight,
+                               kT*np.log(1./p_cut) if kT > 0. else 0.,
+                               site_weights)
     elif submode == "KRYLOV":
         rm = lineshape.READ_MARGIN/(2.*np.pi*T2)
         epop = kT*np.log(1./p_cut) if kT > 0. else 0.
@@ -146,7 +250,11 @@ def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
                                                   h*(np.max(f) + rm)))
     else:
         spec = spectrum.mps_spectrum(chain, V, D, emax, nstates, site_weights)
-    lines = lineshape.Lines(spec, f, h, kT, T1, T2, rabi, p_cut, f_ref)
+    if not (mode == "ED" and submode is None): # _ed_band made its own
+        lines = lineshape.Lines(spec, f, h, kT, T1, T2, rabi, p_cut, f_ref,
+                                tip_weight=tip_weight)
+    if mode == "DMRG" and submode is None:
+        _warn_band(chain, V, spec, lines, emax, f, h, T1, T2, rabi)
     if method == "rates":
         dc, hom = lines.signal(f, vrf_over_vdc, phase)
     else:
@@ -187,11 +295,17 @@ class ESRSpectrumMixin():
               the transverse spin for a drive through a field gradient, or
               an exchange term for a remote spin driven by a nearby atom).
           T: temperature in K (kB= changes the unit).
-          T1, T2: relaxation and coherence times in ns of a free spin 1/2 on
-              the tip site with Zeeman frequency f_ref. T1 fixes the scale
-              of the Korringa rates of every pair of states, through every
-              site with the weights site_weights (equal by default), and
-              1/T2 - 1/(2 T1) is the pure dephasing of every coherence.
+          T1, T2: relaxation and coherence times in ns of the tip spin, a
+              free spin 1/2 on the tip site with Zeeman frequency f_ref,
+              whatever the weight of that site in site_weights. T1 fixes the
+              scale of the Korringa rates of every pair of states, through
+              every site with the weights site_weights, and 1/T2 - 1/(2 T1)
+              is the pure dephasing of every coherence.
+          site_weights: the weight of each site in the relaxation, one
+              non-negative entry per site (equal by default). The scale is
+              divided by the weight of the tip site, so only the ratios
+              matter; with a weight of 0 on the tip site (relaxation through
+              the other sites only), T1 and T2 refer to a site of weight 1.
           f_ref: the frequency in GHz at which T1 and T2 are given, the
               Zeeman frequency of the tip spin where they were measured.
               Required: the Korringa rates grow as f coth(hf/2kT), so a
@@ -207,11 +321,16 @@ class ESRSpectrumMixin():
               resonance (lineshape.homodyne_taper): its dispersive tail
               falls as 1/detuning, and the far background is left out.
           mode: "ED" (full diagonalization up to 2000 states, the lowest
-              states of the sparse H above) or "DMRG" (the nstates lowest
-              DMRG eigenstates; raises if they do not reach every state the
-              window and the temperature need, and warns when the energy
-              variance of a strong line's states bounds its position only to
-              more than its half width).
+              states of the sparse H above; the states kept reach 30
+              power-broadened widths of the strongest line above the window,
+              counted from the highest state the temperature or the drive
+              populates, so a state a second photon reaches is kept) or
+              "DMRG" (the nstates lowest DMRG eigenstates, kept up to 30
+              free-spin widths above the window and the thermal states;
+              raises if they do not reach every state the window and the
+              temperature need, warns when the drive needs more states than
+              that, and warns when the energy variance of a strong line's
+              states bounds its position only to more than its half width).
           submode: None, or "KRYLOV": the final states of the lines come
               from a Krylov space started from V|m> for every populated m,
               instead of from the eigenstates up to the top of the window.
@@ -228,8 +347,9 @@ class ESRSpectrumMixin():
               driven Lindblad equation in the same eigenbasis without the
               secular and rotating-wave approximations, nharm harmonics,
               mode="ED" and up to 64 kept states, as a reference).
-          p_cut: relative Boltzmann weight below which a state is empty,
-              and so roughly the relative accuracy of the DC part (1e-6 by
+          p_cut: relative population below which a state is empty, from
+              the temperature or, on mode="ED", from the drive, and so
+              roughly the relative accuracy of the DC part (1e-6 by
               default: 1e-5 of the DC peak on 10 and 12 spins).
           h, kB: Planck's constant in energy/GHz and Boltzmann's in
               energy/K, eV by default (pass h=1 and kB=20.8366 for H in GHz).
