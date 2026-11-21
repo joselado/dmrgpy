@@ -35,10 +35,12 @@ and gains a `**Status**` line when it is acted on.
 
 All 22 were acted on the same day, in ten file-disjoint clusters. Ten
 agents wrote the fixes and their tests in separate worktrees, read and write
-only, after three picks of the author (T1 and T2 of the tip spin for
+only, except that three of them made a text substitution in a source file
+with a Python one-liner that imports nothing, after three picks of the author (T1 and T2 of the tip spin for
 `site_weights`; a refusal of METTS frozen in the fermion parity; a cutoff
 lowered by the weak multi-site terms only). The lead ran everything: the 203
-new tests pass, 158 of them fail on the code before the fixes, the 1636
+new tests pass, 158 of them fail on the code before the fixes (run with
+the new extensions copied in, so the C++ halves do not show there), the 1636
 tests of the 62 affected files pass without `julia_live`, the 112
 `julia_live` tests of the 22 files that reach Julia pass, the four ESR
 examples pass, and the v3 site
@@ -6458,8 +6460,13 @@ name `N_MAX` as the default, which contradicts the code.
 - METTS on fermion chains. Every Hermitian one-site operator of a fermion
   site conserves the fermion parity, and on a spinful site also N, so the
   guard of finding 7 refuses METTS on every fermion chain whose H conserves
-  the parity, which is every physical one. A fermion model is sampled as a
-  spin chain through the Jordan-Wigner transformation.
+  the parity, which is every physical one. Measured on the code before the
+  fixes: on number-conserving spinful chains METTS already raised, with the
+  default basis because `Sx` and `Sz` are not defined on fermion sites, and
+  with `("N",)` or `("Nup", "Ndn")` by the 2026-10-23 guard. So the chains
+  that lose METTS are those whose H does not conserve N, whose samples were
+  frozen in the fermion parity. A fermion model is sampled as a spin chain
+  through the Jordan-Wigner transformation.
 - FIXED with finding 7 (`8c63bb9`), executed, not reviewed: `_check_basis`
   returned at once for a name outside
   `canonical._DIAGONAL`, which lists `N` but not its diagonal aliases `n`,
