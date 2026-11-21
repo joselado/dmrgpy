@@ -362,8 +362,8 @@ the timed sweep, for the JIT reason above.
 
 ## The audits, and what to know before touching the code
 
-Nine hole hunts, a fix pass and one review ran between 2026-08 and
-2026-11-12, each hunt a multi-lens search for numbers that are plausible and
+Ten hole hunts, a fix pass and one review ran between 2026-08 and
+2026-11-21, each hunt a multi-lens search for numbers that are plausible and
 wrong, with every finding reproduced, handed to a reviewer briefed to refute
 it, and fixed:
 `docs/audit_2026_08_hole_hunt.md` (21 findings), `docs/audit_2026_09_hole_hunt.md`
@@ -382,7 +382,10 @@ over the least-covered areas rather than a commit; the bugs fixed the same
 day, and its nine leads reviewed the same day into six more findings, all
 fixed), and by `docs/audit_2026_11_hole_hunt.md` (17 findings over the
 Kondo machinery, bugs and measured hot spots together, 16 fixed on
-2026-11-12; its rules are in `.claude/rules/kondo.md`). Four things to read before
+2026-11-12; its rules are in `.claude/rules/kondo.md`), and by
+`docs/audit_2026_11_21_hole_hunt.md` (22 findings over the 158 commits
+since that one, hunted by read-only agents with every repro run by the
+lead; all open). Four things to read before
 changing the kind of code they cover:
 
 - **`docs/numerical_changes.md`** before comparing any number against
