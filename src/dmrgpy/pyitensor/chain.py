@@ -907,11 +907,19 @@ class Chain:
     def sum_mps(self, wf1, wf2):
         return mps_sum(wf1, wf2, cutoff=self.cutoff, maxdim=self.maxm)
 
-    def sum_mps_weighted(self, wfs, coefs):
+    def sum_mps_weighted(self, wfs, coefs, method=None):
         """sum_k coefs[k]*wfs[k] in one sum_many at the chain's
-        cutoff/maxm, as mpscpp3's Chain::sum_mps_weighted (the Ritz vectors
-        of nhlevels.py, whose coefficients cancel between nearly parallel
-        states)."""
+        cutoff/maxm, as mpscpp3's Chain::sum_mps_weighted.
+
+        `method` is sum_many's: None takes the module default (the
+        density-matrix sum, whose floor is about 1e-8 of the input norms),
+        "exact" the direct sum truncated once. A sum whose coefficients
+        cancel between nearly parallel states, as the Ritz vectors of
+        nhlevels.py, needs "exact": [b, a] with [1/eps, -1/eps] and
+        b = a + eps c is 0.97 off c at eps = 1e-8 by the default, 5.8e-7
+        by "exact" (8 sites). The exact sum places every operand in
+        one block per site, (sum of bond dimensions)^2 numbers per site,
+        so a caller with hundreds of states keeps the default."""
         wfs, coefs = list(wfs), list(coefs)
         if not wfs or len(wfs) != len(coefs):
             raise ValueError("sum_mps_weighted: need as many coefficients "
@@ -919,7 +927,22 @@ class Chain:
         terms = [w * complex(c) for w, c in zip(wfs, coefs)]
         if len(terms) == 1:
             return terms[0]
-        return sum_many(terms, cutoff=self.cutoff, maxdim=self.maxm)
+        return sum_many(terms, cutoff=self.cutoff, maxdim=self.maxm,
+                        method=method)
+
+    def residual_norm(self, terms, x, b):
+        """||A x - b|| for the operator A of `terms`, with A x and the
+        difference formed exactly, nothing truncated, and the norm read
+        off the orthogonality centre (implicit.py's _residual). It is how
+        mpsalgebra.check_bicgstab measures a BiCGSTAB answer: apply_operator
+        and sum_mps take the density-matrix routes, and next to a level
+        (||x|| >> ||b||) their floor reads 1.0 for a true residual of
+        1.4e-7 (8 sites, ||x||/||b|| = 9e7). The MPO is built at the
+        session's mpomaxm, which the check lifts."""
+        from .implicit import _residual
+        self._check_wf_sites(x, "residual_norm")
+        self._check_wf_sites(b, "residual_norm")
+        return _residual(self._mpo(terms), x, b)
 
     def scale_mps(self, wf, z):
         """Rescale an MPS by a complex number, mirroring

@@ -428,25 +428,47 @@ BICGSTAB_RAISE = 1.
 
 
 def check_bicgstab(self,A,x,wf,norm,delta):
-    """The true relative residual ||A x - wf||/||wf|| of a BiCGSTAB solve,
-    with A applied and the difference summed exactly: the maxm cap lifted
-    (as vev.energy_variance does) and the cutoff at 0, since a cutoff acts
+    """The true relative residual ||A x - wf||/||wf|| of a BiCGSTAB solve.
+    On "python" and v3 it is the session's residual_norm, and on
+    julia_live mpsjulialive's mps_residual_norm: A x formed with nothing
+    truncated, the direct sum with -wf, and the norm read off the
+    orthogonality centre. The density-matrix apply and sum the sessions
+    take by default have a floor set by ||A|| ||x||, and next to a level
+    (||x|| >> ||wf||) it reads 1.0 on "python" and 0.54 on v3 for a true
+    residual of 1.4e-7 and 2.4e-7 (8 sites, ||x||/||wf|| = 9e7). v2, and v3
+    in a conserved sector (its residual_norm is dense only), apply and sum
+    by the session's routes with the maxm cap lifted (as
+    vev.energy_variance does) and the cutoff at 0, since a cutoff acts
     relative to ||A x||, about ||wf||, and its floor sqrt(cutoff) would
     reach 10*delta for a tight cvm_tol. Warns above BICGSTAB_WARN*delta,
     raises RuntimeError above BICGSTAB_RAISE or when it is not finite.
     Returns it."""
     from . import vev
     julia = _is_julia(wf)
+    exact = None if julia else getattr(self._session,"residual_norm",None)
+    if exact is not None and self.itensor_version==3 and \
+            getattr(self,"conserved_sector",None):
+        exact = None # v3's residual_norm places dense blocks only
     old, oldcut = self.maxm, self.cutoff
     self.maxm, self.cutoff = vev._UNCAPPED, 0.
     try:
         if not julia:
+            # the MPO of A is built at mpomaxm by every route
             self._session.set_sweep_params(self.maxm,self.nsweeps,
                     self.cutoff,self.noise)
             self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
-        ax = applyoperator_dmrg(self,A,x)
-        r = summps_dmrg(self,ax,wf*(-1.))
-        res = np.sqrt(abs(r.dot(r)))/norm
+        if (julia or exact is not None) and not np.isfinite(abs(x.dot(x))):
+            res = np.inf # a diverged x: the SVDs of the exact routes would fail on it
+        elif julia:
+            from .mpsjulialive.juliasession import Main
+            res = float(Main.mps_residual_norm(_julia_mpo(self,A),x.jlmps,
+                    wf.jlmps))/norm
+        elif exact is not None:
+            res = float(exact(A.to_terms(),x.cpp_handle,wf.cpp_handle))/norm
+        else:
+            ax = applyoperator_dmrg(self,A,x)
+            r = summps_dmrg(self,ax,wf*(-1.))
+            res = np.sqrt(abs(r.dot(r)))/norm
     finally:
         self.maxm, self.cutoff = old, oldcut
         if not julia:

@@ -206,8 +206,13 @@ def _accepted(pairs, H, tol):
 
 
 def _combine(self, snaps, c):
+    # the exact direct sum, truncated once: the coefficients cancel between
+    # nearly parallel snapshots, and the default sums of the sessions (the
+    # density-matrix one on "python", truncated pairwise ones on v3) floor
+    # at about 1e-8 of the inputs, relative to the partial sums on v3
     handle = self._session.sum_mps_weighted([x.cpp_handle for x in snaps],
-                                            [complex(z) for z in c])
+                                            [complex(z) for z in c],
+                                            method="exact")
     return mps.MPS(self, cpp_handle=handle).copy()
 
 

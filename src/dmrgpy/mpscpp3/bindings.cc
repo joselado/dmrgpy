@@ -1003,9 +1003,24 @@ PYBIND11_MODULE(_dmrgcpp, m)
                 return self.overlap_aMb(wf1,terms_from_python(terms),wf2);
             }, py::arg("wf1"),py::arg("terms"),py::arg("wf2"))
         .def("sum_mps",&Chain::sum_mps,py::arg("wf1"),py::arg("wf2"))
-        .def("sum_mps_weighted",&Chain::sum_mps_weighted,py::arg("wfs"),
-             py::arg("coefs"),
-             "sum_k coefs[k]*wfs[k] in one sum at the chain's maxm/cutoff")
+        .def("sum_mps_weighted",
+            [](Chain& self, std::vector<MPS> const& wfs,
+               std::vector<std::complex<double>> const& coefs,
+               py::object method) {
+                std::string m = method.is_none() ? std::string("pairwise")
+                                                 : method.cast<std::string>();
+                return self.sum_mps_weighted(wfs,coefs,m);
+            }, py::arg("wfs"),py::arg("coefs"),py::arg("method")=py::none(),
+             "sum_k coefs[k]*wfs[k] at the chain's maxm/cutoff: method None "
+             "or 'pairwise' is ITensor's tree of truncated pairwise sums, "
+             "'exact' the direct sum truncated once (Chain::sum_mps_weighted)")
+        .def("residual_norm",[](Chain& self, std::vector<PyTerm> const& terms,
+                                 MPS const& x, MPS const& b) {
+                return self.residual_norm(terms_from_python(terms),x,b);
+            }, py::arg("terms"),py::arg("x"),py::arg("b"),
+             "||A x - b|| with A x and the difference formed exactly and "
+             "the norm read off the orthogonality centre "
+             "(Chain::residual_norm; mpsalgebra.check_bicgstab)")
         .def("scale_mps",&Chain::scale_mps,py::arg("wf"),py::arg("z"),
              "Rescale an MPS by a complex number (single-tensor, no truncation)")
         .def("conjugate",&Chain::conjugate,py::arg("wf"))

@@ -44,6 +44,32 @@ function apply_op(A,psi0,maxdim,cutoff;alg="densitymatrix")
 end
 
 
+# A x contracted exactly, with nothing truncated (bond dimension D_A D_x)
+function apply_exact(A,x)
+	return apply(A,x;alg="naive",truncate=false)
+end
+
+
+# a + b as one direct sum, with nothing truncated
+function sum_direct(a,b)
+	return add(a,b;alg="directsum")
+end
+
+
+# ||A x - b|| formed exactly, which is how mpsalgebra.check_bicgstab
+# measures a BiCGSTAB answer: A x and the difference with nothing
+# truncated, and the norm of the centre tensor after an orthogonalization,
+# which truncates nothing either. The densitymatrix apply and sum have a
+# floor set by ||A|| ||x||, far above the residual of a converged solve
+# next to a level, where ||x|| >> ||b||, and <r|r> from inner() is a
+# difference of numbers of order ||b||^2.
+function mps_residual_norm(A,x,b)
+	r = sum_direct(apply_exact(A,x),(-1.0)*b)
+	orthogonalize!(r,1)
+	return norm(r[1])
+end
+
+
 function summps(psi1,psi2,maxdim,cutoff; alg = "densitymatrix")
 	# cutoff must be forwarded explicitly: ITensorMPS's own add() defaults
 	# to cutoff=1e-15 when not given, three orders tighter than dmrgpy's

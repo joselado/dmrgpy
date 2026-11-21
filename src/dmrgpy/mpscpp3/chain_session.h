@@ -1436,16 +1436,27 @@ class Chain
         return sum(wf1,wf2,{"MaxDim",maxm_,"Cutoff",cutoff_});
         }
 
-    // sum_k coefs[k]*wfs[k] in one ITensor sum(std::vector<MPS>) call at
-    // the chain's maxm_/cutoff_: the Ritz vectors of nhlevels.py, whose
-    // coefficients cancel between nearly parallel states, so a chain of
-    // pairwise sums would truncate the partial sums first.
+    // sum_k coefs[k]*wfs[k] at the chain's maxm_/cutoff_. method
+    // "pairwise" (the default) is ITensor's sum(std::vector<MPS>), a tree
+    // of pairwise sums, each truncated by MPS::orthogonalize() relative to
+    // its partial sum, so a sum whose coefficients cancel loses the small
+    // part: [A, B, A] with [M, 1, -M] comes back 1.4e-2 off B at M = 1e5 on
+    // 10 sites. method "exact" is the direct sum of all the operands,
+    // made canonical with nothing truncated (exact_sum_right_canonical)
+    // and truncated once by the sweep of position(N): the Ritz vectors of
+    // nhlevels.py, whose coefficients cancel between nearly parallel
+    // states. It holds (sum of bond dimensions) x d x (bond dimension) per
+    // site, so the ESR Krylov basis of hundreds of states keeps the
+    // default. Dense indices only.
     MPS
     sum_mps_weighted(std::vector<MPS> const& wfs,
-                     std::vector<Cplx> const& coefs) const
+                     std::vector<Cplx> const& coefs,
+                     std::string const& method = "pairwise") const
         {
         if (wfs.empty() || wfs.size()!=coefs.size())
             throw std::invalid_argument("Chain::sum_mps_weighted: need as many coefficients as states, at least one");
+        if (method!="pairwise" && method!="exact")
+            throw std::invalid_argument("Chain::sum_mps_weighted: unknown method '"+method+"' (have: pairwise, exact)");
         std::vector<MPS> terms;
         for (size_t k=0;k<wfs.size();++k)
             {
@@ -1454,7 +1465,34 @@ class Chain
             terms.push_back(t);
             }
         if (terms.size()==1) return terms[0];
-        return sum(terms,{"MaxDim",maxm_,"Cutoff",cutoff_});
+        if (method=="pairwise") return sum(terms,{"MaxDim",maxm_,"Cutoff",cutoff_});
+        reject_sector("sum_mps_weighted(method=\"exact\")");
+        auto out = exact_sum_right_canonical(terms);
+        int N = length(out);
+        if (N>1) out.position(N,{"MaxDim",maxm_,"Cutoff",cutoff_});
+        return out;
+        }
+
+    // ||A x - b|| formed exactly, which is how mpsalgebra.check_bicgstab
+    // measures a BiCGSTAB answer: A x with nothing truncated
+    // (exact_apply_mpo, bond dimension D_A D_x), the direct sum with -b
+    // made canonical with nothing truncated (exact_sum_right_canonical),
+    // and the norm of the centre tensor on site 1. The density-matrix
+    // applyMPO overstates a converged residual next to a level up to 2e6
+    // times (0.54 against 2.4e-7 on 8 sites at ||x||/||b|| = 9e7), and
+    // <r|r> by innerC is a difference of numbers of order ||b||^2. The MPO
+    // is built at mpomaxm_, which the check lifts. Dense indices only.
+    double
+    residual_norm(std::vector<MOTerm> const& terms, MPS const& x,
+                  MPS const& b) const
+        {
+        reject_sector("residual_norm");
+        auto A = mpo_from_terms(terms);
+        auto Ax = exact_apply_mpo(A,x);
+        MPS mb = b;
+        mb *= Cplx(-1.0,0.0);
+        auto r = exact_sum_right_canonical({Ax,mb});
+        return norm(r(1));
         }
 
     // Rescale an MPS by a complex number. ITensor's own operator*=(MPS,Cplx)
@@ -6575,6 +6613,108 @@ class Chain
         static const TagSet site_tag("Site");
         auto out = applyMPO(K,x,x0,args);
         out.noPrime(site_tag);
+        return out;
+        }
+
+    // K x with nothing truncated: the site tensors contracted one by one
+    // and the two links of each bond combined into one of dimension
+    // D_K D_x. ITensor v3's applyMPO takes "DensityMatrix" or "Fit" only,
+    // and both truncate. The physical index comes back unprimed, as from
+    // apply_mpo(). No gauge is assumed. Dense indices only (the callers
+    // reject a sector).
+    MPS
+    exact_apply_mpo(MPO const& K, MPS const& x) const
+        {
+        static const TagSet site_tag("Site");
+        int N = length(x);
+        if (length(K)!=N)
+            throw std::invalid_argument("Chain::exact_apply_mpo: the MPO and the MPS have different lengths");
+        std::vector<ITensor> T(N+1);
+        for (int j=1;j<=N;j++) T[j] = K(j)*x(j);
+        for (int j=1;j<N;j++)
+            {
+            auto C = std::get<0>(combiner(IndexSet(linkIndex(K,j),linkIndex(x,j)),
+                                          Args("Tags",tinyformat::format("Link,l=%d",j))));
+            T[j] *= C;
+            T[j+1] *= dag(C);
+            }
+        MPS out(N);
+        for (int j=1;j<=N;j++) out.set(j,T[j]);
+        out.noPrime(site_tag);
+        out.leftLim(0);
+        out.rightLim(N+1);
+        return out;
+        }
+
+    // sum_k terms[k] as one direct sum, right-canonical with its centre on
+    // site 1 and nothing truncated. It is the direct sum of the operands
+    // (addAssumeOrth's plussers in mpsalgs.cc, for K operands and without
+    // its closing orthogonalize(), a density-matrix truncation relative
+    // to the partial sum) followed by a sweep of SVDs from the right end
+    // that keeps every singular value, but the block tensors are never
+    // formed: the sweep carries one matrix per operand, from the operand's
+    // link to the new one, and at site j stacks the operands' tensors
+    // along one index of dimension sum_k D_k, so a site holds
+    // (sum_k D_k) d r numbers rather than (sum_k D_k)^2 d. An operand
+    // passed twice ([A, B, A]) has its own matrices, since nothing is keyed
+    // on its link indices. Dense indices only (the callers reject a sector).
+    MPS
+    exact_sum_right_canonical(std::vector<MPS> const& terms) const
+        {
+        int K = static_cast<int>(terms.size());
+        if (K==0)
+            throw std::invalid_argument("Chain::exact_sum_right_canonical: no states");
+        int N = length(terms[0]);
+        for (auto const& t : terms)
+            if (length(t)!=N)
+                throw std::invalid_argument("Chain::exact_sum_right_canonical: states of different lengths");
+        MPS out(N);
+        std::vector<ITensor> carry(K); // (link of operand k at bond j, new link)
+        for (int j=N;j>=1;--j)
+            {
+            std::vector<ITensor> T(K);
+            for (int k=0;k<K;k++)
+                {
+                T[k] = terms[k](j);
+                if (j<N) T[k] *= carry[k];
+                }
+            if (j==1)
+                {
+                ITensor S = T[0];
+                for (int k=1;k<K;k++) S += T[k];
+                out.set(1,S);
+                break;
+                }
+            long total = 0;
+            std::vector<Index> l(K);
+            for (int k=0;k<K;k++)
+                {
+                l[k] = leftLinkIndex(terms[k],j);
+                total += dim(l[k]);
+                }
+            auto st = Index(total,TagSet("Link,stack"));
+            std::vector<ITensor> E(K);
+            ITensor M;
+            long off = 0;
+            for (int k=0;k<K;k++)
+                {
+                E[k] = ITensor(l[k],st);
+                for (long a=1;a<=dim(l[k]);a++) E[k].set(l[k]=a,st=off+a,1.0);
+                off += dim(l[k]);
+                auto t = T[k]*E[k];
+                if (k==0) M = t;
+                else M += t;
+                }
+            // no Cutoff and no MaxDim: svd() keeps every singular value
+            ITensor U(st),S,V;
+            svd(M,U,S,V,{"LeftTags","Link,U",
+                         "RightTags",tinyformat::format("Link,l=%d",j-1)});
+            out.set(j,V);
+            auto US = U*S;
+            for (int k=0;k<K;k++) carry[k] = E[k]*US;
+            }
+        out.leftLim(0);
+        out.rightLim(2);
         return out;
         }
 
