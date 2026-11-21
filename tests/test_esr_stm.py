@@ -440,10 +440,30 @@ def test_krylov_route_inputs():
     sc = chain(4)
     with pytest.raises(ValueError, match="submode"):
         sc.get_esr_spectrum(F, submode="TASK", **KW)
-    with pytest.raises(ValueError, match="ED"):
-        sc.get_esr_spectrum(F, submode="KRYLOV", mode="DMRG", **KW)
     with pytest.raises(ValueError, match="nkry"):
         sc.get_esr_spectrum(F, submode="KRYLOV", nkry=0, **KW)
+
+
+@pytest.mark.parametrize("iv", BACKENDS)
+def test_dmrg_krylov_route_matches_ed(iv):
+    """submode="KRYLOV" on DMRG: the DMRG states below the window and the
+    final states of the window lines from the tangent space of each
+    populated state (TASK), in one common basis, against ED (measured
+    1.1e-5 of the peak, rising toward the top of the window: the DC tail of
+    the lines past the 30-width margin, which ED keeps among its states and
+    this route does not); it raises when nkry is too small or the DMRG
+    states do not reach below the window"""
+    _, a = chain(8).get_esr_spectrum(F, **KW)
+    sc = chain(8, iv)
+    _, b = sc.get_esr_spectrum(F, mode="DMRG", submode="KRYLOV", nstates=4,
+                               **KW)
+    assert np.max(np.abs(a - b)) < 5e-5*np.max(np.abs(a))
+    with pytest.raises(ValueError, match="raise nkry"):
+        chain(8, iv).get_esr_spectrum(F, mode="DMRG", submode="KRYLOV",
+                                      nstates=4, nkry=3, **KW)
+    with pytest.raises(ValueError, match="raise nstates"):
+        chain(8, iv).get_esr_spectrum(F, mode="DMRG", submode="KRYLOV",
+                                      nstates=1, **KW)
 
 
 @pytest.mark.parametrize("iv", BACKENDS)

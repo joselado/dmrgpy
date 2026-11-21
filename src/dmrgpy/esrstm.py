@@ -45,7 +45,7 @@ def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
                      T=1.0, T1=100., T2=50., f_ref=None, rabi=1e-3,
                      vrf_over_vdc=0.,
                      phase=0., site_weights=None, mode="ED", submode=None,
-                     nstates=16, nkry=100, method="rates", nharm=2,
+                     nstates=16, nkry=None, method="rates", nharm=2,
                      p_cut=P_CUT, h=H_EV_GHZ, kB=KB_EV_K, return_parts=False,
                      return_poles=False):
     """See ESRSpectrumMixin.get_esr_spectrum"""
@@ -53,9 +53,9 @@ def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
         raise ValueError("mode must be \"ED\" or \"DMRG\"")
     if submode not in (None, "KRYLOV"):
         raise ValueError("submode must be None or \"KRYLOV\"")
-    if submode == "KRYLOV" and mode != "ED":
-        raise ValueError("submode=\"KRYLOV\" runs on mode=\"ED\" only")
-    if isinstance(nkry, bool) or not isinstance(nkry, (int, np.integer)) or nkry < 1:
+    if nkry is not None and (isinstance(nkry, bool)
+                             or not isinstance(nkry, (int, np.integer))
+                             or nkry < 1):
         raise ValueError("nkry must be a positive integer, got %r" % (nkry,))
     if method not in ("rates", "floquet"):
         raise ValueError("method must be \"rates\" or \"floquet\"")
@@ -119,6 +119,8 @@ def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
         emax += kT*np.log(1./p_cut)
     if mode == "DMRG":
         mode = chain.get_mode(mode="DMRG") # the automatic fallbacks to ED
+    if nkry is None: # blocks of npop vectors on ED, single steps on DMRG
+        nkry = 100 if mode == "ED" else 600
     if mode == "ED" and submode == "KRYLOV":
         epop = kT*np.log(1./p_cut) if kT > 0. else 0.
         ritz_tol = RITZ_TOL*h/(2.*np.pi*T2)
@@ -127,6 +129,14 @@ def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
                                            kT, nkry, ritz_tol, site_weights)
     elif mode == "ED":
         spec = spectrum.ed_spectrum(chain, V, D, emax, site_weights)
+    elif submode == "KRYLOV":
+        epop = kT*np.log(1./p_cut) if kT > 0. else 0.
+        ritz_tol = RITZ_TOL*h/(2.*np.pi*T2)
+        window = (h*(np.min(f) - margin), h*(np.max(f) + margin))
+        spec = spectrum.mps_krylov_spectrum(chain, V, D, emax, epop, window,
+                                            kT, nkry, ritz_tol, nstates,
+                                            site_weights,
+                                            read=(h*np.min(f), h*np.max(f)))
     else:
         spec = spectrum.mps_spectrum(chain, V, D, emax, nstates, site_weights)
     lines = lineshape.Lines(spec, f, h, kT, T1, T2, rabi, p_cut, f_ref)
@@ -149,7 +159,7 @@ class ESRSpectrumMixin():
                          detection=None, T=1.0, T1=100., T2=50., f_ref=None,
                          rabi=1e-3, vrf_over_vdc=0., phase=0.,
                          site_weights=None,
-                         mode="ED", submode=None, nstates=16, nkry=100,
+                         mode="ED", submode=None, nstates=16, nkry=None,
                          method="rates", nharm=2,
                          p_cut=P_CUT, h=H_EV_GHZ, kB=KB_EV_K,
                          return_parts=False, return_poles=False):
@@ -195,12 +205,18 @@ class ESRSpectrumMixin():
               window and the temperature need, and warns when the energy
               variance of a strong line's states bounds its position only to
               more than its half width).
-          submode: None, or "KRYLOV" on mode="ED": the populated
-              eigenstates and one block Krylov space of nkry blocks from
-              V|m> for every populated m. Faster than the eigenbasis when few
-              states are populated and many lie in the window, slower when
-              most are populated; raises when nkry is too small to converge
-              the final states of the lines in the window.
+          submode: None, or "KRYLOV": the final states of the lines come
+              from a Krylov space started from V|m> for every populated m,
+              instead of from the eigenstates up to the top of the window.
+              On mode="ED" the populated eigenstates and one block Krylov
+              space of nkry blocks (default 100). On mode="DMRG"
+              (itensor_version 3 and "python") the nstates lowest DMRG
+              states must reach the populated states and every state below
+              the window, and the Krylov space of nkry steps (default 600)
+              runs in the tangent space of each populated state (TASK).
+              Faster when few states are populated and many lie in the
+              window, slower when most are populated; raises when nkry is
+              too small to converge the final states of the window lines.
           method: "rates" (the rate equation, default) or "floquet" (the
               driven Lindblad equation in the same eigenbasis without the
               secular and rotating-wave approximations, nharm harmonics,

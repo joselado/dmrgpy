@@ -987,11 +987,20 @@ supplement of Yang et al. (PRL 119, 227206, eq. S13, open on the APS site,
 not on arXiv) uses the thermal absorption spectrum instead, and the weak
 lines of their dimer differ by a factor sin^2(xi/2) between the two
 (`docs/esr_stm_plan_yang_weights.py`). (2) Do NOT route the DMRG side
-through TASK, KPM or the correction vector: excited states are populated
-at 1 K and 10 to 30 GHz, and the tangent space of the ground state does
-not hold the transitions out of them (the same reason TASK refuses a
-thermal population of its Ritz states); the DMRG route is the lowest
-`nstates` eigenstates, and it raises when they do not reach `emax`.
+through KPM or the correction vector, nor through TASK from the ground
+state alone: excited states are populated at 1 K and 10 to 30 GHz, and
+the tangent space of the ground state does not hold the transitions out
+of them (the same reason TASK refuses a thermal population of its Ritz
+states). The default DMRG route is the lowest `nstates` eigenstates, and
+it raises when they do not reach `emax`. `submode="KRYLOV"` (2026-11-21)
+runs TASK from EVERY populated state, takes every state below the window
+from DMRG (the relaxation partners: without the one empty state at
+10 GHz of a 14-spin chain the widths were 5% off and the curve 8%), keeps
+the window lines of each populated state relative to its own strongest
+line (relative to the strongest of all, the final states of a weakly
+populated state were lost: 1.9e-5 against 2.3e-6), and diagonalizes H in
+one common basis; do NOT replace that basis by one two-level line per
+transition (46 to 61% off).
 (3) The relaxation is block diagonal over what S connects (the charge
 sectors of a fermion chain), each block at its thermal weight; a drive
 across two blocks raises. (4) Only an exact degeneracy coupled by V, D or K

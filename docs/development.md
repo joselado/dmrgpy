@@ -7808,6 +7808,26 @@ The pieces:
   populated, each one seeding a block), hence opt-in, not a default
   (picked for the author on 2026-11-21). A full MPS Krylov space does not
   carry over: it needs 3 to 4 vectors per eigenstate it replaces.
+- On DMRG, `submode="KRYLOV"` (`spectrum.mps_krylov_spectrum`, v3 and
+  `"python"`) runs that Krylov space in the one-site tangent space of each
+  populated state instead (`pyitensor/task.py`'s `TangentSpace` and
+  `block_krylov` from P V|m>, nkry steps, 600 by default), where its
+  vectors are cheap. The `nstates` lowest DMRG states must reach every
+  populated state and every state below the window: those are the
+  relaxation partners of the upper states, and without the one empty
+  state at 10 GHz of a 14-spin chain the widths were 5% off. The window
+  lines of each populated state (relative to its own strongest line) must
+  have a tangent-space residual below `RITZ_TOL` of a free-spin half
+  width, or the call raises. Their Ritz vectors become MPS of twice the
+  bond dimension (`_tangent_to_mps`, the bond saying whether the tangent
+  tensor is already placed) truncated to `maxm` by a sum; H is
+  diagonalized in the span of them and the low states through the overlap
+  matrix (linearly dependent directions, from two populated states
+  reaching one final state, dropped at 1e-10), and the eigenstates up to
+  `emax` are formed as MPS sums and read by `_states_spectrum`, the code
+  of the eigenstate route, sigma included. On 14 spins at J = 30 GHz,
+  T = 0.05 K it agrees with ED to 3e-7 of the peak; the speed against the
+  eigenstate route is in the plan's Krylov section.
 - `esrtk/rates.py`: the Korringa rates, their scale from `T1` (a free spin
   1/2 at `f_ref`), the pure dephasing from `T2`, and the
   resolvent G of the relaxation. G is block diagonal over the blocks the

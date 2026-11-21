@@ -91,6 +91,7 @@ class Lines():
         e = spec.e
         self.kT = kT
         self.T2 = float(T2)
+        self.fmin, self.fmax = float(np.min(f)), float(np.max(f))
         # f_ref: the frequency at which a free spin 1/2 relaxes in T1
         self.f_ref = float(f_ref)
         self.g = rates.korringa_scale(T1, h*self.f_ref, kT)
@@ -259,11 +260,17 @@ class Lines():
     def warn_positions(self, h):
         """On the MPS route, warn when the bound on the position of a strong
         line (sigma_n + sigma_m, which has an eigenvalue within it) is
-        larger than its half width."""
+        larger than its half width. Only lines inside the window count: one
+        outside adds a tail to it, and on submode="KRYLOV" the states such a
+        line ends on can be relaxation partners whose energies are not
+        converged."""
         if self.spec.sigma is None or self.npairs == 0: return
         s = self.spec.sigma
         bound = (s[self.u] + s[self.l])/h
         strength = np.abs(self.v2*self.y0)
+        near = (self.f_p >= self.fmin) & (self.f_p <= self.fmax)
+        strength = strength*near
+        if not np.any(strength > 0.): return
         strong = strength > WARN_WEIGHT*np.max(strength)
         hw = 0.5*self.gam/np.pi
         bad = strong & (bound > hw)

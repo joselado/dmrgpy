@@ -286,6 +286,17 @@ def mps_spectrum(chain, V, D, emax, nstates, site_weights=None):
             % (nstates, e[-1], emax))
     keep = np.flatnonzero(e <= emax)
     ws = [ws[i] for i in keep]
+    return _states_spectrum(chain, ws, e[keep], V, D, site_weights,
+                            route="DMRG", reached=e[-1])
+
+
+def _states_spectrum(chain, ws, e, V, D, site_weights=None, route="DMRG",
+                     reached=None):
+    """ESRSpectrum of a list of MPS states with energies e (relative to the
+    lowest): normalized here, sigma from vev.energy_variance, and V, D and K
+    from their matrix elements."""
+    from .. import vev
+    w = _weights(chain, site_weights)
     norms = np.array([np.sqrt(abs(chain.overlap(x, x))) for x in ws])
     ws = [x*(1./nx) for x, nx in zip(ws, norms)]
     n = len(ws)
@@ -344,8 +355,195 @@ def mps_spectrum(chain, V, D, emax, nstates, site_weights=None):
         z2 = np.abs(matrix(Sz[k]))**2
         p2 = np.abs(matrix(Sp[k], herm=False))**2
         K += w[k]*(z2 + 0.5*(p2 + p2.T))
-    return ESRSpectrum(e[keep], Vm, Dm, K, sigma=sigma, route="DMRG",
-                       reached=e[-1])
+    return ESRSpectrum(e, Vm, Dm, K, sigma=sigma, route=route,
+                       reached=reached)
+
+
+def _mpo_site_arrays(chain, M):
+    """The site arrays (left link, bra, ket, right link) of an MPO of the
+    chain's session (v3 or "python")"""
+    if chain.itensor_version == "python":
+        from ..pyitensor import task
+        return task.mpo_arrays(M)
+    return chain._session.mpo_site_arrays(M)
+
+
+def _tangent_to_mps(ts, T):
+    """The tangent vector sum_l A_1..A_{l-1} T_l B_{l+1}..B_L of the
+    tangent space ts as MPS site arrays of twice the bond dimension: the
+    bond carries whether T has been placed to the left (then B follows) or
+    not (then A), so that site l is [[B_l, 0], [T_l, A_l]]."""
+    from ..pyitensor import backend
+    As = [np.asarray(backend.to_host(a)) for a in ts.As]
+    Bs = [np.asarray(backend.to_host(b)) for b in ts.Bs]
+    Ts = [np.asarray(backend.to_host(x)) for x in T]
+    L = len(As)
+    if L == 1:
+        return [Ts[0]]
+    out = []
+    for l in range(L):
+        A, B, X = As[l], Bs[l], Ts[l]
+        a, d, b = A.shape
+        dt = np.result_type(A, B, X)
+        if l == 0:
+            M = np.zeros((1, d, 2*b), dtype=dt)
+            M[:, :, :b] = X
+            M[:, :, b:] = A
+        elif l == L - 1:
+            M = np.zeros((2*a, d, 1), dtype=dt)
+            M[:a] = B
+            M[a:] = X
+        else:
+            M = np.zeros((2*a, d, 2*b), dtype=dt)
+            M[:a, :, :b] = B
+            M[a:, :, :b] = X
+            M[a:, :, b:] = A
+        out.append(M)
+    return out
+
+
+def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
+                        nstates, site_weights=None, read=None):
+    """ESRSpectrum on DMRG from the eigenstates below the window and the
+    final states of the window lines found in the tangent space (TASK).
+
+    The nstates lowest DMRG eigenstates must reach max(epop, window[0]):
+    the populated states, and the states below the window, into which the
+    upper states of the lines relax (without the one empty state below
+    the window of a 14-spin chain, the widths were 5% off and the curve
+    8%). From every populated state m, a block Krylov space of nkry steps
+    of P(H - E_m)P in the one-site tangent space of m, started from P V|m>
+    (pyitensor/task.py), gives Ritz states; those on a line of the window
+    (|<n|V|m>|^2 above LINE_TOL of the strongest line out of m) must have a
+    tangent-space residual below ritz_tol, or the call raises and asks for
+    more nkry. They are formed as MPS (_tangent_to_mps, truncated to maxm
+    by a sum), H is diagonalized in the span of all of them and of the low
+    states (generalized eigenproblem, linearly dependent directions
+    dropped), and the eigenstates up to emax are formed as MPS sums and
+    read as on the eigenstate route (_states_spectrum), sigma included for
+    the states below the window and the final states of the window lines
+    (the other eigenstates of the basis are relaxation partners, with
+    sigma set to 0, as on ED).
+    On 14 spins at J = 30 GHz, T = 0.05 K it agrees with ED to 3e-7 of the
+    peak and takes a fifth of the time of the 58 eigenstates."""
+    from ..pyitensor import task, backend
+    from ..mps import MPS
+    from ..multioperatortk.staticoperator import StaticOperator
+    if chain.itensor_version not in (3, "python"):
+        raise NotImplementedError(
+            "get_esr_spectrum(mode=\"DMRG\", submode=\"KRYLOV\") runs on "
+            "itensor_version=3 and \"python\" only (got %r)"
+            % (chain.itensor_version,))
+    s = chain._session
+    ecut = max(epop, window[0])
+    es, ws = chain.get_excited_states(n=int(nstates))
+    es = np.real(np.asarray(es))
+    o = np.argsort(es)
+    es = es[o]
+    ws = [ws[i] for i in o]
+    e = es - es[0]
+    if len(ws) < nstates or not e[-1] > ecut:
+        raise ValueError(
+            "get_esr_spectrum(mode=\"DMRG\", submode=\"KRYLOV\"): the %d "
+            "lowest states reach %.4g above the ground state, but every "
+            "state below the window and every populated state, up to %.4g, "
+            "is needed; raise nstates" % (len(ws), e[-1], ecut))
+    low = [w*(1./np.sqrt(abs(chain.overlap(w, w))))
+           for w, x in zip(ws, e) if x <= ecut]
+    elow = e[e <= ecut]
+    Ws = _mpo_site_arrays(chain, s.H if chain.itensor_version == "python"
+                          else s.hamiltonian_mpo())
+    Wv = _mpo_site_arrays(chain, s.build_operator(V.to_terms()))
+    # the tangent-space Krylov space of every populated state
+    spaces = []
+    for m, x in zip(low, elow):
+        if x > epop: continue
+        ts = task.TangentSpace(s.mps_site_arrays(m.cpp_handle), Ws)
+        b = ts.project_operator(Wv)
+        store, cnt, Hq, (jl, R) = task.block_krylov(ts, [b], int(nkry),
+                                                    residual=True)
+        th, U = np.linalg.eigh(Hq)
+        res = np.zeros(cnt)
+        if len(R):
+            Ul = U[jl:, :]
+            res = np.sqrt(np.abs(np.einsum("jf,jk,kf->f", Ul.conj(), R, Ul)))
+        ov = np.asarray(backend.to_host(
+            backend.row_overlaps(store, ts.flat(b), cnt)))[:cnt]
+        strength = np.abs(U.conj().T @ ov)**2
+        inwin = ((np.abs(th) + res >= window[0])
+                 & (np.abs(th) - res <= window[1]))
+        spaces.append((ts, store, cnt, U, res, strength*inwin))
+    finals, nbad, nneed, worst = [], 0, 0, 0.
+    for ts, store, cnt, U, res, strength in spaces:
+        # relative to the strongest line of this populated state, so that
+        # the final states of a weakly populated one are kept as well: they
+        # are relaxation partners too (relative to the strongest line of
+        # all, the curve was 1.9e-5 of the peak off on 10 spins, 2.3e-6 so)
+        smax = np.max(strength) if len(strength) else 0.
+        line = (strength > LINE_TOL*smax) & (smax > 0.)
+        nneed += int(np.sum(line))
+        bad = line & (res > ritz_tol)
+        if np.any(bad):
+            nbad += int(np.sum(bad))
+            worst = max(worst, float(np.max(res[bad])))
+            continue
+        for k in np.flatnonzero(line):
+            T = task.ritz_vector((ts, store, cnt), U[:, k])
+            h = s.mps_from_site_arrays(_tangent_to_mps(ts, T))
+            h = s.sum_mps_weighted([h, h], [0.5, 0.5]) # truncated to maxm
+            finals.append(MPS(chain, cpp_handle=h))
+    if nbad:
+        raise ValueError(
+            "get_esr_spectrum(mode=\"DMRG\", submode=\"KRYLOV\"): %d of the "
+            "%d final states of the lines in the window are not converged "
+            "in the tangent space (largest residual %.3g, ritz_tol %.3g); "
+            "raise nkry (%d)" % (nbad, nneed, worst, ritz_tol, nkry))
+    # one basis: the low states and the final states, which are nearly
+    # parallel when two populated states reach the same final state
+    basis = low + finals
+    N = len(basis)
+    pt = _PairTraces(chain, basis)
+    S = np.zeros((N, N), dtype=complex)
+    Hb = np.zeros((N, N), dtype=complex)
+    Hop = StaticOperator(chain.hamiltonian, chain)
+    for (a, c), G in pt.G.items():
+        S[a, c] = np.trace(G[0])
+        Hb[a, c] = Hop.aMb(basis[a], basis[c])
+        S[c, a], Hb[c, a] = np.conj(S[a, c]), np.conj(Hb[a, c])
+    sv, Us = np.linalg.eigh(S)
+    ind = sv > 1e-10*np.max(sv)
+    X = Us[:, ind]/np.sqrt(sv[ind])
+    E, C = np.linalg.eigh(X.conj().T @ Hb @ X)
+    Cf = X @ C
+    sel = np.flatnonzero(E - E[0] <= emax)
+    states = [MPS(chain, cpp_handle=s.sum_mps_weighted(
+        [x.cpp_handle for x in basis], [complex(c) for c in Cf[:, j]]))
+        for j in sel]
+    spec = _states_spectrum(chain, states, E[sel] - E[sel][0], V, D,
+                            site_weights, route="KRYLOV", reached=e[-1])
+    # The energy error sigma counts for the states below the window and the
+    # final states of the lines inside the frequency window itself (read,
+    # without the margin), whose positions are read. The other eigenstates
+    # of the basis are relaxation partners or ends of lines in the margin,
+    # which act through their tails, and some are far from converged: 3 GHz
+    # on 12 spins for two states 31 GHz above the second populated state,
+    # whose tangent space holds them only roughly, and their sigma in the
+    # degeneracy tolerance made them a "level crossing". As on ED
+    # (ed_krylov_spectrum), theirs is set to 0.
+    if read is None:
+        read = window
+    ee = spec.e
+    popm = ee <= epop
+    v2 = np.abs(spec.V)**2
+    de = np.abs(ee[:, None] - ee[None, :])
+    inwin = (de >= read[0]) & (de <= read[1])
+    line = np.zeros(len(ee), dtype=bool)
+    for m in np.flatnonzero(popm):
+        col = v2[:, m]*inwin[:, m]
+        if np.max(col) > 0.:
+            line |= col > LINE_TOL*np.max(col)
+    spec.sigma = np.where(line | (ee <= ecut), spec.sigma, 0.)
+    return spec
 
 
 def _orth(B, Q):

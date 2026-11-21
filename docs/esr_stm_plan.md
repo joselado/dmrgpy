@@ -67,6 +67,53 @@ sectors on the MPS route, the digitized peak heights of Yang et al.
 Fig. 3, the PyESRSTM cross-check, a run on `julia_live`, and section S5 of
 Bae et al.
 
+## The Krylov routes (2026-11-21)
+
+The author asked whether the final states of the lines could come from a
+Krylov space instead of from excited-state DMRG, since a long chain needs
+more excited states than DMRG can give, and picked the regime of an
+exchange well above kT. Fable took the decisions of the night. What was
+measured and built:
+
+- A Krylov space can only replace the final states. The populated states
+  and every state below the window are still needed as eigenstates: the
+  upper state of a line relaxes into them. Without the one empty state at
+  10 GHz of a 14-spin chain, the widths were 5% off and the curve 8%. At
+  the default `p_cut`, on 14 spins, 110 of the 139 needed states are
+  populated at J = 240 GHz and T = 1.2 K, and 10 of 99 at J = 30 GHz and
+  T = 0.05 K. So the Krylov routes pay in the second regime only.
+- One common basis is needed. One two-level Bloch line per transition, as
+  separate Krylov spaces give, is 46 to 61% of the peak off.
+- A Krylov space of full MPS does not pay: it needs 3 to 4 vectors per
+  eigenstate it replaces (273 vectors for 100 eigenstates at 2e-5 of the
+  peak on 12 spins).
+- ED, `submode="KRYLOV"`: the populated eigenstates and one block Krylov
+  space of V|m>. 3.2 times faster than the eigenbasis on 16 spins at
+  J = 30 GHz and T = 0.05 K, but 0.45 times at J = 240 GHz and T = 1.2 K,
+  so it is opt-in.
+- DMRG, `submode="KRYLOV"`: the Krylov space runs in the tangent space of
+  each populated state (TASK), where its vectors are cheap. The TASK poles
+  out of the ground state of 14 spins were off by a median of 1 to 1.7
+  half widths at nkry=100, and by 2.4e-5 (maxm=32) and 3.4e-7 (maxm=64)
+  at nkry=300: the error was the Krylov space, not the tangent
+  projection. With the states below the window from DMRG, nkry=600 (300
+  left 14 window lines unconverged) and one common basis, the curve agrees
+  with ED to 3e-7 of the peak on 14 spins at J = 30 GHz, T = 0.05 K.
+  It took 318 s on v3 on one E-core, where the eigenstate route spent
+  1376 s on its 58 eigenstates alone and then refused the result: two of
+  its states were closer than their energy errors at maxm=64. On 12 spins
+  two final states 31 GHz above the second populated state came out with
+  an energy error of 3 GHz, since the tangent space of an excited state
+  holds states far above it only roughly; they end lines in the margin,
+  not in the window, so their error is left out of the degeneracy
+  tolerance and of the position warning.
+- Left open: the crossover between the routes, as a function of the
+  populated fraction; chains above 14 spins; the MPS sums that form the
+  eigenstates of the common basis, a third of the time; how nkry has to
+  grow with the length; `julia_live`; and the regime of an exchange close
+  to kT, where almost every state is populated and only a typicality
+  method (finite-temperature Lanczos) would avoid eigenstates.
+
 ## Why it is not the spin spectral function
 
 The d2I/dV2 of IETS at T=0 is, up to a constant,
