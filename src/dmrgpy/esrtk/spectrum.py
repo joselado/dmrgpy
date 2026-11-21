@@ -21,19 +21,35 @@ them and diagonalizes H in their span) and reads every matrix element as
 and the MPS route raises when its states do not reach emax, since a state
 missing below emax would be a missing line or a missing population.
 
-ed_krylov_spectrum (submode="KRYLOV") needs as eigenstates only the
-populated ones, up to epop = kT ln(1/p_cut) above the lowest state. The
-final states come from one block Krylov space started from V|m> for every
-populated m, and H is diagonalized in the span of the populated states and
-that space. This follows the pattern of kondospectrumtk/krylovkondo.py, with
-one difference that is measured: the relaxation needs one common basis. A
-two-level Bloch line per transition, as separate Krylov spaces would give,
-was 46 to 61% of the peak off the full rate equation on 8 and 10 spins,
-while the full rate equation restricted to the populated states and the
-final states with |V_nm|^2 above 1e-2 of the largest was within 4e-7 to
-2e-4 of it. The final states of the lines in the window must converge
-(ed_krylov_spectrum); the other Ritz states are kept as relaxation
-partners.
+ed_krylov_spectrum (submode="KRYLOV") takes as eigenstates the populated
+ones and every state below the window, up to max(epop, window[0]) above
+the lowest state, epop = kT ln(1/p_cut): the upper state of a line relaxes
+into them. The final states come from one block Krylov space started from
+V|m> for every populated m. A second, closing block Krylov space, started
+from S^a_k|n> and V|n> for the states below the window and the converged
+final states n of the window lines, adds the relaxation partners and the
+states of a second photon that V|m> and H never reach: when V conserves a
+quantum number of H that S^a_k does not (a tip moment along the field),
+the whole of the other sectors. H is diagonalized in the span of the
+eigenstates and of both spaces. This follows the pattern of
+kondospectrumtk/krylovkondo.py, with one difference that is measured: the
+relaxation needs one common basis. A two-level Bloch line per transition,
+as separate Krylov spaces would give, was 46 to 61% of the peak off the
+full rate equation on 8 and 10 spins, while the full rate equation
+restricted to the populated states and the final states with |V_nm|^2
+above 1e-2 of the largest was within 4e-7 to 2e-4 of it. The final states
+of the lines in the window must converge (ed_krylov_spectrum); the other
+Ritz states are kept as relaxation partners.
+
+Both Krylov routes end with a closure guard (_ed_guard, _mps_guard): for
+each final state n of a window line, the part of S^a_k|n> and of V|n>
+outside the kept states is resolved in energy by a few Lanczos steps, and
+the call raises, naming submode=None, when a part of it below emax carries
+more than GUARD_TOL of the relaxation rate out of n, or of |V|n>|^2. The
+DMRG route has no closing stage: its states below the window come from
+DMRG, and above the window the guard is what stands for the partners
+whenever H conserves a charge that the spin operators change, the case in
+which whole sectors are out of reach of its tangent spaces.
 """
 import numpy as np
 import scipy.sparse as sp
@@ -41,6 +57,7 @@ import scipy.sparse.linalg as sla
 
 from ..algebra import algebra
 from ..kondospectrumtk import edkondo
+from . import rates
 
 # Above this dimension the ED route takes the lowest eigenpairs of the
 # sparse H with eigsh, starting from K0 states and raising k by 1.6 until
@@ -64,6 +81,45 @@ OVERLAP_CUT = 1e-10
 # submode="KRYLOV": a line out of a populated state m into n counts as a line
 # of the window when |V_nm|^2 p_m is above LINE_TOL of the strongest
 LINE_TOL = 1e-6
+# submode="KRYLOV" on ED: the closing stage starts from S^z_k|n>, S^+_k|n>,
+# S^-_k|n> and V|n> for every site k with a weight and every state n below
+# the window or final state of a window line, when there are at most
+# CLOSE_WIDTH of these vectors, and from CLOSE_WIDTH random combinations of
+# them otherwise (generator seeded with CLOSE_SEED): a combination reaches
+# every eigenstate the vectors reach, and the Krylov space resolves them. It
+# grows one block at a time, and checks its Ritz states each time it has
+# grown by the factor CLOSE_GROWTH.
+CLOSE_WIDTH = 128
+CLOSE_SEED = 20261121
+CLOSE_GROWTH = 1.25
+# The closure guard of both Krylov routes. For each final state n of a
+# window line, the part of W|n> outside the kept states, W a witness of the
+# Korringa operators, is resolved in energy by GUARD_STEPS Lanczos steps of
+# H. The call raises when the part below emax takes more than GUARD_TOL of
+# the relaxation rate out of n (and is more than GUARD_TOL of |W|n>|^2),
+# or when the part of V|n> below emax is more than GUARD_TOL of |V|n>|^2.
+# The witnesses are sqrt(w_k) S^z_k and sqrt(w_k/2) S^+-_k themselves when
+# there are at most GUARD_WITNESSES of them, and otherwise GUARD_WITNESSES
+# random combinations of them (seed GUARD_SEED), whose mean |<m|W|n>|^2 is
+# the Korringa kernel K[m, n]. A missing T+ on the guide's dimer with the
+# tip along the field moves the curve by 1.2e-4 of its peak, through the
+# readout D_T+T+ = 1/2, and takes about 6e-6 of the rate out of T0 (worked
+# out by hand from the dimer's eigenstates, not measured). A few Lanczos
+# steps give an upper bound of the lowest missing energy, so the guard
+# sees a missing state below emax for sure only when its weight brings a
+# Ritz value below emax in GUARD_STEPS steps. The chains that pin it
+# (tests/test_audit_2026_11_21_esr_krylov.py) exhaust their Hilbert space.
+# On DMRG the guard runs only when H conserves a charge that S^+_k changes
+# (_sector_blocked).
+GUARD_TOL = 1e-6
+GUARD_STEPS = 6
+GUARD_WITNESSES = 6
+GUARD_SEED = 20261121
+# A Lanczos recurrence of the guard stops when its next coupling is below
+# LANCZOS_BREAK of the largest entry of its tridiagonal matrix so far, and
+# the ED guard runs its Lanczos recurrences GUARD_CHUNK columns at a time
+LANCZOS_BREAK = 1e-10
+GUARD_CHUNK = 16
 
 
 class ESRSpectrum():
@@ -359,13 +415,21 @@ def _states_spectrum(chain, ws, e, V, D, site_weights=None, route="DMRG",
     Vm = matrix(V)
     Dm = matrix(D)
     K = np.zeros((n, n))
+    site_matrices = []
     for k in range(len(w)):
         if w[k] == 0.: continue
-        z2 = np.abs(matrix(Sz[k]))**2
-        p2 = np.abs(matrix(Sp[k], herm=False))**2
-        K += w[k]*(z2 + 0.5*(p2 + p2.T))
-    return ESRSpectrum(e, Vm, Dm, K, sigma=sigma, route=route,
+        z = matrix(Sz[k])
+        p = matrix(Sp[k], herm=False)
+        site_matrices.append((k, z, p))
+        p2 = np.abs(p)**2
+        K += w[k]*(np.abs(z)**2 + 0.5*(p2 + p2.T))
+    spec = ESRSpectrum(e, Vm, Dm, K, sigma=sigma, route=route,
                        reached=reached)
+    # the normalized states and <a|S^z_k|b>, <a|S^+_k|b> between them, for
+    # the closure guard of the Krylov route (_mps_guard)
+    spec.states = ws
+    spec.site_matrices = site_matrices
+    return spec
 
 
 def _mpo_site_arrays(chain, M):
@@ -434,7 +498,16 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
     (the other eigenstates of the basis are relaxation partners, with
     sigma set to 0, as on ED).
     On 14 spins at J = 30 GHz, T = 0.05 K it agrees with ED to 3e-7 of the
-    peak and takes a fifth of the time of the 58 eigenstates."""
+    peak and takes a fifth of the time of the 58 eigenstates.
+
+    The partners above the window are only those the tangent spaces of the
+    populated states reach from V|m>, so a sector that V and H never reach
+    (the T+ and T- of an S-T0 line when the tip moment is along the field)
+    is missing from them. There is no closing stage here, as there is on
+    ED: seeding the tangent-space Krylov space with S^a_k|n> would take a
+    start block of 3 vectors per site and final state, each with a store of
+    nkry steps. _mps_guard checks the closure instead and raises, naming
+    submode=None."""
     from ..pyitensor import task, backend
     from ..mps import MPS
     from ..multioperatortk.staticoperator import StaticOperator
@@ -564,18 +637,233 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
         read = window
     ee = spec.e
     popm = ee <= epop
-    v2 = np.abs(spec.V)**2
-    de = np.abs(ee[:, None] - ee[None, :])
-    err = spec.sigma[:, None] + spec.sigma[None, :]
-    inwin = (de + err >= read[0]) & (de - err <= read[1])
-    line = np.zeros(len(ee), dtype=bool)
+    line = _line_finals(ee, spec.V, spec.sigma, popm, read)
+    finals = _line_finals(ee, spec.V, spec.sigma, popm, window)
+    spec.sigma_measured = spec.sigma
+    spec.sigma = np.where(line | (ee <= ecut), spec.sigma, 0.)
+    _mps_guard(chain, spec, Hop, E[sel][0], finals, V,
+               _weights(chain, site_weights), emax, kT)
+    return spec
+
+
+def _line_finals(e, V, err, popm, rng):
+    """The final states of the lines out of the populated states (popm)
+    whose position, give or take the error err of its two energies, lies in
+    rng = (lo, hi), with |V_nm|^2 above LINE_TOL of the strongest such line
+    out of the same m"""
+    v2 = np.abs(V)**2
+    de = np.abs(e[:, None] - e[None, :])
+    er = err[:, None] + err[None, :]
+    inwin = (de + er >= rng[0]) & (de - er <= rng[1])
+    line = np.zeros(len(e), dtype=bool)
     for m in np.flatnonzero(popm):
         col = v2[:, m]*inwin[:, m]
         if np.max(col) > 0.:
             line |= col > LINE_TOL*np.max(col)
-    spec.sigma_measured = spec.sigma
-    spec.sigma = np.where(line | (ee <= ecut), spec.sigma, 0.)
-    return spec
+    return line
+
+
+def _H(X):
+    """The adjoint of a dense array, without a copy when it is real"""
+    return X.conj().T if np.iscomplexobj(X) else X.T
+
+
+def _witnesses(wk):
+    """The witness operators of the closure guard for the weights wk (> 0)
+    of the sites that relax: a list of (n, 3) arrays, the coefficients of
+    each witness on (S^z_k, S^+_k, S^-_k) of those sites, and the factor
+    that turns the sum of the measures of the witnesses into the measure of
+    the Korringa kernel, sum_m K[m, n] delta(E - E_m) (see GUARD_TOL)"""
+    wk = np.asarray(wk, dtype=float)
+    scale = np.sqrt(np.column_stack([wk, 0.5*wk, 0.5*wk]))
+    if scale.size <= GUARD_WITNESSES:
+        out = []
+        for i, a in np.ndindex(scale.shape):
+            c = np.zeros(scale.shape)
+            c[i, a] = scale[i, a]
+            out.append(c)
+        return out, 1.
+    rng = np.random.default_rng(GUARD_SEED)
+    out = [scale*rng.standard_normal(scale.shape)
+           for _ in range(GUARD_WITNESSES)]
+    return out, 1./GUARD_WITNESSES
+
+
+def _guard_verdict(e, K, idx, kT, norm, miss_w, miss_r, nv, miss_v, label):
+    """Raise when a final state of a window line sends more than GUARD_TOL
+    of its relaxation rate into states below emax outside the basis, or
+    when a second photon from it reaches such states; idx are the finals,
+    norm, miss_w and miss_r the weight of the witnesses, and the weight and
+    the rate of their parts outside the basis below emax, nv and miss_v the
+    same weights for V|n>."""
+    kept = np.zeros(len(idx))
+    for j, n in enumerate(idx):
+        others = np.arange(len(e)) != n
+        kept[j] = np.sum(K[others, n]*rates.phi(e[n] - e[others], kT))
+    bad = (miss_w > GUARD_TOL*norm) & (miss_r > GUARD_TOL*(kept + miss_r))
+    if np.any(bad):
+        share = miss_r/np.maximum(kept + miss_r, 1e-300)
+        j = np.flatnonzero(bad)[np.argmax(share[bad])]
+        raise ValueError(
+            "get_esr_spectrum(%s): the final state of a line in the window "
+            "at %.6g above the lowest state (in the units of H) sends %.3g of "
+            "its relaxation rate into states below emax that the Krylov basis "
+            "does not hold: the space reached from V|m> misses relaxation "
+            "partners, for instance the other sectors of a quantum number of "
+            "H that the drive conserves and the spin operators of the "
+            "relaxation do not (a tip moment along the field). Use "
+            "submode=None, the eigenstates up to the top of the window"
+            % (label, e[idx[j]], share[j]))
+    badv = miss_v > GUARD_TOL*nv
+    if np.any(badv):
+        share = miss_v/np.maximum(nv, 1e-300)
+        j = np.flatnonzero(badv)[np.argmax(share[badv])]
+        raise ValueError(
+            "get_esr_spectrum(%s): the drive takes the final state of a line "
+            "in the window at %.6g above the lowest state (in the units of H) "
+            "into states below emax that the Krylov basis does not hold (%.3g "
+            "of |V|n>|^2), the upper states of a second photon. Use "
+            "submode=None, the eigenstates up to the top of the window"
+            % (label, e[idx[j]], share[j]))
+
+
+def _below_emax(th, om, e0, en, emax, kT):
+    """The weight and the relaxation rate from a state at en (both relative
+    to the lowest state) of the Ritz values th (absolute) and weights om of
+    a Lanczos measure, counting those at most emax above the lowest state,
+    e0 its absolute energy"""
+    x = np.asarray(th) - e0
+    below = x <= emax
+    if not np.any(below):
+        return 0., 0.
+    om = np.asarray(om)[below]
+    return float(np.sum(om)), float(np.sum(om*rates.phi(en - x[below], kT)))
+
+
+def _mps_lanczos(chain, Hop, r, steps):
+    """(theta, weight): the Ritz values of `steps` Lanczos steps of H (the
+    StaticOperator Hop) from the MPS r, and their Gauss weights times
+    ||r||^2, the quadrature of the spectral measure of r. Each new vector
+    is orthogonalized against the two before it, as a weighted MPS sum
+    truncated to the chain's maxm."""
+    from ..mps import MPS
+    s = chain._session
+    n2 = float(np.real(chain.overlap(r, r)))
+    if not n2 > 0.:
+        return np.zeros(0), np.zeros(0)
+    v = r*(1./np.sqrt(n2))
+    prev, b = None, 0.
+    alpha, beta = [], []
+    for j in range(int(steps)):
+        x = Hop*v
+        a = float(np.real(chain.overlap(v, x)))
+        alpha.append(a)
+        if j == int(steps) - 1:
+            break
+        hs, cs = [x.cpp_handle, v.cpp_handle], [1.+0j, complex(-a)]
+        if prev is not None:
+            hs.append(prev.cpp_handle)
+            cs.append(complex(-b))
+        x = MPS(chain, cpp_handle=s.sum_mps_weighted(hs, cs))
+        b = np.sqrt(max(float(np.real(chain.overlap(x, x))), 0.))
+        top = max(np.max(np.abs(alpha)), max(beta) if beta else 0.)
+        if not b > LANCZOS_BREAK*top:
+            break
+        beta.append(b)
+        prev, v = v, x*(1./b)
+    m = len(alpha)
+    T = (np.diag(alpha) + np.diag(beta[:m - 1], 1)
+         + np.diag(beta[:m - 1], -1))
+    th, Y = np.linalg.eigh(T)
+    return th, n2*np.abs(Y[0])**2
+
+
+def _sector_blocked(chain, ops):
+    """Whether H conserves a charge of the site types (Sz, Nf) that one of
+    the operators ops changes: the tangent spaces of the populated states
+    then stay in the sectors V reaches from them, and the relaxation
+    partners in the sectors next to those are never in them"""
+    from ..multioperatortk import charge
+    names = charge.conserved_qn_names(chain, chain.hamiltonian)
+    if not names:
+        return False
+    for op in ops:
+        q = charge.multioperator_charge(chain, op, names)
+        if q is None or any(x != 0 for x in q):
+            return True
+    return False
+
+
+def _mps_guard(chain, spec, Hop, e0, finals, V, w, emax, kT):
+    """The closure guard of mps_krylov_spectrum (see GUARD_TOL), with MPS:
+    for each final state n of a window line, W|n> for every witness W and
+    V|n>, minus their parts on the kept states (whose overlaps are the
+    matrices the spectrum was read from), resolved in energy by GUARD_STEPS
+    Lanczos steps. w are the site weights and e0 the absolute energy of the
+    lowest kept state.
+
+    It runs only when H conserves a charge of the site types that S^+_k
+    changes (_sector_blocked), the case where whole sectors of partners
+    are out of reach. Without such a charge (a transverse field anywhere in
+    H) the tangent spaces reach the partners, and those above the margin
+    are kept when converged and dropped otherwise, by design (1.1e-6 of the
+    peak on 10 spins); the guard would count the dropped ones as missing,
+    and how often that would refuse a chain of the plan is not measured.
+    A conserved quantity that is not a charge of the site types (Sx_tot
+    for a field and a tip along x, a mirror of the chain) is not seen."""
+    from ..mps import MPS
+    from ..multioperatortk.staticoperator import StaticOperator
+    idx = np.flatnonzero(finals)
+    if len(idx) == 0:
+        return
+    s = chain._session
+    states = spec.states
+    ks = [k for k, _, _ in spec.site_matrices]
+    Sz, Sp = site_operators(chain)
+    if not _sector_blocked(chain, [Sp[k] for k in ks]):
+        return
+    wits, factor = _witnesses(np.asarray(w)[ks])
+
+    def outside(Op, cols, n):
+        """|phi|^2, and the weight and the rate below emax of the part of
+        phi = Op|n> outside the kept states, cols[i] = <i|Op|n>"""
+        phi = Op*states[n]
+        n2 = float(np.real(chain.overlap(phi, phi)))
+        big = np.flatnonzero(np.abs(cols)**2 > 1e-14*n2)
+        if n2 - np.sum(np.abs(cols[big])**2) <= 1e-3*GUARD_TOL*n2:
+            return n2, 0., 0.
+        r = MPS(chain, cpp_handle=s.sum_mps_weighted(
+            [phi.cpp_handle] + [states[i].cpp_handle for i in big],
+            [1.+0j] + [complex(-cols[i]) for i in big]))
+        th, om = _mps_lanczos(chain, Hop, r, GUARD_STEPS)
+        return (n2,) + _below_emax(th, om, e0, spec.e[n], emax, kT)
+
+    norm = np.zeros(len(idx))
+    miss_w = np.zeros(len(idx))
+    miss_r = np.zeros(len(idx))
+    for c in wits:
+        O = 0
+        M = 0.
+        for i, (k, z, p) in enumerate(spec.site_matrices):
+            Sm = chain.Sx[k] - 1j*chain.Sy[k]
+            for a, (op, mat) in enumerate(((Sz[k], z), (Sp[k], p),
+                                           (Sm, p.conj().T))):
+                if c[i, a] != 0.:
+                    O = O + float(c[i, a])*op
+                    M = M + float(c[i, a])*mat
+        Ow = StaticOperator(O, chain)
+        for j, n in enumerate(idx):
+            n2, mw, mr = outside(Ow, M[:, n], n)
+            norm[j] += factor*n2
+            miss_w[j] += factor*mw
+            miss_r[j] += factor*mr
+    nv = np.zeros(len(idx))
+    miss_v = np.zeros(len(idx))
+    Vop = StaticOperator(V, chain)
+    for j, n in enumerate(idx):
+        nv[j], miss_v[j], _ = outside(Vop, spec.V[:, n], n)
+    _guard_verdict(spec.e, spec.K, idx, kT, norm, miss_w, miss_r, nv, miss_v,
+                   "mode=\"DMRG\", submode=\"KRYLOV\"")
 
 
 def _orth(B, Q):
@@ -590,13 +878,249 @@ def _orth(B, Q):
     return U[:, sv > DROP_TOL*scale]
 
 
+def _rayleigh_ritz(Hs, Q, emax, width):
+    """(theta, y, cand, res): the Ritz values theta (sorted) of H in the
+    span of the orthonormal columns of Q, the Ritz vectors being Q @ y, and
+    of the Ritz states up to emax + width above the lowest the ones whose
+    residual ||(H - theta)|u>|| reaches below emax (an eigenvalue lies
+    within it), with those residuals. H Q is formed CHUNK columns at a time
+    and not kept."""
+    N = Q.shape[1]
+    Hk = np.empty((N, N), dtype=np.result_type(Q.dtype, Hs.dtype))
+    QH = _H(Q)
+    for c0 in range(0, N, CHUNK):
+        Hk[:, c0:c0 + CHUNK] = QH @ (Hs @ Q[:, c0:c0 + CHUNK])
+    theta, y = np.linalg.eigh(0.5*(Hk + _H(Hk)))
+    del Hk
+    cand = np.flatnonzero(theta - theta[0] <= emax + width)
+    res = np.empty(len(cand))
+    for c0 in range(0, len(cand), CHUNK):
+        sel = cand[c0:c0 + CHUNK]
+        U = Q @ y[:, sel]
+        R = Hs @ U - U*theta[sel][None, :]
+        res[c0:c0 + CHUNK] = np.linalg.norm(R, axis=0)
+    inside = theta[cand] - theta[0] - res <= emax
+    return theta, y, cand[inside], res[inside]
+
+
+def _ed_lines(e, Vm, res, epop, kT, window):
+    """(popm, need): the populated states (up to epop above the lowest) and
+    the final states of the lines in the window out of them, those n with
+    |V_nm|^2 p_m above LINE_TOL of the strongest line and |E_n - E_m| in
+    the window give or take the residual of n"""
+    popm = e <= epop
+    p = np.zeros(len(e))
+    p[popm] = np.exp(-e[popm]/kT) if kT > 0. else (e[popm] == 0.)
+    strength = np.abs(Vm)**2*p[None, :] # zero unless m is populated
+    de = np.abs(e[:, None] - e[None, :])
+    inwin = (de + res[:, None] >= window[0]) & (de - res[:, None] <= window[1])
+    smax = np.max(strength*inwin) if strength.size else 0.
+    line = inwin & (strength > LINE_TOL*smax) & (smax > 0.)
+    return popm, np.any(line, axis=1)
+
+
+def _check_finals(need, res, ritz_tol, nkry):
+    bad = need & (res > ritz_tol)
+    if np.any(bad):
+        raise ValueError(
+            "get_esr_spectrum(submode=\"KRYLOV\"): %d of the %d final states "
+            "of the lines in the window are not converged (largest residual "
+            "%.3g, ritz_tol %.3g); raise nkry (%d)"
+            % (np.sum(bad), np.sum(need), np.max(res[bad]), ritz_tol, nkry))
+
+
+def _sparse_operator(edobj, op):
+    """The ED matrix of op as a csr matrix, real when its imaginary part is
+    exactly zero"""
+    M = sp.csr_matrix(edobj.get_operator(op))
+    if edkondo._imag_is_zero(M):
+        return _part(M, np.real)
+    return sp.csr_matrix(M, dtype=complex)
+
+
+def _closing_start(mats, X):
+    """The start of the closing stage: M X for every matrix of mats, or
+    CLOSE_WIDTH random combinations of their columns when there are more
+    than CLOSE_WIDTH of them (see CLOSE_WIDTH)"""
+    if len(mats)*X.shape[1] <= CLOSE_WIDTH:
+        return np.hstack([M @ X for M in mats])
+    rng = np.random.default_rng(CLOSE_SEED)
+    out = 0.
+    for M in mats:
+        out = out + M @ (X @ rng.standard_normal((X.shape[1], CLOSE_WIDTH)))
+    return out
+
+
+def _project_out(X, Q1, blocks):
+    """X projected twice on the complement of the columns of Q1 and of the
+    blocks, and its coefficients on the blocks, stacked"""
+    dt = np.result_type(X.dtype, Q1.dtype, *[b.dtype for b in blocks])
+    X = X.astype(dt, copy=False)
+    c = np.zeros((sum(b.shape[1] for b in blocks), X.shape[1]), dtype=dt)
+    for _ in range(2):
+        X = X - Q1 @ (_H(Q1) @ X)
+        i = 0
+        for b in blocks:
+            d = _H(b) @ X
+            X = X - b @ d
+            c[i:i + b.shape[1]] += d
+            i += b.shape[1]
+    return X, c
+
+
+def _closing_krylov(Hs, Q1, S0, nkry, top, tol):
+    """An orthonormal basis Q2, orthogonal to the columns of Q1, of the
+    block Krylov space of the compression of H to the complement of Q1,
+    started from the columns of S0 (their part above DROP_TOL, _orth). It
+    grows one block at a time, H B projected twice on the complement of Q1
+    and of the space so far (the coefficients on the space are its
+    projected matrix, as in krylovkondo.block_krylov), and stops when a
+    block is empty (the space is exhausted), after nkry blocks, or once
+    every Ritz state of the compression with an energy up to top (absolute),
+    and the lowest one above it, has a residual below tol: the states the
+    start reaches below emax are then converged, and more blocks would
+    refine the ones above it. The residual is the norm of what the last
+    block leaves outside the space, and it is checked each time the space
+    has grown by CLOSE_GROWTH."""
+    B = _orth(S0, Q1)
+    blocks = []
+    Hk = np.zeros((0, 0), dtype=np.result_type(Hs.dtype, Q1.dtype, B.dtype))
+    n = checked = 0
+    coupling = None
+    for _ in range(int(nkry)):
+        if B.shape[1] == 0: break # the space is exhausted
+        k = B.shape[1]
+        Hk = np.pad(Hk, ((0, k), (0, k)))
+        if coupling is not None:
+            Hk[n:n + k, n - coupling.shape[1]:n] = coupling
+        blocks.append(B)
+        n += k
+        X = Hs @ B
+        scale = float(np.max(np.linalg.norm(X, axis=0)))
+        X, c = _project_out(X, Q1, blocks)
+        Hk[:n, n - k:n] = c
+        if scale > 0.:
+            Ux, s, Vh = np.linalg.svd(X, full_matrices=False)
+            keep = s > DROP_TOL*scale
+            W = s[:, None]*Vh
+        else:
+            Ux, keep, W = X[:, :0], np.zeros(0, dtype=bool), np.zeros((0, k))
+        B, coupling = Ux[:, keep], W[keep]
+        if n >= CLOSE_GROWTH*checked:
+            checked = n
+            th, yk = np.linalg.eigh(0.5*(Hk + _H(Hk)))
+            # the Ritz values come down from above as the space grows, so
+            # the lowest one above top must be converged too: a start block
+            # with most of its weight high up has none below top at first
+            low = th <= top
+            if not np.all(low):
+                low[np.argmax(~low)] = True
+            if np.all(np.linalg.norm(W @ yk[n - k:, low], axis=0) < tol):
+                break
+    if not blocks:
+        return Q1[:, :0]
+    return np.hstack(blocks)
+
+
+def _lanczos_columns(Hs, R, steps):
+    """For every column r of R: (theta, weight), the Ritz values of `steps`
+    Lanczos steps of H from r, with full reorthogonalization, and their
+    Gauss weights times ||r||^2 (the quadrature of the spectral measure of
+    r); a recurrence stops at a coupling below LANCZOS_BREAK."""
+    nrm = np.linalg.norm(R, axis=0)
+    X = R/np.where(nrm > 0., nrm, 1.)[None, :]
+    Vs = []
+    alpha, beta = [], []
+    for _ in range(int(steps)):
+        Vs.append(X)
+        W = Hs @ X
+        alpha.append(np.real(np.sum(X.conj()*W, axis=0)))
+        for _ in range(2):
+            for Y in Vs:
+                W = W - Y*np.sum(Y.conj()*W, axis=0)[None, :]
+        b = np.linalg.norm(W, axis=0)
+        beta.append(b)
+        X = W/np.where(b > 0., b, 1.)[None, :]
+    alpha, beta = np.array(alpha), np.array(beta)
+    out = []
+    for c in range(R.shape[1]):
+        if not nrm[c] > 0.:
+            out.append((np.zeros(0), np.zeros(0)))
+            continue
+        m = len(alpha)
+        for j in range(len(alpha) - 1):
+            top = max(np.max(np.abs(alpha[:j + 1, c])), np.max(beta[:j, c])
+                      if j else 0.)
+            if not beta[j, c] > LANCZOS_BREAK*top:
+                m = j + 1
+                break
+        T = (np.diag(alpha[:m, c]) + np.diag(beta[:m - 1, c], 1)
+             + np.diag(beta[:m - 1, c], -1))
+        th, Y = np.linalg.eigh(T)
+        out.append((th, nrm[c]**2*np.abs(Y[0])**2))
+    return out
+
+
+def _ed_guard(Hs, Vs, ops, U, e, e0, K, finals, emax, kT):
+    """The closure guard of ed_krylov_spectrum (see GUARD_TOL): for each
+    final state n of a window line, W|n> for every witness W and V|n>,
+    minus their parts on the kept Ritz states U, resolved in energy by
+    GUARD_STEPS Lanczos steps. ops are (k, w_k, S^z_k, S^+_k, S^-_k) of the
+    sites that relax, and e0 the absolute energy of the lowest kept state."""
+    idx = np.flatnonzero(finals)
+    if len(idx) == 0:
+        return
+    Uf = U[:, idx]
+    UH = _H(U)
+
+    def outside(Phi):
+        """per column: |phi|^2, and the weight and the rate below emax of
+        the part of phi outside the kept states"""
+        n2 = np.sum(np.abs(Phi)**2, axis=0)
+        mw = np.zeros(len(idx))
+        mr = np.zeros(len(idx))
+        for c0 in range(0, len(idx), GUARD_CHUNK):
+            R = Phi[:, c0:c0 + GUARD_CHUNK]
+            for _ in range(2):
+                R = R - U @ (UH @ R)
+            r2 = np.sum(np.abs(R)**2, axis=0)
+            run = np.flatnonzero(r2 > 1e-3*GUARD_TOL*n2[c0:c0 + GUARD_CHUNK])
+            if len(run) == 0: continue
+            for j, (th, om) in zip(run, _lanczos_columns(Hs, R[:, run],
+                                                         GUARD_STEPS)):
+                mw[c0 + j], mr[c0 + j] = _below_emax(th, om, e0, e[idx[c0 + j]],
+                                                     emax, kT)
+        return n2, mw, mr
+
+    wits, factor = _witnesses([wk for _, wk, _, _, _ in ops])
+    norm = np.zeros(len(idx))
+    miss_w = np.zeros(len(idx))
+    miss_r = np.zeros(len(idx))
+    for c in wits:
+        O = None
+        for i, (_, _, z, p, m) in enumerate(ops):
+            for a, M in enumerate((z, p, m)):
+                if c[i, a] != 0.:
+                    t = float(c[i, a])*M
+                    O = t if O is None else O + t
+        n2, mw, mr = outside(O @ Uf)
+        norm += factor*n2
+        miss_w += factor*mw
+        miss_r += factor*mr
+    nv, miss_v, _ = outside(Vs @ Uf)
+    _guard_verdict(e, K, idx, kT, norm, miss_w, miss_r, nv, miss_v,
+                   "submode=\"KRYLOV\"")
+
+
 def ed_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
                        site_weights=None):
-    """ESRSpectrum from the populated eigenstates (up to epop above the
-    lowest) and the Ritz states of one block Krylov space started from V|m>
-    for every populated m, up to nkry blocks, kept up to emax above the
-    lowest state. window = (elo, ehi) is the energy range of the lines that
-    are read (the frequency window and its margin, times h).
+    """ESRSpectrum from the eigenstates up to max(epop, window[0]) above the
+    lowest (the populated ones, up to epop, and every state below the
+    window), the Ritz states of one block Krylov space started from V|m>
+    for every populated m, and those of a closing block Krylov space, kept
+    up to emax above the lowest state. window = (elo, ehi) is the energy
+    range of the lines that are read (the frequency window and its margin,
+    times h). Both spaces have at most nkry blocks.
 
     The final states of the lines in the window, those n with
     |V_nm|^2 p_m above LINE_TOL of the strongest for a populated m and
@@ -606,19 +1130,35 @@ def ed_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
     are kept as they are, as relaxation partners, whose energies and spin
     matrix elements are then approximate; this needs about half the Krylov
     space of asking every state below emax to converge (measured on 10 and
-    12 spins), and their sigma is set to 0."""
+    12 spins), and their sigma is set to 0.
+
+    The closing space starts from S^z_k|n>, S^+_k|n>, S^-_k|n> (every site
+    k with a weight) and V|n>, for the states below the window and the
+    converged final states n, orthogonal to everything before
+    (_closing_start, _closing_krylov), and H is diagonalized again in the
+    span of all of it. It holds the relaxation partners that the space of
+    V|m> does not reach, the T+ and T- of an S-T0 line when the tip moment
+    is along the field (2 of the 4 states of the dimer were kept without
+    it, and its line came out -5.0 times the eigenstate one), and the upper
+    states of a second photon (the |+1> of a saturated spin 1). The guard
+    _ed_guard checks the closure at the end."""
     w = _weights(chain, site_weights)
     edobj = chain.get_ED_obj()
     Hs = sp.csr_matrix(edobj.get_hamiltonian())
     if edkondo._imag_is_zero(Hs):
         Hs = _part(Hs, np.real)
     dim = Hs.shape[0]
+    # every eigenstate below the window, into which the upper state of a
+    # line relaxes, and every populated one (a 4-spin chain with an empty
+    # Sz = -2 level below a line was 2.1e-2 of its peak off without it)
+    ecut = max(epop, window[0])
     if dim <= algebra.maxsize:
         emu, vs = np.linalg.eigh(Hs.toarray())
     else:
-        emu, vs = _low_states(Hs, epop)
-    pop = emu - emu[0] <= epop
-    P = np.ascontiguousarray(vs[:, pop])
+        emu, vs = _low_states(Hs, ecut)
+    low = emu - emu[0] <= ecut
+    lowpop = (emu - emu[0] <= epop)[low]
+    P = np.ascontiguousarray(vs[:, low])
     Vs = sp.csr_matrix(edobj.get_operator(V))
     if not edkondo._imag_is_zero(Vs) or np.iscomplexobj(P):
         Vs = sp.csr_matrix(Vs, dtype=complex)
@@ -626,59 +1166,57 @@ def ed_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
         Hs = sp.csr_matrix(Hs, dtype=complex)
     else:
         Vs = _part(Vs, np.real)
-    # the block Krylov space of V|m>, orthogonal to the populated states
+    # the block Krylov space of V|m> for the populated m, orthogonal to the
+    # eigenstates
     Q = P
-    B = _orth(Vs @ P, Q)
+    B = _orth(Vs @ P[:, lowpop], Q)
     for _ in range(int(nkry)):
         if B.shape[1] == 0: break # the space is exhausted
         Q = np.hstack([Q, B])
         B = _orth(Hs @ B, Q)
-    HQ = Hs @ Q
-    Hk = Q.conj().T @ HQ
-    theta, y = np.linalg.eigh(0.5*(Hk + Hk.conj().T))
     # the Ritz states up to emax, and those above whose residual reaches
-    # below it (an eigenvalue lies within the residual), tested up to one
-    # window width above emax
-    cand = np.flatnonzero(theta - theta[0] <= emax + (window[1] - window[0]))
-    res = np.empty(len(cand))
-    for c0 in range(0, len(cand), CHUNK):
-        yc = y[:, cand[c0:c0 + CHUNK]]
-        R = HQ @ yc - (Q @ yc)*theta[cand[c0:c0 + CHUNK]][None, :]
-        res[c0:c0 + CHUNK] = np.linalg.norm(R, axis=0)
-    inside = theta[cand] - theta[0] - res <= emax
-    cand, res = cand[inside], res[inside]
-    del HQ
+    # below it, tested up to one window width above emax
+    width = window[1] - window[0]
+    theta, y, cand, res = _rayleigh_ritz(Hs, Q, emax, width)
     U = Q @ y[:, cand]
-    del Q
     e = theta[cand] - theta[cand[0]]
     Vm = _transform(Vs, U)
-    # the lines in the window out of the populated states
-    popm = e <= epop
-    p = np.zeros(len(e))
-    p[popm] = np.exp(-e[popm]/kT) if kT > 0. else (e[popm] == 0.)
-    strength = np.abs(Vm)**2*p[None, :] # zero unless m is populated
-    de = np.abs(e[:, None] - e[None, :])
-    inwin = (de + res[:, None] >= window[0]) & (de - res[:, None] <= window[1])
-    smax = np.max(strength*inwin) if strength.size else 0.
-    line = inwin & (strength > LINE_TOL*smax) & (smax > 0.)
-    need = np.any(line, axis=1)
-    bad = need & (res > ritz_tol)
-    if np.any(bad):
-        raise ValueError(
-            "get_esr_spectrum(submode=\"KRYLOV\"): %d of the %d final states "
-            "of the lines in the window are not converged (largest residual "
-            "%.3g, ritz_tol %.3g); raise nkry (%d)"
-            % (np.sum(bad), np.sum(need), np.max(res[bad]), ritz_tol, nkry))
-    Dm = _transform(edobj.get_operator(D), U)
-    K = np.zeros((len(e), len(e)))
+    popm, need = _ed_lines(e, Vm, res, epop, kT, window)
+    _check_finals(need, res, ritz_tol, nkry)
+    # the closing stage, from the spin operators of every site that relaxes
+    # and from V, applied to the states below the window and to the final
+    # states of the window lines
     Sz, Sp = site_operators(chain)
+    ops = []
     for k in range(len(w)):
         if w[k] == 0.: continue
-        z = _transform(edobj.get_operator(Sz[k]), U)
-        pk = _transform(edobj.get_operator(Sp[k]), U)
+        z = _sparse_operator(edobj, Sz[k])
+        p = _sparse_operator(edobj, Sp[k])
+        ops.append((k, w[k], z, p, sp.csr_matrix(_H(p))))
+    mats = [M for _, _, z, p, m in ops for M in (z, p, m)] + [Vs]
+    S0 = _closing_start(mats, np.hstack([P, U[:, need]]))
+    Q2 = _closing_krylov(Hs, Q, S0, nkry, theta[0] + emax, ritz_tol)
+    del S0
+    if Q2.shape[1]:
+        Q = np.hstack([Q, Q2])
+        del Q2
+        theta, y, cand, res = _rayleigh_ritz(Hs, Q, emax, width)
+        U = Q @ y[:, cand]
+        e = theta[cand] - theta[cand[0]]
+        Vm = _transform(Vs, U)
+        popm, need = _ed_lines(e, Vm, res, epop, kT, window)
+        _check_finals(need, res, ritz_tol, nkry)
+    del Q
+    Dm = _transform(edobj.get_operator(D), U)
+    K = np.zeros((len(e), len(e)))
+    for _, wk, z, p, _ in ops:
+        zk = _transform(z, U)
+        pk = _transform(p, U)
         p2 = np.abs(pk)**2
-        K += w[k]*(np.abs(z)**2 + 0.5*(p2 + p2.T))
-    sigma = np.where(need | popm, res, 0.)
+        K += wk*(np.abs(zk)**2 + 0.5*(p2 + p2.T))
+    _ed_guard(Hs, Vs, ops, U, e, theta[cand[0]], K, need, emax, kT)
+    lowk = e <= ecut
+    sigma = np.where(need | popm | lowk, res, 0.)
     out = ESRSpectrum(e, Vm, Dm, K, sigma=sigma, route="KRYLOV",
                       reached=theta[-1] - theta[0])
     out.sigma_measured = res
