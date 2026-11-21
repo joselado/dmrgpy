@@ -31,8 +31,11 @@ real parts within 1e-5 of the exact ones, where NH-DMRG stalls from 14
 sites. A level exactly degenerate with one in another symmetry sector comes
 out once, as one Ritz vector in their common eigenspace.
 
-levels() returns the accepted Ritz pairs. ground_pair() selects, among the
-ones that share the smallest real part, the one of smallest residual, builds its Ritz vector as one weighted sum of the last
+levels() returns the accepted Ritz pairs. ground_pair() takes, among the
+ones whose relative residual is below the certificate's tolerance, the one
+of smallest real part, and breaks only a tie at the accuracy of the Ritz
+values (NH-DMRG's Ritz tie window) by residual (_select_ground); it builds
+its Ritz vector as one weighted sum of the last
 states (sum_mps_weighted), evolves a left state under H^dagger from its
 conjugate, which already is the left eigenvector of a complex-symmetric H,
 reads the left Ritz vector closest to conj(E) and maximally overlapping
@@ -154,6 +157,48 @@ def _scale(H):
     return _residual_scale(H.to_terms())
 
 
+def _tie_window(evals):
+    """NH-DMRG's Ritz tie window (pyitensor/nhdmrg.py, _select_ritz):
+    1e-6 of the real spread of the Ritz values plus 100 eps of the largest
+    |value|, shift-invariant and scale-covariant."""
+    evals = np.asarray(evals, dtype=complex)
+    re = evals.real
+    return (1e-6 * (re.max() - re.min())
+            + 100.0 * np.finfo(float).eps * np.max(np.abs(evals)))
+
+
+def _select_ground(acc, ritz, rscale, e_id, cert_tol):
+    """((theta, residual, c), skipped): the accepted pair ground_pair()
+    takes, and the lowest pair skipped for its residual that lies below it
+    by more than the tie window, or None.
+
+    acc are the accepted pairs sorted by real part (_accepted), ritz the
+    Ritz values of the whole projection, whose spread sets the window
+    (_tie_window). The candidates are the pairs whose relative residual
+    is below cert_tol, the tolerance of the certificate the pair goes to.
+    Among them the smallest real part is taken, and the pairs within the
+    window of it, one level at the accuracy of the Ritz values, give the
+    best converged one. A window at the scale of the certificate,
+    1e-4*(c+|E-e_id|), ties distinct levels: with a field of 5e-5 on the
+    6-site PT-symmetric XX chain it took the level 5e-5 above the lowest,
+    with Im E off by 0.20, whenever its residual was the smaller. When no
+    pair reaches cert_tol the certificate is not expected to pass, and the
+    best converged pair within that wider window of the smallest real
+    part goes to it, with NH-DMRG tried after it."""
+    def rel(p): return p[1] / (rscale + abs(p[0] - e_id))
+    good = [p for p in acc if rel(p) < cert_tol]
+    if not good:
+        w = 1e-4 * (rscale + abs(acc[0][0] - e_id))
+        tied = [p for p in acc if p[0].real <= acc[0][0].real + w]
+        return min(tied, key=lambda p: p[1]), None
+    win = _tie_window(ritz)
+    tied = [p for p in good if p[0].real <= good[0][0].real + win]
+    pick = min(tied, key=lambda p: p[1])
+    below = [p for p in acc if rel(p) >= cert_tol
+             and p[0].real < pick[0].real - win]
+    return pick, (below[0] if below else None)
+
+
 def _accepted(pairs, H, tol):
     rscale, e_id = _scale(H)
     return sorted([p for p in pairs if p[1] < tol * (rscale + abs(p[0] - e_id))],
@@ -199,26 +244,34 @@ def levels(self, H=None, nsnap=NSNAP, tau=None, nsteps=NSTEPS, tol=RITZ_TOL,
 
 
 def ground_pair(self, H=None, nsnap=NSNAP, tau=None, nsteps=NSTEPS,
-                tol=RITZ_TOL):
+                tol=RITZ_TOL, cert_tol=1e-4):
     """(E, psil, psir): the level of smallest real part of H with its right
-    and left eigenvectors, <psil|psir> = 1 (module docstring). Raises
-    RuntimeError when no Ritz pair is accepted or the two vectors do not
-    pair."""
+    and left eigenvectors, <psil|psir> = 1 (module docstring). The level is
+    taken among the accepted Ritz pairs whose relative residual is below
+    cert_tol, the tolerance of the certificate the pair is checked against
+    (_select_ground); a pair skipped for its residual that lies below the
+    one taken is named in a warning. Raises RuntimeError when no Ritz pair
+    is accepted or the two vectors do not pair."""
     if H is None: H = self.hamiltonian
     snaps = _right_states(self, H, tau, nsteps, int(nsnap))
-    acc = _accepted(_rayleigh_ritz(snaps, H), H, float(tol))
+    ritz = _rayleigh_ritz(snaps, H)
+    acc = _accepted(ritz, H, float(tol))
     if not acc:
         raise RuntimeError("nhlevels: no Ritz pair of the imaginary-time "
                            "states reached the residual tolerance")
-    # among the pairs that share the smallest real part, within the scale
-    # of the certificate's tolerance, the best converged one: on 16 sites
+    # the poorly converged member of a tied set is skipped: on 16 sites
     # the lowest Ritz value of a 16-fold tied set had residual 5.7e-4
     # where the others had 2e-4 or less
     rscale, e_id = _scale(H)
-    remin = acc[0][0].real
-    tied = [p for p in acc
-            if p[0].real <= remin + 1e-4 * (rscale + abs(acc[0][0] - e_id))]
-    theta, _, c = min(tied, key=lambda p: p[1])
+    (theta, _, c), low = _select_ground(acc, [p[0] for p in ritz], rscale,
+                                        e_id, float(cert_tol))
+    if low is not None:
+        print("Warning: nhlevels: the Ritz value " + str(complex(low[0]))
+              + " lies below the level taken, " + str(complex(theta))
+              + ", but its relative residual "
+              + str(low[1] / (rscale + abs(low[0] - e_id)))
+              + " is above the certificate tolerance " + str(cert_tol)
+              + "; it may be a lower level that did not converge")
     psir = _combine(self, snaps, c)
     psir = psir * (1.0 / np.sqrt(psir.dot(psir).real))
     # the left state: evolved under H^dagger from conj(psir), the left
@@ -266,7 +319,7 @@ def gs_energy_imaginary_time(self, **kwargs):
     tol = float(kwargs.get("tol", 1e-4))
     H = self.hamiltonian
     try:
-        E, psil, psir = ground_pair(self, H)
+        E, psil, psir = ground_pair(self, H, cert_tol=tol)
     except (RuntimeError, np.linalg.LinAlgError) as e:
         if self.verbose > 0:
             print("nhlevels: imaginary-time route failed (%r), using NH-DMRG" % (e,))

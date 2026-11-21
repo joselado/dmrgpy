@@ -363,29 +363,117 @@ def biorthogonal_ground_state(h,**kwargs):
     """Return (e0,vr,vl), the ground state of a (possibly non-Hermitian)
     matrix h as a biorthogonal right/left pair: h@vr = e0*vr and
     dagger(h)@vl = conj(e0)*vl, normalized so that conj(vl)@vr = 1 (the
-    convention needed by braket_ww-style expectation values). vr/vl pick
-    the state with smallest real part of the eigenvalue, matching
-    lowest_states' own non-Hermitian ordering."""
-    er,vsr = lowest_states(h,n=1,**kwargs)
-    el,vsl = lowest_states(dagger(h),n=1,**kwargs)
-    vr = matrix2vector(vsr[0])
-    vl = matrix2vector(vsl[0])
+    convention needed by braket_ww-style expectation values). e0 is the
+    eigenvalue of smallest real part in lowest_states' order
+    (eigen_order), and vr its right eigenvector as lowest_states returns
+    it.
+
+    The left state is chosen by its eigenvalue, never by a sort of its
+    own: the eigenvalues of dagger(h) are conj(E), so the same ordering
+    applied to them takes, on a level of smallest real part shared by a
+    complex-conjugate pair, the left state of the other member, which is
+    biorthogonal to vr. In the dense case both come from one
+    scipy.linalg.eig(h,left=True,right=True); above maxsize the left one
+    is the eigenvector of dagger(h) whose eigenvalue is nearest conj(e0).
+    On a degenerate level vl is the projection of vr on the left
+    eigenspace, the left eigenvector of largest overlap with vr, which
+    is zero only for a defective level (above maxsize, on the copies of
+    the level that ARPACK returns). A pair that is still (near)
+    orthogonal raises ValueError."""
+    if ishermitian(h): # left and right eigenvectors are the same
+        er,vsr = lowest_states(h,n=1,**kwargs)
+        vr = matrix2vector(vsr[0])
+        return er[0],vr,_biorthonormal_left(vr,vr.copy())
+    if h.shape[0]>maxsize: # ARPACK, as lowest_states takes it
+        er,vsr = lowest_states(h,n=1,**kwargs)
+        e0,vr = er[0],matrix2vector(vsr[0])
+        dim = h.shape[0]
+        k = _arpack_k(1,dim)
+        el,vls = slg.eigs(dagger(h),k=k,which="SR",maxiter=int(maxiter),
+                          tol=tol,ncv=_ncv(k,dim))
+        d = np.abs(el-np.conjugate(e0))
+        sel = np.flatnonzero(d<=max(_level_tolerance(el),d.min()))
+        vl = _left_in_eigenspace(vr,vls[:,sel])
+        return e0,vr,_biorthonormal_left(vr,vl)
+    w,VL,VR = dlg.eig(np.asarray(todense(h)),left=True,right=True)
+    k0 = eigen_order(w)[0]
+    e0,vr = w[k0],VR[:,k0]
+    # the left eigenspace of e0: the left vectors of every eigenvalue
+    # equal to it at the accuracy of the ordering
+    sel = np.flatnonzero(np.abs(w-e0)<=_level_tolerance(w))
+    vl = _left_in_eigenspace(vr,VL[:,sel])
+    return e0,vr,_biorthonormal_left(vr,vl)
+
+
+def _left_in_eigenspace(vr,VL):
+    """The left eigenvector in the span of the columns of VL (the left
+    eigenvectors of one level) of largest overlap with vr: the projection
+    of vr on that span. On a single vector it is that vector, rescaled."""
+    U,s,_ = np.linalg.svd(VL,full_matrices=False)
+    # the direction of a nearly dependent column carries its rounding
+    # error times s[0]/s, so only s above 1e-6*s[0] is kept: vl then stays
+    # a left eigenvector to about 1e-10 of its norm
+    U = U[:,s>1e-6*s[0]]
+    return U@(np.conjugate(U.T)@vr)
+
+
+def _biorthonormal_left(vr,vl):
+    """vl rescaled so that conj(vl)@vr = 1, vr as the eigensolver returns
+    it (of unit norm). Raises when |<vl|vr>| of the unit vl is below
+    1e-8."""
+    nl = np.linalg.norm(vl)
+    if nl>0.: vl = vl/nl
     norm = np.conjugate(vl)@vr
     if np.abs(norm)<1e-8:
         raise ValueError("Right and left ground states are (near) "
                 "orthogonal, <vl|vr> = "+str(norm)+" - biorthogonal "
                 "normalization failed")
-    vl = vl/np.conjugate(norm)
-    return er[0],vr,vl
+    return vl/np.conjugate(norm)
+
+
+def _level_tolerance(eig):
+    """Two eigenvalues whose real parts differ by at most this are one
+    level of the ordering: 1e-10 of the largest |E|. A dense or ARPACK
+    eigenvalue is accurate to a few eps times that, times its condition
+    number, so a complex-conjugate pair, whose real parts are equal in
+    exact arithmetic, always falls in one group, and a physical split of
+    the real parts is resolved down to 1e-10 of the spectrum's scale."""
+    eig = np.asarray(eig)
+    return 1e-10*float(np.max(np.abs(eig))) if eig.size else 0.
+
+
+def eigen_order(eig):
+    """The indices of eig, smallest real part first, and the imaginary
+    part ascending among eigenvalues whose real parts are equal at
+    _level_tolerance. The groups are formed after a sort by real part,
+    each starting at its smallest member, so a tie cannot be split by the
+    edge of a rounding bin. The imaginary part only breaks a tie: any
+    weight on it in a single key, Re + w*Im, puts a level whose real part
+    lies above the minimum ahead of it once its imaginary part is lower
+    by more than 1/w times the difference."""
+    eig = np.asarray(eig)
+    re,im = eig.real,eig.imag
+    idx = np.argsort(re,kind="stable")
+    tol = _level_tolerance(eig)
+    out = []
+    i = 0
+    while i<len(idx):
+        j = i+1
+        while j<len(idx) and re[idx[j]]<=re[idx[i]]+tol: j += 1
+        group = idx[i:j]
+        out.extend(group[np.argsort(im[group],kind="stable")])
+        i = j
+    return np.array(out,dtype=int)
+
 
 def sorteigen(eig,vs):
-    """Return sorted eigenvalues and eigenvectors"""
-    w = eig - np.min(eig.real) # smallest real part
-    imweight = 1e-3 # how much to weight im when sorting 
-    wz = w.real + imweight*w.imag
-    vs = [y for (x,y) in sorted(zip(wz,vs),key=lambda x: x[0])]
-    eig = [y.copy() for (x,y) in sorted(zip(wz,eig),key=lambda x: x[0])]
-    return np.array(eig),vs
+    """Return sorted eigenvalues and eigenvectors, in eigen_order: the
+    smallest real part first, the imaginary part ascending only within a
+    tie. vs is any sequence indexed like eig (rows of an array, a list of
+    MPS); it comes back as a list."""
+    eig = np.asarray(eig)
+    order = eigen_order(eig)
+    return eig[order],[vs[i] for i in order]
 
 
 
