@@ -102,15 +102,16 @@ experiments subtract a smooth background anyway. The keywords are:
   the transverse spin `sc.Sx[0]` for a drive through a gradient of the tip
   field.
 - `T`: the temperature in kelvin.
-- `T1`, `T2`, `f_ref`: the relaxation and coherence times in ns of a free
-  spin-1/2 on the tip site with Zeeman frequency `f_ref` (GHz), the
-  frequency where they were measured. `f_ref` is required, since the
-  relaxation rates grow with frequency.
+- `T1`, `T2`, `f_ref`: the relaxation and coherence times in ns of the
+  spin on the tip site, as a free spin-1/2 with Zeeman frequency `f_ref`
+  (GHz), the frequency where they were measured. `f_ref` is required,
+  since the relaxation rates grow with frequency.
 - `rabi`: the Rabi frequency in GHz of a transition with
   $|V_{nm}|=1/2$. A small value gives the linear response.
 - `vrf_over_vdc`, `phase`: the size and the phase of the homodyne part.
-- `site_weights`: the weight of each site in the relaxation (equal by
-  default).
+- `site_weights`: the relative weight of each site in the relaxation
+  (equal by default). `T1` and `T2` stay those of the tip spin, so only
+  the ratios matter.
 - `h`, `kB`: the units. With $H$ in GHz pass `h=1` and `kB=20.8366`.
 
 ## Coupled spins
@@ -170,7 +171,11 @@ f, idm = sc.get_esr_spectrum(f, mode="DMRG", nstates=24, **kw)
 
 The two agree to a few $10^{-7}$ of the peak. The states needed are the
 populated ones, up to $kT\ln(1/p_{\rm cut})$ above the ground state, and
-those reached from them by a line in the window. When the `nstates`
+those reached from them by a line in the window. With `mode="ED"` the
+states a saturating drive populates count too, and the states kept above
+the window reach further as the power broadening grows. With
+`mode="DMRG"` the call warns when the drive needs more states than it
+keeps. When the `nstates`
 lowest states do not reach that energy the call raises and asks for more
 states; here 11 states are needed, and `nstates=8` is not enough. So DMRG is the method for long
 chains whose window holds few states, a gapped chain or a cluster in a
@@ -191,7 +196,9 @@ otherwise. The keywords are:
   started from $V|m\rangle$ for every populated state $m$, on ED or in the
   tangent space of $m$ with DMRG, where `nstates` must reach every state
   below the window. Use it when few states are populated and many lie in
-  the window; it raises when `nkry` is too small.
+  the window. It raises when `nkry` is too small, or when a state into
+  which a final state relaxes is missing. With DMRG and the tip
+  moment along the field this is the usual case; use `submode=None` there.
 - `method="floquet"`: the driven Lindblad equation in the same
   eigenbasis, without the secular and rotating-wave approximations, on
   `mode="ED"` with up to 64 states. It is the reference for close lines

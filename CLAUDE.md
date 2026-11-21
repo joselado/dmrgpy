@@ -385,8 +385,11 @@ Kondo machinery, bugs and measured hot spots together, 16 fixed on
 2026-11-12; its rules are in `.claude/rules/kondo.md`), and by
 `docs/audit_2026_11_21_hole_hunt.md` (22 findings over the 158 commits
 since that one, hunted by read-only agents with every repro run by the
-lead; all open). Four things to read before
-changing the kind of code they cover:
+lead, all fixed on 2026-11-21; three only in part: finding 1 on DMRG is a
+guard rather than a closing stage, finding 3's DMRG half warns, and
+finding 4 warns on DMRG and keeps the free-spin band on the Krylov
+routes). Four things to
+read before changing the kind of code they cover:
 
 - **`docs/numerical_changes.md`** before comparing any number against
   a result from before 2026-09-26. It is the ledger of every fix that moved
@@ -460,20 +463,25 @@ Do not undo one without reading its finding first.
   larger of that and the summed signature magnitudes); CVM stops relative
   to `||b||` and its early exits read the CG functional; NH-DMRG's Ritz tie
   window is `1e-6*(max Re - min Re) + 100*eps*max|ev|` with `<=`,
-  identically in `pyitensor/nhdmrg.py` and in both `arnoldi_select_kbest`
-  and `nh_ritz_order`; the
-  VUMPS Lanczos reference is capped by the Hamiltonian's unit; the KPM
-  same-vector shortcut and ROOTN's Lanczos breakdown compare against the
-  vectors' own norms (`test_audit_2026_09_25_scale.py`,
-  `test_audit_2026_09_25b_{cvm,nh,cpp,ednum,mpobuilder}.py`). A bond whose
-  strongest term is far below the largest coefficient is covered since
-  2026-11-14 by a cutoff of the MPO build that is one per bond
+  identically in `pyitensor/nhdmrg.py`, in both `arnoldi_select_kbest`
+  and `nh_ritz_order`, and in `nhlevels._tie_window` over the Ritz values
+  of the imaginary-time projection; the VUMPS Lanczos reference is capped
+  by the Hamiltonian's unit; the KPM same-vector shortcut and ROOTN's
+  Lanczos breakdown compare against the vectors' own norms
+  (`test_audit_2026_09_25_scale.py`,
+  `test_audit_2026_09_25b_{cvm,nh,cpp,ednum,mpobuilder}.py`). The NRG
+  tail of `nrgmps` has the same number of sites at every band D
+  (`max_sites`, `OMEGA_MIN` relative to D), and its hand-over check is
+  1e-12 of the largest hopping of the head (`test_audit_2026_11_21_nrg.py`).
+  A weak term is covered by a cutoff of the MPO build that is one per bond
   (`mo_terms.h`'s `bond_cutoff_args` on v2/v3, `mpobuilder._bond_cutoff_factor`
-  on `"python"`): the cutoff is lowered by m^2, m the strongest coefficient
-  crossing the weakest bond over the largest one, floored at (1e-14)^2,
-  and an operator with m = 1 is built exactly as before. Do NOT edit the
-  vendored svdMPO for this (`test_audit_2026_09_25_scale.py`, whose strict
-  xfails became tests).
+  on `"python"`). The cutoff is lowered by m^2, floored at (1e-14)^2. m is
+  the smaller of two ratios to the largest coefficient: the strongest
+  coefficient crossing the weakest bond, and the weakest multi-site
+  coefficient below 1e-5. A term's span starts after the Jordan-Wigner
+  strings that cancel in pairs, and an operator with m = 1 is built
+  exactly as before. Do NOT edit the vendored svdMPO for this
+  (`test_audit_2026_09_25_scale.py`, `test_audit_2026_11_21_mpo_cutoff.py`).
 - **A chain constructor keyword is a setting assigned after `initialize()`**,
   exactly as an assignment afterwards, `mode` included (`sites.check_settings`,
   the explicit allowlist `sites.SETTINGS`); anything else, a Hamiltonian
@@ -540,6 +548,11 @@ Do not undo one without reading its finding first.
 - **`Thermal_Spin_Chain.anneal()` is order-8 Taylor steps** of
   `exp(-dtau(H-E_mid))` at `dtau*W <= 2`, about `2*beta*W` factor
   applications (`test_audit_2026_09_25b_thermal.py`).
+- **`Thermal_Spin_Chain.get_gs()` returns its stored state only under the
+  key it was purified under** (`thermal.purification_key`: T, the
+  `anneal_*` settings, `mode`, the backend and `groundstate.solver_key`),
+  read before any solve. Do NOT go back to a short circuit on `computed_gs`
+  alone, or to a setter on T alone (`test_audit_2026_11_21_thermal.py`).
 - **TASK's error bar is two numbers, not one.** The two-site variance of
   a pole does not see the part of `B|GS>` outside the one-site tangent
   space, which is dropped before the recursion starts: zero for a sum of
@@ -548,14 +561,11 @@ Do not undo one without reading its finding first.
   degenerate Majorana pair) at truncated `maxm`. `taskdmrg.get_poles`
   returns it as `missing_weight` and warns above 1e-6 of the weight
   (`test_audit_2026_10_task.py`).
-- **A collapse basis METTS cannot sample with is refused.** `metts_vev`
-  raises on a non-Hermitian basis operator, and on an all-diagonal basis
-  (`("N",)`, `("Sz",)`, `("Nupdn",)`, `("N2",)`) when H conserves
-  `sum_i O_i` for one of its names or one of the chain's
-  `get_sector_charge_operators()`, tested on a random witness, since a
-  diagonal name collapses to computational states and every sample would
-  then stay in the first sample's charge sector with an error bar of 0
-  (`test_audit_2026_10_23.py`, `test_audit_2026_10_23_leads.py`).
+- **A collapse basis METTS cannot sample with is refused** by both calls on
+  every backend (`mettsvev._check_basis`): a non-Hermitian name, or names
+  all commuting on each site with a charge or parity H conserves, which
+  refuses every fermion chain (the author's pick). Do NOT go back to a list
+  of diagonal names (`test_audit_2026_10_23*.py`, `test_audit_2026_11_21_metts.py`).
 - **`"python"` DMRG mixes noise into its Lanczos starts.**
   `pyitensor/dmrg.py`'s `_noisy_start` adds a random vector of relative
   weight `noise`, from its own generator reseeded per `dmrg()` call, on the
@@ -578,7 +588,14 @@ Do not undo one without reading its finding first.
   before, v3 returned a vector 3e64 times the right-hand side on 10 sites
   at maxm=12, silently. Do NOT loosen it to quiet a test; the divergence
   of the recurrence itself is still open
-  (`test_bicgstab_residual_check.py`).
+  (`test_bicgstab_residual_check.py`). On `"python"`, v3 without a
+  conserved sector and `julia_live` the check forms A x and A x - b with
+  nothing truncated (`residual_norm`, `mps_residual_norm`); the default
+  density-matrix routes overstate a converged residual next to a level up
+  to 2e6 times. A sum whose coefficients cancel passes
+  `sum_mps_weighted(method="exact")`, as `nhlevels._combine` does; do NOT
+  make it the default, the ESR Krylov route sums hundreds of states
+  (`test_audit_2026_11_21_exact-arith.py`).
 - **NH-DMRG sweeps the transposed left state.** Inside every v2, v3 and
   `"python"` sweep the left state is ITensorNHDMRG.jl's own,
   H^T|wl> = E|wl>, solved against the conjugate of the adjoint MPO and
@@ -595,13 +612,41 @@ Do not undo one without reading its finding first.
   sector, its pair checked by `nhdmrg()`'s own certificate and stored by
   `nhdmrg.store_nh_pair`; a failed check runs `nhdmrg()` and keeps the
   pair of smaller residual, a raised route and every other backend go to
-  `gs_energy_nhdmrg`; `mode="ED"` is untouched. Its
+  `gs_energy_nhdmrg`; `mode="ED"` is untouched. The pair taken is the
+  smallest real part among the accepted Ritz pairs below the certificate's
+  tolerance, and only a tie inside the Ritz tie window goes by residual
+  (`test_audit_2026_11_21_nh.py`). Its
   grid is in units of the largest coefficient off the identity, since an
   offset as the unit leaves nothing projected. `get_nh_levels()` returns
   the accepted Ritz pairs (`test_nh_levels.py`).
+- **ED orders a non-Hermitian spectrum by real part first**:
+  `algebra.eigen_order`, behind `sorteigen`, groups real parts at 1e-10 of
+  the largest |E| and orders by Im only inside a group;
+  `biorthogonal_ground_state` takes its left state by its eigenvalue, never
+  by a sort of `dagger(h)` (`test_audit_2026_11_21_nh.py`).
 - **The DMRG `vev` has no `**kwargs`**: an unknown keyword raises, and
   `T>0` raises naming `mode="ED"` and `metts_vev()`
   (`test_audit_2026_10_23.py`).
+- **The ESR Krylov basis is closed under the Korringa operators on ED**:
+  every eigenstate below the window and a closing block Krylov stage from
+  S^a_k|n> and V|n>. Both Krylov routes end with a guard that raises naming
+  `submode=None`, on DMRG only when H conserves a charge that S^+_k changes
+  (`test_audit_2026_11_21_esr_krylov.py`).
+- **The ESR band follows the drive on ED**: the states kept reach
+  WINDOW_MARGIN power-broadened widths above the window from the highest
+  state the drive or the temperature populates (`esrstm._ed_band`); DMRG
+  warns instead, Krylov keeps the free-spin band, and T1, T2 are the tip
+  spin's whatever `site_weights` is (`test_audit_2026_11_21_esr_window.py`).
+- **One predicate, `correlationentropy._full_applies`, picks the default
+  `dmmode`** in a sector and outside: `"full"` only for the chain's own C
+  on spinless sites with a one-sweep session, else `"explicit"` in a sector
+  and `"fast"` outside. Do NOT add a condition to one branch of
+  `_default_dmmode` only (`test_audit_2026_11_21_corrmat.py`).
+- **The Krylov Kondo stop reads residual intervals**: with `tol=`,
+  `krylovkondo.block_krylov` counts every Ritz state with theta - r <= top
+  in the window, since a Ritz value lies above the eigenvalue it approaches,
+  and with S^z_tot conserved the start is put on its sector, so the space
+  stops once it is spanned (`test_audit_2026_11_21_kondo_krylov.py`).
 - **Out of scope by construction** for every hunt: the vendored ITensor and
   TDVP folders, the three legacy quirks `.claude/rules/cpp-backend.md` lists
   as deliberately reproduced (`evoloperator()`'s z^3/6 term on `H2`, the
@@ -637,6 +682,13 @@ the ED-against-v3 KPM residual; `kpm_finite`'s `window_chain_kwargs` check;
 `julia_live`'s slowdown and its KPM guard raising `juliacall.JuliaError`
 rather than `RuntimeError`; `ShiftInv`'s `applyinverse(delta=)`; the lower-level route's pair `name=` next to
 `i=`/`j=`; and the short `nt` defaults of `td_dynamical_correlator`.
+The fixes of `docs/audit_2026_11_21_hole_hunt.md` left open: the ESR
+DMRG guard runs only when H conserves a charge that S^+_k changes; the
+ESR Krylov routes keep the free-spin band and neither grow nor warn; the
+`julia_live` side of the exact BiCGSTAB check was not measured; the cost
+of the exact check and of the ESR closing stage at real size was not
+measured; and whether v3's `bicstab` recurrence should take the exact
+apply is the author's pick.
 
 ## Architecture
 

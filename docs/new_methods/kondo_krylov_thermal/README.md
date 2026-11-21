@@ -54,9 +54,14 @@ Each new block H B is projected twice on the whole space so far (block
 Gram-Schmidt, one product with the basis per pass), and an SVD
 keeps its directions with a singular value above `DROP_TOL` (1e-9) of its
 largest column norm. The space stops when a block is empty, which means
-the space is exhausted, or when it would pass 3 `nkry` states. Then one
-Rayleigh-Ritz step in the whole space gives the Ritz states. With a field
-in the xz plane H is real, the start vectors S+|i>, S-|i>, Sz|i> are real,
+the space is exhausted, or when it would pass 3 `nkry` states. When H
+conserves S^z_tot and the initial state has a definite S^z_tot, the state
+and the three starts are first put exactly on their sectors. Otherwise
+the roundoff of eigsh outside the sector, about 1e-14, keeps the space
+growing after the sectors are spanned: 301 states instead of 13 on a
+polarized 12-spin chain. Then one Rayleigh-Ritz step in the whole space
+gives the Ritz states. With a field in the xz plane H is real, the start
+vectors S+|i>, S-|i>, Sz|i> are real,
 and everything stays real.
 
 Nothing of the size of the Hilbert space is built twice. The coefficients
@@ -71,8 +76,14 @@ a real matrix, so the sums of `conductance.py` run in real arithmetic.
 The space of a state can also stop before 3 `nkry` states, but only when
 it is asked for (`tol`, None by default). A final state f enters the sums
 only while its step is open, e_f - e_i below max|eV| (plus 40 kT at T>0),
-and the stop asks that every Ritz state in that window be converged: its
-residual ||(H - theta) f|| below `tol` times onenorm(H). The check is a
+and the stop asks that every Ritz state that can still be in that window
+be converged. With r = ||(H - theta) f|| its residual, a Ritz state
+counts when theta - r is in the window, and then r must be below `tol`
+times onenorm(H). A Ritz value lies above the eigenvalue it approaches
+and has an eigenvalue of H within r, so a final state of the window can
+sit under a Ritz value above it. Counting only theta inside the window
+stopped at the first check on a polarized 12-spin chain, and the k=0
+magnon step was missing. The check is a
 diagonalization of the small matrix, which is complete after each block,
 so it costs no product in the Hilbert space; it is made after 10 blocks
 and then each time the space has grown by a factor 1.25, or by 2 while

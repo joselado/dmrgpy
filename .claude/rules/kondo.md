@@ -485,8 +485,18 @@ of `state_spectrum` there. A check reads Hk[:n, :n], which is complete
 once the coefficients of the last block are in, and stops with the eigh
 it made, so a stop is the fixed space of that size; the window is
 conductance._final_states' (max|eV|, plus THETA_CUT kT), which is why
-`spectra()` and `state_spectrum()` take `emax`. Do not make it the
-default without a measurement at 12 spins or more with nkry 200 to 400.
+`spectra()` and `state_spectrum()` take `emax`. Since the 2026-11-21 hunt
+(finding 14) a Ritz state is in the window when theta - r <= top, with r
+its residual, and the stop waits until all of those are converged; a
+window that no interval reaches is still a stop. Counting only
+theta <= top stopped at the first check on the polarized 12-spin chain
+and lost the k=0 magnon step, 14% of the peak. Do NOT go back to it.
+With S^z_tot conserved, `_start_block` puts the initial state and its
+starts on their sectors (finding 15, 301 states to 13), but only when
+that removes at most SECTOR_LEAK = 1e-10 of their norm; do NOT replace it
+by zeroing small entries, which depends on the basis
+(`tests/test_audit_2026_11_21_kondo_krylov.py`). Do not make the stop
+the default without a measurement at 12 spins or more with nkry 200 to 400.
 
 **Leading-log resummation (2026-11-06)**, `kondospectrumtk/leadinglog.py`,
 is a new method documented in `docs/new_methods/kondo_leading_log/README.md`
@@ -848,10 +858,19 @@ over all five indices (chi^4 d: 166 s of a 250 s call at 258 states, more
 than an hour at 408). On 9 spins (a Kondo resonance) the joined bases of
 700 to 870 states converge to 0.03% of the peak.
 The tail chain stops before its scale falls
-below 1e-30 (`max_sites`, 99 sites at Lambda = 4): `wilson_chain` breaks
-near 1e-35. The hand-over needs a graded basis, so `head_state` solves in
-the sector (Nf, 2Sz), with the v3 charge seed, scans 2Sz in a field and
-promotes to dense; "python" states come in a complex gauge and
+below 1e-30 D, relative to the band (`max_sites`, 99 sites at Lambda = 4
+for every D). `wilson_chain` is a Lanczos on levels proportional to D, so
+it breaks near 1e-35 D at the same site whatever D is (from site 114 at
+Lambda = 4, where |eps|/t passes 1e-3). With an absolute floor the tail
+was 116 sites at D = 1e5 and 120 at 1e8, into the broken end, and it moved
+the curve by 7.3e-3 and 9.2e-2 of its peak. The hand-over check
+(`_check_prefix`) is 1e-12 of the largest hopping of the head, for the
+same reason, and it runs before the head is solved. Do NOT put D back into
+`max_sites` or an absolute tolerance into the check
+(`tests/test_audit_2026_11_21_nrg.py`). The hand-over needs a graded
+basis, so `head_state` solves in the sector (Nf, 2Sz), with the v3
+charge seed, scans 2Sz in a field and promotes to dense; "python" states
+come in a complex gauge and
 `real_gauge` weights by the bond matrix (unweighted, Schmidt values of
 1e-6 failed it at 3.7e-4), with a tolerance of 1e-4 because a solved
 state is real only to the accuracy of the solve (2.5e-7 at 20 sweeps).
@@ -1008,7 +1027,17 @@ cutoff 1e-14 and at any overlap cut). A drive on two MPS sites is
 refused on that route. Its basis also holds the converged Ritz states
 between the window bottom and emax as partners: do NOT drop them for
 speed, without them a chain with no tip field in H (V never reaches its
-singlets and quintets) was 4.3e-5 off instead of 1.1e-6.
+singlets and quintets) was 4.3e-5 off instead of 1.1e-6. On ED the
+Krylov basis also holds every eigenstate below the window and a closing
+block Krylov space from S^a_k|n> and V|n> (2026-11-21 hunt, findings 1
+to 3). Do NOT drop it: with the tip moment along the field it is the only
+source of the partners in the other Sz sectors (2 of the 4 states of the
+dimer and a line -5.0 times the eigenstate one without it). Both Krylov
+routes end with the closure guard (`GUARD_TOL` = 1e-6 of the relaxation
+rate out of a final state). On DMRG the guard runs only when H conserves
+a charge that S^+_k changes; do NOT widen it to every chain before
+measuring the 12-spin example and the 10-spin chain of the review with it
+(`tests/test_audit_2026_11_21_esr_krylov.py`).
 (3) The relaxation is block diagonal over what S connects (the charge
 sectors of a fermion chain), each block at its thermal weight; a drive
 across two blocks raises. (4) Only an exact degeneracy coupled by V, D or K
@@ -1025,8 +1054,18 @@ half the states), with
 version; do NOT put the second term back for a window dependence, that
 1% was the homodyne tail of (7), and the DC part moves by 1.7e-5 on a
 zoom with one term. 1000 widths made the DMRG route ask for 160 GHz of
-states at T2 = 2 ns. On DMRG the degeneracy tolerance adds
-sigma_n + sigma_m. (6) At zero tip field the S-T0 line keeps a small DC part from
+states at T2 = 2 ns. Since the 2026-11-21 hunt (findings 3 and 4) the
+band on mode="ED" is counted in the power-broadened width of the
+strongest line (`lineshape.band_margin`, an estimate from ||V||, rabi, T1
+and T2). It is counted from the highest state the temperature or the
+drive can populate (`Lines.carry_top`), and the spectrum is rebuilt until
+that state stops rising (`esrstm._ed_band`). Do NOT go back to a
+thermal-only band: a spin 1 at 50 mK lost its second rung, 4.3e-2 at the
+default drive. The DMRG eigenstate route keeps the free-spin band and
+warns when it keeps less than `BAND_WARN` of the power-broadened one; the
+Krylov routes keep the free-spin band too and do not warn. On DMRG the
+degeneracy tolerance adds sigma_n + sigma_m. (6) At zero tip field the
+S-T0 line keeps a small DC part from
 the relaxation of S and T0 to T- and T+ (1.2e-3 of the homodyne part at
 rabi = 1e-4 and V_RF/V_DC = 0.2, growing as rabi T1 over V_RF/V_DC); it is
 the model, not a bug. (7) The homodyne part goes through
@@ -1039,4 +1078,9 @@ inside itself). Without it the 1/detuning tail of the kept lines made the
 homodyne part move by 1e-2 to 4e-2 of the DC line with the window or
 with emax; do NOT remove it to "restore" the background, which needs
 every state up to the exchange scale and the counter-rotating terms.
+(8) T1 and T2 are those of the tip spin: the Korringa scale is divided by
+`site_weights[site]` when it is positive, so only ratios matter, and at
+weight 0 T1 refers to a site of weight 1. The author's pick of
+2026-11-21, finding 5 of that hunt
+(`tests/test_audit_2026_11_21_esr_window.py`).
 `tests/test_esr_stm.py`.

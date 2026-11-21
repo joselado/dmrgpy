@@ -33,6 +33,19 @@ JSON file).
 This file is the evidence, not a task list. Each finding keeps its repro
 and gains a `**Status**` line when it is acted on.
 
+All 22 were acted on the same day, in ten file-disjoint clusters. Ten
+agents wrote the fixes and their tests in separate worktrees, read and write
+only, after three picks of the author (T1 and T2 of the tip spin for
+`site_weights`; a refusal of METTS frozen in the fermion parity; a cutoff
+lowered by the weak multi-site terms only). The lead ran everything: the 203
+new tests pass, 158 of them fail on the code before the fixes, the 1636
+tests of the 62 affected files pass without `julia_live`, the 112
+`julia_live` tests of the 22 files that reach Julia pass, the four ESR
+examples pass, and the v3 site
+arrays of eight reference MPOs are equal before and after the rebuild. Each
+Status line names its commit. Where a Status line says PARTIAL, the open
+half is under "Left open, and new leads".
+
 ## The seven lenses
 
 | Lens | Brief |
@@ -78,6 +91,8 @@ reviewer's counter-repro or a reviewer-found candidate.
 
 `bug` &middot; severity **HIGH** &middot; CONFIRMED &middot; lens `esr` &middot; candidate `esr-1`
 
+**Status**: FIXED on ED, PARTIAL on DMRG in `c881507`. On ED the Krylov route takes every eigenstate up to max(epop, window[0]) and adds a closing block Krylov stage, started from S^z_k|n>, S^+_k|n>, S^-_k|n> and V|n> of those states and of the converged final states of the window lines, before H is diagonalized again. A closure guard then raises, naming submode=None, when the part of S^a_k|n> or V|n> outside the kept states that lies below emax takes more than 1e-6 of the relaxation rate out of n, or more than 1e-6 of |V|n>|^2. On DMRG there is no closing stage, since seeding TASK with S^a_k|n> needs a start block of 3 vectors per site and final state, each with a store of nkry steps; the guard is the fix there. It runs only when H conserves a charge of the site types (Sz) that S^+_k changes, so a conserved quantity that is not such a charge (Sx_tot with a field and a tip along x, a mirror of the chain) is still silent. NUMBERS CHANGE on ED KRYLOV, see the ledger. Pinned by tests/test_audit_2026_11_21_esr_krylov.py::test_dimer_with_the_tip_along_the_field_on_ed, ::test_closure_guard_on_ed, ::test_dmrg_krylov_refuses_the_dimer and ::test_dmrg_krylov_refuses_a_partner_in_the_window. The pinning chains exhaust their Hilbert space. At a real size the lead measured one case: on 10 spins (1024 states, the chain of the repro with J = 30 GHz, B = 5 GHz, a 3 GHz tip field along z, tip=[0,0,1], T = 0.03 K), the ED Krylov route agrees with the eigenstate route to 4.9e-10 of the peak of the strongest line, with no warning. The DMRG guard at real size is not measured.
+
 **Where**: `src/dmrgpy/esrtk/spectrum.py:616-635 (ed_krylov_spectrum: Q = populated eigenstates only, then the block Krylov space of V P)`; `src/dmrgpy/esrtk/spectrum.py:458-473 (mps_krylov_spectrum: DMRG states only up to ecut = max(epop, window[0]))`; `src/dmrgpy/esrtk/spectrum.py:481-521 (TASK finals and partners from P V|m> only)`; `src/dmrgpy/esrstm.py:129-148 (the dispatch to both Krylov builders)`; `tests/test_esr_stm.py:225-241 (the test chain has no conserved quantity)`
 
 The Krylov routes build their basis from the populated eigenstates and the
@@ -88,7 +103,7 @@ a tip field along z, and every populated state lies in one sector, the basis
 is exactly that sector, deterministically, since `_orth` drops the 1e-16
 leakage. The T- and T+ partners of an S-T0 line are then missing from the
 rate matrix, from the widths and from the DC readout through `D_T-T- = -1/2`.
-On the guide's dimer (J = 30 GHz, B = 5 GHz, tip field 3 GHz along z,
+On a dimer (J = 30 GHz, B = 5 GHz, tip field 3 GHz along z,
 T = 0.03 K, `tip=[0,0,1]`) the ED Krylov route keeps 2 of the 4 states, the
 DC peak is -5.0 times the right value, with the sign flipped, and the width
 is 6.8% low. At zero tip field it returns a DC part of exactly 0, where full
@@ -469,11 +484,13 @@ add a second block Krylov stage seeded with `S^a_k|n>` for the final states
 and the states below the window, then re-diagonalize. On both routes a cheap
 guard: for each needed final state, measure the weight of `S^a_k|n>` outside
 the basis and raise when part of it lies below `emax`. The regression test
-is the guide's dimer with `tip=[0,0,1]` at 0.03 K on ED and DMRG.
+is the dimer of the repro with `tip=[0,0,1]` at 0.03 K on ED and DMRG.
 
 ### 2. Extension of the Krylov finding above: with a tilted tip the ED `submode="KRYLOV"` route still misses an empty level two Sz steps away, and a line comes out 1.6e-2 to 2.7e-2 of its peak off
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `esr` &middot; candidate found by the reviewer of `esr-1`
+
+**Status**: FIXED on ED in `c881507`. The Sz = -2 level of the B = 8.5 GHz case lies below the window, so it is now one of the eigenstates the route takes. A level two Sz steps away inside the window comes from the closing stage, since S^-_k of a final state is one of its seeds. NUMBERS CHANGE. The DMRG route takes the states below the window from DMRG and agrees with ED on this chain, with the guard running. Pinned by tests/test_audit_2026_11_21_esr_krylov.py::test_tilted_tip_two_sz_steps_away_on_ed and ::test_tilted_tip_on_dmrg_holds_its_partners.
 
 **Where**: `src/dmrgpy/esrtk/spectrum.py:616-635 (basis: populated eigenstates and the Krylov space of V P under H only)`; `src/dmrgpy/esrtk/spectrum.py:673-680 (K inside span(U) only)`; `src/dmrgpy/esrstm.py:129-134 (ED Krylov dispatch)`; `docs/esr_stm_plan.md:78-81 (every state below the window is needed as an eigenstate)`
 
@@ -664,6 +681,10 @@ the dimer with `tip=[0,0,1]`.
 ### 3. `get_esr_spectrum` keeps states only by temperature, so below about 70 mK at 20 GHz a second photon's state is dropped and a saturated spin-1 line comes out 50% low (4.8e-2 at the default drive)
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `esr` &middot; candidate found by the reviewer of `esr-2`
+
+**Status**: PARTIAL in `c881507`. The submode="KRYLOV" half is FIXED on ED: V|n> of the final states of the window lines seeds the closing stage, so the |+1> of a saturated spin 1 is in the basis whenever emax keeps it. On DMRG a state of a second photon below emax that the basis does not hold makes the call raise (the V part of the guard), under the same charge condition as finding 1. The emax half is the next Status line. Pinned by tests/test_audit_2026_11_21_esr_krylov.py::test_second_photon_of_a_spin_one_on_ed, whose window reaches 2 F0 + 0.5 GHz so that both routes keep |+1>.
+
+**Status**: PARTIAL. The eigenbasis half was FIXED in `c95efb5` on 2026-11-21. On mode="ED" the kept band follows the drive. `lineshape.Lines._carrying` marks the states that can carry population above p_cut: the thermal ones, plus every state a driven pair reaches from one that carries some. A pair moves s/(2(1+s)) of its source, with s its saturation parameter at the closest frequency of the window; this is an estimate. `esrstm._ed_band` sets emax to h(f_max + band) above the highest of them and rebuilds the spectrum until that state stops rising, one pass per photon. On mode="DMRG" (submode=None) the band is not grown, and the call warns instead (`esrstm._warn_band`, `lineshape.BAND_WARN`). The submode="KRYLOV" half is the Status line above; both Krylov routes keep the free-spin band. NUMBERS CHANGE on ED at low T under drive (see the ledger). Pinned by tests/test_audit_2026_11_21_esr_window.py::test_spin1_ladder_keeps_the_second_rung, ::test_ed_keeps_the_second_rung_on_two_sites and ::test_dmrg_route_warns_when_the_drive_needs_more_states.
 
 **Where**: `src/dmrgpy/esrstm.py:107-124 (emax from the window, its margin and the thermal populations only)`; `src/dmrgpy/esrtk/spectrum.py:175 (keep = e <= emax) and 289-296 (DMRG route, same cut)`; `src/dmrgpy/esrtk/lineshape.py:138-147 (population grows along driven pairs among the kept states only)`; `src/dmrgpy/esrtk/floquet.py:28-33 (the Floquet reference uses the same basis)`
 
@@ -918,6 +939,8 @@ closure the two findings above ask for.
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `esr` &middot; candidate `esr-2`
 
+**Status**: PARTIAL. Fixed on ED and warned on DMRG in `c95efb5`. On mode="ED" the band above the window is WINDOW_MARGIN power-broadened widths sqrt(1 + xi^2)/(pi T2) of the strongest line (`lineshape.band_margin`). Here xi^2 = (4 pi rabi ||V||)^2 T1 T2, an estimate, with ||V|| from power iteration on the ED matrix of V. The DMRG eigenstate route keeps the free-spin band and warns when it keeps less than BAND_WARN = 0.5 of that band above the window, counted from the highest state that can carry population. The WINDOW_MARGIN comment now says (1 + xi^2)/(4 WINDOW_MARGIN^2) of a line for a band in free-spin widths. Not done: the two submode="KRYLOV" routes still use the free-spin margin, for emax and for their window, and neither grow nor warn, although the suggested fix asked for a warning there. NUMBERS CHANGE on ED at T of a few mK or a short T2 under strong drive (see the ledger). Pinned by tests/test_audit_2026_11_21_esr_window.py::test_saturated_line_above_the_window_at_zero_temperature and ::test_weak_drive_tail_left_out_is_below_the_bound.
+
 **Where**: `src/dmrgpy/esrstm.py:121-124 (margin = WINDOW_MARGIN/(pi T2), emax = h(f_max + margin))`; `src/dmrgpy/esrstm.py:132,141 (the Krylov routes' window, same margin; read, not run)`; `src/dmrgpy/esrtk/spectrum.py:175 (ED: keep = e <= emax)`; `src/dmrgpy/esrtk/lineshape.py:43-48 (the comment claiming the 3e-4 bound)`; `docs/development.md (4.8l, the same bound)`
 
 The states are kept up to `emax = h(f_max + margin) + kT ln(1/p_cut)`, with
@@ -1129,6 +1152,8 @@ development notes to `(1+xi^2)/(4 WINDOW_MARGIN^2)` of a line.
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `esr` &middot; candidate `esr-3`
 
+**Status**: FIXED in `c95efb5` on 2026-11-21, by the author's pick (a). `rates.korringa_scale(..., weight=)` divides the Korringa scale by site_weights[site] when it is positive, passed through `lineshape.Lines(tip_weight=)`. So T1 and T2 are those of the tip spin on every route (ED, DMRG, both Krylov routes, Floquet), and only the ratios of the weights matter. At site_weights[site] == 0 the raw scale stays, and the docstring says T1 then refers to a site of weight 1. NUMBERS CHANGE for every call with site_weights[site] != 1 (see the ledger). Pinned by tests/test_audit_2026_11_21_esr_window.py::test_site_weights_keep_the_tip_T1_and_T2 and ::test_only_the_ratios_of_the_weights_matter.
+
 **Where**: `src/dmrgpy/esrtk/lineshape.py:109-110 (g = korringa_scale(T1, h f_ref, kT), no tip weight)`; `src/dmrgpy/esrtk/rates.py:39-56 (korringa_scale fixes g for K = 1/2)`; `src/dmrgpy/esrtk/spectrum.py:99-110 (_weights) and the K sums of every route`; `src/dmrgpy/esrstm.py:190-197 (docstring: T1, T2 of a free spin 1/2 on the tip site)`; `docs/guide/esr-stm.md (the T1, T2 and site_weights entries)`
 
 The docstring and the guide define T1 and T2 as those of a free spin 1/2 on
@@ -1311,6 +1336,8 @@ which no test uses today.
 ### 6. The METTS collapse-basis guard runs only in `metts_vev` on `"python"` and v3, so `julia_live` and `metts_dynamical_correlator` on every backend freeze in one charge sector: `<Sztot^2>` 1, 4 and 0 for an exact 0.370
 
 `bug` &middot; severity **HIGH** &middot; CONFIRMED, NARROWED &middot; lens `julia` &middot; candidate `julia-1`
+
+**Status**: FIXED in `8c63bb9` on 2026-11-21. `_check_basis` runs on every backend, `julia_live` included, and `metts_dynamical_correlator` calls it after its argument checks and before `str2MO`, with the call named in the message. A non-Hermitian name is refused from its site matrix on every site, before any sampling. As defence in depth, `pyitensor/metts.py::_eigenbasis` and `metts.jl::metts_eigenbasis` raise when ||M - M^dag|| > 1e-12 ||M||. The v3 C++ eigenbasis is not changed. A call that returned a frozen average now raises ValueError, see the ledger. Pinned by `tests/test_audit_2026_11_21_metts.py`: `test_metts_vev_refuses_a_frozen_basis` and `test_metts_dynamical_correlator_refuses_a_frozen_basis` on "python", 3 and julia_live, plus `test_python_eigenbasis_refuses_a_non_hermitian_name` and `test_julia_eigenbasis_refuses_a_non_hermitian_name`.
 
 **Where**: `src/dmrgpy/vevtk/mettsvev.py:194-195 (the guard, python and v3 only)`; `src/dmrgpy/vevtk/mettsdynamicalcorrelator.py:98-160 (no basis check)`; `src/dmrgpy/mpsjulialive/metts.jl:41-56 (eigen(Hermitian(M)) reads the upper triangle)`; `src/dmrgpy/mpsjulialive/metts.py:33-104`; `src/dmrgpy/mpscpp3/chain_session.h:2437-2508 (the v3 dynamical correlator, no check)`; `src/dmrgpy/pyitensor/metts.py:89-95 (np.linalg.eigh reads the lower triangle)`; `tests/test_audit_2026_10_23.py, tests/test_audit_2026_10_23_leads.py (python and v3 only)`
 
@@ -1750,6 +1777,8 @@ also incomplete, which is the reviewer-found finding below.
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `julia` &middot; candidate found by the reviewer of `julia-1`
 
+**Status**: FIXED in `8c63bb9`. The guard no longer stops at a non-diagonal name. It reads the one-site matrices of the pyitensor site tables and refuses when every basis name commutes, on each site, with the one-site part of a charge that H conserves. The charges are each sector charge of `get_sector_charge_operators()` and each name's own sum, with [H,Q] = 0 proven by the canonical form or tested on the random witness as before. They also include the parity prod_i 2O_i of a name with (2O)^2 = 1 on every site, and on a chain with fermion sites the fermion parity (-1)^N, which raises by the author's pick. A parity is proven conserved term by term from the factor matrices. Pinned by the same file (cases `heis-Sx`, `isingx-Sx` and `kitaev-N`). `test_a_mixing_basis_passes_the_guard` and `test_a_mixing_basis_samples_every_sector_and_matches_ed` pin that the default basis and ("Sz",) on the x-field Ising chain still run.
+
 **Where**: `src/dmrgpy/vevtk/mettsvev.py:57 (_check_basis returns at the first non-diagonal name)`; `src/dmrgpy/vevtk/mettsvev.py (_check_basis tests U(1) charges only, never a parity)`
 
 `_check_basis` misses two kinds of frozen Markov chain on `"python"` and
@@ -1933,6 +1962,8 @@ ensemble at fixed parity whose bias falls off as `Tr(P e^-bH)/Z`.
 ### 8. In a conserved sector, `get_correlation_matrix(operators=X)` ignores X on every DMRG backend: a Hadamard rotation is off by 0.507 and `C[:2]` returns the (n, n) matrix
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `julia, v3-cpp` &middot; candidate `julia-2` and `v3-cpp-1`, one defect
+
+**Status**: FIXED, NUMBERS CHANGE in `539b9cb` on 2026-11-21. `_default_dmmode` reads one predicate, `correlationentropy._full_applies`, in both branches. It takes "full" only for basis="electron", no `operators=` or exactly the chain's own C in order, and either a "python" or v3 session with the one-sweep method on spinless fermion sites or a julia_live state on spinless fermion sites. Otherwise the default is "explicit" in a sector and "fast" outside one. An explicit `dmmode="full"` with other operators raises ValueError naming `dmmode="explicit"`, before the ground state is solved. The rotation fast path was not added. On the 4-site chain at Nf=2 of the repro, the Hadamard entry [0,0] goes from 0.401066 to 0.907759, and `operators=C[:2]` gives (2, 2) instead of (4, 4). The entropy of `C[:3]` on the 6-site free chain at Nf=3 goes from 0.000000 to 0.720480, the ED value. Pinned by `tests/test_audit_2026_11_21_corrmat.py`: `test_sector_default_reads_a_rotated_basis_and_a_subset` ("python", 3, julia_live), `test_sector_default_reads_a_momentum_basis_and_a_reversed_list`, `test_sector_correlation_entropy_of_a_subsystem`, `test_spin_chain_in_a_sector_answers_with_operators`, `test_explicit_full_with_other_operators_raises_before_the_solve` and `test_no_sector_default_is_unchanged`.
 
 **Where**: `src/dmrgpy/entropytk/correlationentropy.py:89-95 (the operators= guard, skipped in a sector)`; `src/dmrgpy/entropytk/correlationentropy.py:334-339 (_default_dmmode's sector branch returns "full")`; `src/dmrgpy/entropytk/correlationentropy.py:116-117 and 265-279 ("full" never sees operators)`
 
@@ -2351,6 +2382,8 @@ and since the file dispatches into `julia_live` its tests should run there.
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `julia, v3-cpp` &middot; candidate found by the reviewer of `julia-2`
 
+**Status**: FIXED in `539b9cb`, with finding 8. The predicate of finding 8 tests for spinless fermion sites in both branches, so a native spinful chain in a sector takes "explicit". `get_correlation_matrix()` and `get_correlation_entropy()` with no keywords now answer on "python" and v3, and match ED in the Nf=4 sector. A raise became an answer, so no saved number moves. Pinned by `tests/test_audit_2026_11_21_corrmat.py::test_native_spinful_chain_in_a_sector_answers_the_default_call`.
+
 **Where**: `src/dmrgpy/entropytk/correlationentropy.py:334-339 (_default_dmmode's sector branch returns "full" with no site-type test)`
 
 A second missing condition on the branch of the sector correlation-matrix
@@ -2503,6 +2536,8 @@ in the same place, and the two branches cannot drift a fourth time.
 ### 10. `Thermal_Spin_Chain.get_gs()` ignores a temperature set after the first solve, and returns the T=2.0 state at T=0.2 (energy 0.785 off)
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `solvers` &middot; candidate `solvers-3`
+
+**Status**: FIXED in `898b21b` on 2026-11-21. `get_gs()` stores, next to `wf0`, the key the state was purified under (`thermal.purification_key`) and returns the stored state only while the current key equals it. The key holds `float(T)`, `anneal_step`, `anneal_order`, whether those two are set on the instance (which `auto_anneal_method()` reads), `anneal_method`, a frozen copy of `anneal_options`, `mode`, `MBChain.itensor_version` and `groundstate.solver_key(MBChain)`, read before any solve touches `MBChain`. The T check and the `anneal_*` checks run before the comparison, so an invalid setting after a solve raises, as on a fresh object. A new solve marks the object as not current before it touches `MBChain`, so a solve that raises half way does not leave the old state returned over the singlet Hamiltonian. NUMBERS CHANGE only for a caller who changed T or another setting between two `get_gs()` calls on one object: on the 3-site Heisenberg chain at T=0.2 after a solve at T=2.0, -0.206813 (the T=2.0 energy) becomes -0.991668, the exact Boltzmann value, on `mode="ED"` and on `"python"`. Nothing changes for a caller who changed nothing after a solve: the stored state itself comes back, without a solve. Pinned by `tests/test_audit_2026_11_21_thermal.py` (`::test_a_temperature_sweep_on_one_object_follows_the_temperature`, `::test_a_new_stepper_after_a_solve_is_the_one_taken`, `::test_an_edit_in_place_of_anneal_options_is_read_on_dmrg`, `::test_an_edit_in_place_of_anneal_options_is_read_on_ed`, `::test_a_new_solver_setting_of_the_chain_purifies_again`, `::test_a_new_mode_purifies_again`, `::test_an_invalid_setting_after_a_solve_raises`, `::test_the_key_sees_a_stepper_set_on_the_instance`, `::test_anneal_order_set_after_a_solve_keeps_the_taylor_stepper_on_v3`).
 
 **Where**: `src/dmrgpy/thermal.py:52-53 (get_gs returns self.wf0 whenever computed_gs)`; `src/dmrgpy/thermal.py:65-68 (the T check a stored state skips)`; `src/dmrgpy/thermal.py:73-80 (anneal_method and anneal_options validation, skipped the same way)`; `src/dmrgpy/thermal.py:141-143 (set_hamiltonian, the only reset)`; `src/dmrgpy/thermal.py:121-140 (class attributes overridden on the instance)`
 
@@ -2692,6 +2727,8 @@ Boltzmann value, on `mode="ED"` and `"python"`.
 ### 11. The default non-Hermitian `gs_energy()` on DMRG returns a level up to 1e-4 above the smallest real part, with Im E off by 0.20 and `<Sz_total>` off by 1 or 2, in 3 of 4 seeded runs
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `solvers` &middot; candidate `solvers-1`
+
+**Status**: FIXED in `787360d`, NUMBERS CHANGE. `nhlevels.ground_pair` takes the smallest real part among the accepted Ritz pairs whose relative residual is below the certificate tolerance (`cert_tol`, passed from `gs_energy(tol=)`, 1e-4 by default). Only a tie inside NH-DMRG's Ritz tie window, `1e-6*(Re spread of the Ritz values) + 100*eps*max|E|`, goes to the pair of smaller residual (`nhlevels._select_ground`, `nhlevels._tie_window`). A pair skipped for its residual that lies below the one taken by more than the window is named in a printed warning. When no pair reaches the tolerance, the best residual within `1e-4*(c+|E-e_id|)` is still taken, and the certificate and NH-DMRG judge it as before. On the 6-site PT-symmetric XX chain with `5e-5*Sz_total`, the default `gs_energy()` returned -1.39612641 +- 0.20120744i (`<Sz_total>` = 0) or -1.39607641 (+1). It now returns -1.39617641 with `<Sz_total>` = -1. Pinned by `tests/test_audit_2026_11_21_nh.py::test_default_nh_gs_energy_is_the_level_of_smallest_real_part` ("python" and v3, three seeds each, against np.linalg.eig) and by the `test_selection_*` tests, which run on the accepted lists printed in the record.
 
 **Where**: `src/dmrgpy/nhlevels.py:216-221 (the tie window 1e-4*(c+|E_min-e_id|) and the pick by smallest residual)`; `src/dmrgpy/nhlevels.py:157 (_accepted, sorted by (Re, Im))`; `src/dmrgpy/nhlevels.py:275 (the certificate checks the eigen-residual only)`; `src/dmrgpy/groundstate.py:970-973 (default dispatch to gs_energy_imaginary_time)`; `src/dmrgpy/manybodychain.py:180 (nh_gs_method default)`
 
@@ -3192,6 +3229,8 @@ the ED sort below, and anchor the test on `np.linalg.eig`, not on
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `solvers` &middot; candidate `solvers-2`
 
+**Status**: FIXED in `787360d`, NUMBERS CHANGE. `algebra.sorteigen` sorts in `algebra.eigen_order`: real part first, in groups of real parts within 1e-10 of the largest |E| of each group's smallest member, and Im ascending only inside a group. Both branches of `lowest_states`, `lowest_eigenvalues` and the re-sort of the DMRG excited states in `excited.py` (which calls `sorteigen`) take this order. On the 4-site impurity at eps = 1e-4, g = 0.5, `gs_energy(mode="ED")` was -1.49995-0.25i with `<Sz_0>` = +0.5. It is now -1.50005+0.25i with -0.5. On the 6-site PT chain in a field 5e-5 it was -1.39612641-0.20120744i with `<Sz_total>` = 0. It is now -1.39617641 with -1. Pinned by `test_ed_ground_state_is_the_smallest_real_part`, `test_lowest_states_on_the_arpack_branch` and `test_sorteigen_orders_by_real_part_and_im_only_inside_a_tie`.
+
 **Where**: `src/dmrgpy/algebra/algebra.py:381-388 (sorteigen: Re(E - min Re) + 1e-3*Im E)`; `src/dmrgpy/algebra/algebra.py:323, 347, 356 (lowest_eigenvalues, lowest_states)`; `src/dmrgpy/edtk/edchain.py:204-206 and 214-225 (ED gs_energy and get_gs_array)`; `src/dmrgpy/excited.py:250-251 (the same key on DMRG excited states; by reading)`
 
 `algebra.sorteigen` orders non-Hermitian eigenvalues by
@@ -3319,6 +3358,8 @@ and pin both against `np.linalg.eig`.
 ### 13. `algebra.biorthogonal_ground_state` raises at any scale when the smallest real part is shared by a conjugate pair, and the ED non-Hermitian KPM correlator raises with it
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `solvers` &middot; candidate found by the reviewer of `solvers-2`
+
+**Status**: FIXED in `787360d`. `algebra.biorthogonal_ground_state` sorts h only. In the dense case vr and vl come from one `scipy.linalg.eig(h, left=True, right=True)` at the same index. Above `maxsize`, vl is the ARPACK eigenvector of `dagger(h)` whose eigenvalue is nearest `conj(e0)`. On a degenerate level vl is the projection of vr on the left eigenspace, which is the left eigenvector of largest overlap with vr. The normalization `conj(vl)@vr = 1` and the raise below `|<vl|vr>|` = 1e-8 stay. On the 6-site PT chain at g = 0.3 and on the 4-site Heisenberg chain with `0.3 Sz_tot + 1j Sz_0`, the call now returns the pair with scipy's overlap of 0.554 and 0.623, and the ED NH-KPM correlator answers instead of raising. Pinned by `test_biorthogonal_ground_state_on_a_conjugate_pair` (dense and ARPACK branches), `test_biorthogonal_ground_state_on_a_degenerate_level` and `test_ed_nh_kpm_correlator_on_a_conjugate_pair`. That last test checks the correlator against the same recursion run on scipy's pair.
 
 **Where**: `src/dmrgpy/algebra/algebra.py (biorthogonal_ground_state sorts h and dagger(h) with the same key)`; `src/dmrgpy/algebra/algebra.py:381-388 (sorteigen)`; `src/dmrgpy/nonhermitian/kpm.py:111 (the ED NH-KPM route)`
 
@@ -3466,6 +3507,8 @@ index. Inside a degenerate level choose `vl` in the left eigenspace so that
 ### 14. The opt-in `tol=` stop of the ED Krylov Kondo route counts an empty window as converged, and drops a whole inelastic step: 14.3% of the peak on a 12-spin chain, 64% on the 8-spin test chain at one bias
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `kondo-routes` &middot; candidate `kondo-routes-1`
+
+**Status**: FIXED in `5b2a6bf`, NUMBERS CHANGE for tol= calls where the old stop fired early. In block_krylov a Ritz state is now part of the window when theta - r <= top, r being the residual the check already formed for every column, and the space stops only when all of those are converged; a window that no interval reaches is still a stop. On the 12-spin ferromagnetic chain of the repro (J = -1 meV, B = 0.1 meV, site 0, T = 0, nkry = 100), at max|eV| = 0.105 meV, tol=1e-8 was 0.143 (order 2) and 0.144 (order 3) of the peak off the default call. It is now the default call, which at order 2 is the analytic 2pi(1/4 + 1/24) above |eV| = B. On the 8-spin chain of tests/test_kondo_speedups_krylov.py the reviewer's replay of this rule stops at the documented 121 and 31 states. Pinned by test_tol_stop_waits_for_a_ritz_state_whose_interval_reaches_the_window and test_tol_keeps_the_magnon_step in tests/test_audit_2026_11_21_kondo_krylov.py.
 
 **Where**: `src/dmrgpy/kondospectrumtk/krylovkondo.py:254-264 (the check: an empty window counts as converged)`; `src/dmrgpy/kondospectrumtk/krylovkondo.py:476-501 (window() and state_spectrum)`; `src/dmrgpy/kondospectrumtk/krylovkondo.py:525-549 (krylov_kondo_dIdV passes emax = max|eV|)`; `src/dmrgpy/kondospectrumtk/kondomethod.py:377-387 (the public tol= keyword)`; `docs/guide/kondo.md:291-295 (the promise that every possible final state is converged)`
 
@@ -4002,6 +4045,8 @@ chain, whose answer is analytic.
 
 `performance` &middot; severity **LOW** &middot; CONFIRMED &middot; lens `kondo-routes` &middot; candidate found by the reviewer of `kondo-routes-1`
 
+**Status**: FIXED in `5b2a6bf`. When H conserves S^z_tot (krylovkondo.conserved_sz, checked on a random state as in su2_initial_states) and the initial state has a definite S^z_tot up to SECTOR_LEAK = 1e-10, KrylovKondoSpectrum._start_block puts the state on its sector m. It puts S+|i>, S-|i>, Sz|i> on m+1, m-1 and m, and Sx|i>, Sy|i> on m-1 and m+1 for a complex H. It leaves everything as it was when a vector would lose more than SECTOR_LEAK of its norm. On the 12-spin chain the space now holds 13 states instead of 301, and the record found dI/dV the same to 1e-15 of the peak. Pinned by test_space_stops_at_the_one_magnon_states, test_sector_projection_moves_dIdV_at_roundoff, test_projection_on_the_complex_route_matches_ed and test_no_projection_without_sz_conservation in tests/test_audit_2026_11_21_kondo_krylov.py.
+
 **Where**: `src/dmrgpy/kondospectrumtk/krylovkondo.py (block_krylov and its start states)`
 
 On the polarized 12-spin ferromagnetic chain in a field, `S|GS>` reaches
@@ -4103,6 +4148,8 @@ at most 13.
 ### 16. The BiCGSTAB residual check forms A x and A x - b by density-matrix routes, so on an ill-conditioned converged solve it reports up to 1.0 for a true residual of 1.4e-7 and warns falsely, on `"python"`
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `pyitensor` &middot; candidate `pyitensor-2`
+
+**Status**: FIXED in `834f1c7` on 2026-11-21. `mpsalgebra.check_bicgstab` takes the session's `residual_norm` on `"python"` (`pyitensor/chain.py`, through `implicit._residual`) and `mps_residual_norm` on `julia_live` (`mpsjulialive/mpsalgebra.jl`). A x and the difference are formed with nothing truncated, and the norm is read off the orthogonality centre. An x that is not finite reads inf before any SVD. NUMBERS CHANGE: the value of the check and the warnings it gives, not the solves. Pinned by `tests/test_audit_2026_11_21_exact-arith.py` (`test_check_is_not_above_the_dense_residual`, `test_check_reads_a_planted_residual`). The julia_live side was not measured.
 
 **Where**: `src/dmrgpy/mpsalgebra.py:430-468 (check_bicgstab; 447-448 the apply and the sum)`; `src/dmrgpy/mpsalgebra.py:277-298 (summps_dmrg, applyoperator_dmrg)`; `src/dmrgpy/pyitensor/chain.py:880-883, 907-908, 2448-2454 (apply_operator and sum_mps take APPLY_METHOD and SUM_METHOD)`; `src/dmrgpy/pyitensor/mpsalgebra.py:396, 967, 975-995 (both default to "densitymatrix")`; `docs/development.md and docs/numerical_changes.md (both say "summed exactly")`
 
@@ -4448,6 +4495,8 @@ the two docs.
 ### 17. Extension of the BiCGSTAB check finding above to v3, the default backend: the check overstates the true residual up to 2e6 times, and the public `applyinverse` warns at 2.6e-3 on a solve whose residual is 1.2e-4 at delta=1e-4
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `pyitensor` &middot; candidate found by the reviewer of `pyitensor-2`
+
+**Status**: FIXED in `834f1c7` on v3 without a conserved sector. `Chain::residual_norm` (`exact_apply_mpo`, then `exact_sum_right_canonical` of A x and -b, then the norm of the centre tensor) is bound in `bindings.cc`, and `check_bicgstab` takes it. v3 in a sector and v2 keep the old route. Whether `bicstab` should take the exact apply inside its recurrence is still a pick. NUMBERS CHANGE: the check only. Pinned by the same file, `test_public_applyinverse_does_not_warn_on_a_converged_v3_solve` included.
 
 **Where**: `src/dmrgpy/mpsalgebra.py:430-468 (check_bicgstab)`; `src/dmrgpy/mpscpp3/chain_session.h (Chain::apply_operator passes no Method to applyMPO, whose default is DensityMatrix)`
 
@@ -4820,6 +4869,8 @@ is a separate pick.
 ### 18. The per-bond MPO cutoff does nothing when every bond is crossed by an O(1) term, so a weak link of 1e-7 in a ring, or a 1e-7 XY part on an Ising chain, reads 0.000 of itself on v2, v3 and `"python"`
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `pyitensor, v3-cpp` &middot; candidate `pyitensor-3` and `v3-cpp-3`, one defect
+
+**Status**: FIXED in `6cb5033` on 2026-11-21, with the rule the author picked. The per-bond factor now also takes the weakest merged multi-site coefficient whose ratio to the largest one lies strictly between 1e-14 and `WEAK_TERM_TAU` = 1e-5, whatever else crosses its bonds: m = min(m before, that ratio), and f = m^2. The floor (1e-14)^2 and the callers are unchanged. The rule is the same in `pyitensor/mpobuilder.py`'s `_bond_cutoff_factor` and in `bond_cutoff_factor` of both `mo_terms.h`. An operator with no term in the window and no paired string (finding 19) is built as before. NUMBERS CHANGE. Old values, from this record: on 6 S=1/2 sites at s = 1e-7 (maxm=30, nsweeps=10, the ground state of the uniform ring as the fixed state), the weak part read 0.000000 on v2, v3 and "python" for the weak link in a ring, for the same link next to Sz0*Sz5 and for Ising plus s*(XX+YY). The ring with one weak link had (E_dmrg - E_ed)/s = 0.140460 on all three. The 12-site geometric chain jumped by S_0.S_11 at J = 1 read 0.0000 for t = 1e-7 and 1e-8 on "python" and v3. The YSR `comb` layout (2 spins, 6 Wilson sites, t = 0.5, 1e-4, 1e-8, 1e-9, 1e-10) read 0 for the last three hoppings on "python" and v3. New values: the probes read 1 within 1e-2 in the new tests on "python", v2 and v3. The v2 rows were not measured in the record. Pinned by `tests/test_audit_2026_11_21_mpo_cutoff.py`: `test_a_weak_term_sets_the_factor_whatever_crosses_its_bonds` (the "python" factor is 1.0 with the old rule and s^2 now, and 1.0 at s = 2e-5), `test_a_weak_term_crossed_by_order_one_terms_keeps_its_channels` (ED, "python", v3, v2), `test_the_factor_of_a_jumped_chain_follows_its_deepest_bond`, `test_a_chain_jumped_by_a_strong_coupling_keeps_its_deep_bonds` (ED, "python", v3, v2), `test_a_wilson_chain_off_the_right_end_keeps_its_deep_hoppings[comb]` ("python", v3, v2) and `test_the_reference_chains_build_as_before` ("python" only). Bit identity was measured on v3: the site arrays of the eight reference chains of the new test file (Heisenberg, XX, dimerized, J1-J2, 1/r^2, Hubbard, native Hubbard and an NRG head) are equal before and after the rebuild. On v2 it holds by reading only, since v2 has no `mpo_site_arrays`.
 
 **Where**: `src/dmrgpy/mpscpp3/mo_terms.h:371-400 (bond_cutoff_factor: m = min over bonds of the strongest crossing term)`; `src/dmrgpy/mpscpp2/mo_terms.h:88-117 (same rule)`; `src/dmrgpy/pyitensor/mpobuilder.py:295-323 and 366-372 (_bond_cutoff_factor, lowering skipped when f = 1)`; `src/dmrgpy/pyitensor/chain.py:46 (_BUILD_CUTOFF = 1e-14, relative)`; `src/dmrgpy/ysr.py:900-931 (_metal_layout, the comb layout)`
 
@@ -5253,6 +5304,8 @@ the cases above. The trade-off on long tails is the author's to decide.
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED, NARROWED &middot; lens `pyitensor, v3-cpp` &middot; candidate found by the reviewer of `pyitensor-3`
 
+**Status**: FIXED in `6cb5033`, in the factor computation only, as the author picked it. `product2jw` and the terms handed to the builders are unchanged. The span of a term now starts at its leftmost site whose factors are not Jordan-Wigner strings cancelling in pairs (every name F, Fup or Fdn, each an even number of times): `_span_start` in `pyitensor/mpobuilder.py`, and `bond_span_start` in both `mo_terms.h`. One departure from the literal pick: a site with an odd number of strings stops the scan, so a parity-odd term keeps its string, which is a real part of the operator. Read from its first non-string factor, a sum of a_i Cup_i would have gone from the factor a_min^2 to 1 (pinned by `test_a_parity_odd_term_keeps_its_string`). NUMBERS CHANGE. Old values, from this record: `order="sides"` with one left contact (2 spins, t = 0.5, 1e-4, 1e-8, 1e-9, 1e-10) read 0, 0, 0 ("python") and 0.25, 0, 0 (v3) for the last three hoppings. Its "python" factor was 3.906e-03, against 1.563e-22 for `linear`. New values: 1 within 1e-2 in the new test on "python", v2 and v3. Pinned on "python" by `test_the_span_starts_after_the_cancelling_strings`. There every hopping lies above the window, so only the span acts, and the factor of `sides` equals that of `linear`. `test_a_wilson_chain_off_the_right_end_keeps_its_deep_hoppings[sides]` ("python", v3, v2) checks the numbers, but it passes with the window rule of finding 18 alone, since its hoppings lie in the window, so it does not pin the span. On v2 and v3 `bond_span_start` is checked by reading only, because the factor has no Python binding.
+
 **Where**: `src/dmrgpy/pyitensor/mpobuilder.py:295-323 (_bond_cutoff_factor reads a term's span from its first listed site)`; `src/dmrgpy/mpscpp3/mo_terms.h:371-400 (bond_cutoff_factor, the same)`; `src/dmrgpy/multioperatortk/jordanwigner_spinful.py (one_fermion dresses every factor with F from site 0)`; `src/dmrgpy/ysr.py:900-931 and 973-974 (_metal_layout, the sides order)`
 
 On `Spinful_Fermionic_Chain_Native` every fermionic factor reaches the MPO
@@ -5401,6 +5454,8 @@ get shorter. Pin `order="sides"` with one left contact and hoppings to
 ### 20. On `"python"`, `Chain.sum_mps_weighted` takes the density-matrix sum, so a weighted sum of nearly parallel states 5e-6 to 5e-9 of their norms comes back off by 4.9e-4 to 0.97
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `pyitensor` &middot; candidate `pyitensor-1`
+
+**Status**: FIXED in `834f1c7` on 2026-11-21. `Chain.sum_mps_weighted(wfs, coefs, method=None)` on `"python"`, where None keeps the module default, and `nhlevels._combine` passes `method="exact"`. The default is unchanged, because the ESR Krylov route passes its whole basis. Pinned by `test_exact_weighted_sum_keeps_what_survives_a_cancellation` and `test_nh_levels_combination_resolves_a_cancellation`.
 
 **Where**: `src/dmrgpy/pyitensor/chain.py:910-922 (sum_mps_weighted: sum_many with no method)`; `src/dmrgpy/pyitensor/mpsalgebra.py:396 (SUM_METHOD = "densitymatrix")`; `src/dmrgpy/pyitensor/mpsalgebra.py:401-460 (_sum_densitymatrix and its documented floor)`; `src/dmrgpy/nhlevels.py:163-166 (_combine, the consumer; reach not shown)`
 
@@ -5846,6 +5901,8 @@ need gigabytes per site.
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `v3-cpp` &middot; candidate `v3-cpp-2`
 
+**Status**: FIXED for its consumer in `834f1c7`. v3's `Chain::sum_mps_weighted` takes `method`: "pairwise" (the default) is ITensor's tree, and "exact" is the direct sum made canonical with nothing truncated (`exact_sum_right_canonical`, which never forms the block tensors) and truncated once by `position(N)`. Its comment now says what each method does, and `nhlevels._combine` passes "exact". The default stays the tree, because the ESR Krylov route sums its whole basis (273 states on 12 spins) on v3 too. NUMBERS CHANGE for the Ritz vectors of nhlevels on v3. Pinned by the same two tests as finding 20.
+
 **Where**: `src/dmrgpy/mpscpp3/chain_session.h:1439-1456 (Chain::sum_mps_weighted and its comment)`; `vendored mpscpp3/ITensor/itensor/mps/mps.cc:1471-1502 (sum(std::vector<MPS>): pairwise tree)`; `vendored mps.cc:739-790 (MPS::orthogonalize: density matrix)`; `src/dmrgpy/nhlevels.py:163-166 (_combine, the consumer)`
 
 The comment of `Chain::sum_mps_weighted` says it is one direct sum, "so a
@@ -6159,6 +6216,8 @@ any case.
 
 `bug` &middot; severity **LOW** &middot; CONFIRMED, NARROWED &middot; lens `nrg-ysr-metals` &middot; candidate `nrg-ysr-metals-2`
 
+**Status**: FIXED in `9c26552` on 2026-11-21. NUMBERS CHANGE for a band D other than 1 only. `max_sites` no longer reads D, and `OMEGA_MIN` is relative to D. So the default tail at Lambda = 4 is 99 sites at every D. It was 116 at D = 1e5 and 120 at D = 1e8, which ran into the broken end. At D = 1e3 it was 109, and the old formula gives 89 at D = 1e-3 (this last count is computed from the formula, not measured). `_check_prefix` compares to 1e-12 of the largest hopping of the head, not to an absolute 1e-12. `head_tail_poles` builds the tail and runs the check, and the k0 check, before the head is solved, so a refused hand-over costs no DMRG solve. `tail_chain` warns when an explicit `n_tail` goes below 1e-30 D, so `n_tail=113` at Lambda = 4 now warns. The docstrings that named `N_MAX` as the default tail are fixed. The curves after the fix were not measured. Pinned by `tests/test_audit_2026_11_21_nrg.py`. `tests/test_nrgmps.py::test_tail_chain_stays_above_the_broken_end` is unchanged and still holds.
+
 **Where**: `src/dmrgpy/nrgmps.py:603-604 (N_MAX, OMEGA_MIN absolute)`; `src/dmrgpy/nrgmps.py:629-634 (max_sites)`; `src/dmrgpy/nrgmps.py:637-654 (tail_chain default)`; `src/dmrgpy/nrgmps.py:690-695 (_check_prefix, absolute 1e-12)`; `src/dmrgpy/nrgmps.py:784-793 (head_state solve before _check_prefix)`; `src/dmrgpy/nrgmps.py:992-1002 (head="exact": broken tail, no check)`; `src/dmrgpy/wilsonchain.py:159-196 (scale-covariant Lanczos)`
 
 `nrgmps.max_sites` stops the tail where `D Lambda^(-n/2)` reaches
@@ -6381,7 +6440,28 @@ name `N_MAX` as the default, which contradicts the code.
 
 ## Left open, and new leads
 
-- Executed, not reviewed: `_check_basis` returns at once for a name outside
+- Left open by the fixes. The ESR DMRG Krylov guard runs only when H
+  conserves a charge of the site types that `S^+_k` changes, so another
+  conserved quantity (Sx_tot with the field and the tip along x) is still
+  silent there, and the DMRG route has no closing stage. The two ESR Krylov
+  routes keep the free-spin band above the window and neither grow it nor
+  warn. The cost of the ESR closing stage and of the exact BiCGSTAB check at
+  real size was not measured, nor was the `julia_live` side of the exact
+  check. Whether v3's `bicstab` recurrence should take the exact apply is the
+  author's pick.
+- Found while fixing, by reading: a product with a constant, such as the
+  charge penalty `Upen*(N_i - 1)^2` of the YSR builders, carries an `Id`
+  factor that the per-bond factor reads as part of the span. Since the weak
+  term rule covers every weak term, it drops no channel now, and it was left
+  as it is, since skipping `Id` would move the bits of many operators built
+  correctly today.
+- METTS on fermion chains. Every Hermitian one-site operator of a fermion
+  site conserves the fermion parity, and on a spinful site also N, so the
+  guard of finding 7 refuses METTS on every fermion chain whose H conserves
+  the parity, which is every physical one. A fermion model is sampled as a
+  spin chain through the Jordan-Wigner transformation.
+- FIXED with finding 7 (`8c63bb9`), executed, not reviewed: `_check_basis`
+  returned at once for a name outside
   `canonical._DIAGONAL`, which lists `N` but not its diagonal aliases `n`,
   `projOcc`, `projEmp` and `FermiPhase`. So `basis_ops=("n",)` or
   `("projOcc",)` on a number-conserving spinless chain is not refused, while
@@ -6445,7 +6525,7 @@ name `N_MAX` as the default, which contradicts the code.
 - Documentation drift: `docs/development.md` 4.6 still says the
   `julia_live` defaults "stay where they were" (BiCGSTAB, TDVP for METTS,
   Taylor), which `0323513` and `b107ace` changed; the docstrings of
-  `Many_Body_Chain.metts_vev` and `metts_dynamical_correlator` still say
-  they are implemented for `"python"` and 3 only; the 2026-11-15 ledger
-  entry on the imaginary-time route still says the smallest real part is
-  taken.
+  `Many_Body_Chain.metts_vev` and `metts_dynamical_correlator` said
+  they are implemented for `"python"` and 3 only (fixed in `8c63bb9`); the
+  2026-11-15 ledger entry on the imaginary-time route said the smallest
+  real part is taken (corrected with the fixes).

@@ -85,7 +85,7 @@ def assert_close(a, b, tol):
 
 @pytest.mark.parametrize("Bt", [3.0, 0.0])
 def test_dimer_with_the_tip_along_the_field_on_ed(Bt):
-    """Finding 1: the guide's dimer (J = 30 GHz, B = 5 GHz, tip field Bt
+    """Finding 1: the dimer of the repro (J = 30 GHz, B = 5 GHz, tip field Bt
     along z, 30 mK, tip=[0,0,1]). T- lies below the window, T+ between the
     window and emax, and neither is reached by V = S^z_0 from the singlet;
     before, the route kept 2 of the 4 states"""

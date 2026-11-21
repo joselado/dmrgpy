@@ -334,8 +334,11 @@ class ESRSpectrumMixin():
           submode: None, or "KRYLOV": the final states of the lines come
               from a Krylov space started from V|m> for every populated m,
               instead of from the eigenstates up to the top of the window.
-              On mode="ED" the populated eigenstates and one block Krylov
-              space of nkry blocks (default 100). On mode="DMRG"
+              On mode="ED" every eigenstate below the window, one block
+              Krylov space of nkry blocks (default 100) from V|m>, and a
+              closing one from S^a_k|n> and V|n> of the states below the
+              window and of the final states of the window lines. On
+              mode="DMRG"
               (itensor_version 3 and "python") the nstates lowest DMRG
               states must reach the populated states and every state below
               the window, and the Krylov space of nkry steps (default 600)
@@ -343,6 +346,10 @@ class ESRSpectrumMixin():
               Faster when few states are populated and many lie in the
               window, slower when most are populated; raises when nkry is
               too small to converge the final states of the window lines.
+              Both raise, naming submode=None, when a final state relaxes
+              into states below emax that the basis does not hold (on DMRG
+              this is checked when H conserves Sz, as it does with the tip
+              moment along a field along z).
           method: "rates" (the rate equation, default) or "floquet" (the
               driven Lindblad equation in the same eigenbasis without the
               secular and rotating-wave approximations, nharm harmonics,

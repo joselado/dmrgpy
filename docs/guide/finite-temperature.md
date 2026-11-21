@@ -35,7 +35,9 @@ czz = tc.MBChain.vev(tc.Sz[0]*tc.Sz[1]).real  # thermal <Sz_0 Sz_1>
 `tc.MBChain` is the doubled chain that holds the purified state. Static
 expectation values on `tc.MBChain` are thermal averages. A dynamical
 correlator on `tc.MBChain` is not the thermal one, so use METTS or ED for
-those. `T=0` gives the ordinary ground state. The imaginary-time evolution
+those. `T=0` gives the ordinary ground state. After a change of `tc.T` or
+of a keyword below, call `tc.get_gs()` again before reading `tc.MBChain`,
+which then holds the new state. The imaginary-time evolution
 is accurate to about $10^{-6}$ relative at the defaults. The keywords are:
 
 - `tc.anneal_step`: the size of each imaginary-time step, in units of the
@@ -175,10 +177,16 @@ are:
 
 METTS works with `itensor_version=3` (at least 3 sites), `"python"` and
 `"julia_live"`. It
-is not available on `itensor_version=2`, where it raises an error. It also
-raises if the basis operators are all diagonal and $H$ conserves a
-charge, such as the particle number, since the samples then never leave
-one charge sector. The default `basis_ops` avoids this.
+is not available on `itensor_version=2`, where it raises an error. It
+also raises if the samples cannot leave one sector of a charge or a parity
+that $H$ conserves. This is the case when every basis operator commutes
+with a conserved particle number or $S^z_{\rm tot}$. It is also
+the case for a single $S^x$ when $H$ conserves $\sum_i S^x_i$ or
+$\prod_i 2S^x_i$. On a fermion chain it holds for every basis, since $H$
+conserves the fermion parity and no Hermitian operator of one fermion site
+changes it. So METTS is for spin chains, and a fermion model is sampled as
+a spin chain through the Jordan-Wigner transformation. The default
+`basis_ops` avoids all of this on a spin chain.
 
 The same sampling gives real-time thermal correlators
 $C_{AB}(t)=\langle A(t)B\rangle_T$ (arXiv:2405.18484). Each sample

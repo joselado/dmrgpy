@@ -81,14 +81,18 @@ measured and built:
   10 GHz of a 14-spin chain, the widths were 5% off and the curve 8%. At
   the default `p_cut`, on 14 spins, 110 of the 139 needed states are
   populated at J = 240 GHz and T = 1.2 K, and 10 of 99 at J = 30 GHz and
-  T = 0.05 K. So the Krylov routes pay in the second regime only.
+  T = 0.05 K. So the Krylov routes pay in the second regime only. The ED
+  route takes every state below the window since the 2026-11-21 hunt
+  (finding 2).
 - One common basis is needed. One two-level Bloch line per transition, as
   separate Krylov spaces give, is 46 to 61% of the peak off.
 - A Krylov space of full MPS does not pay: it needs 3 to 4 vectors per
   eigenstate it replaces (273 vectors for 100 eigenstates at 2e-5 of the
   peak on 12 spins).
-- ED, `submode="KRYLOV"`: the populated eigenstates and one block Krylov
-  space of V|m>. 3.2 times faster than the eigenbasis on 16 spins at
+- ED, `submode="KRYLOV"`: every eigenstate below the window, one block
+  Krylov space of V|m>, and a closing one from S^a_k|n> and V|n>
+  (findings 1 to 3 of the 2026-11-21 hunt). Measured before the closing
+  stage, it was 3.2 times faster than the eigenbasis on 16 spins at
   J = 30 GHz and T = 0.05 K, but 0.45 times at J = 240 GHz and T = 1.2 K,
   so it is opt-in.
 - DMRG, `submode="KRYLOV"`: the Krylov space runs in the tangent space of
@@ -120,7 +124,9 @@ measured and built:
   quintets when the drive starts from a singlet) were missing as
   relaxation partners. On ED the Krylov route keeps every Ritz state
   below emax and agreed with ED to 1e-12 on 8 and 10 spins with or
-  without the tip field; on DMRG the window-line states alone gave 4.3e-5
+  without the tip field (with a tilted tip; with the tip moment along the
+  field it kept one Sz_tot sector, finding 1 of the 2026-11-21 hunt); on
+  DMRG the window-line states alone gave 4.3e-5
   of the peak on 10 spins without the tip field, and with every converged
   Ritz state between the window bottom and emax as a partner 1.1e-6
   (1.2e-7 with the tip field), for 15% more time. On 14 spins with the tip

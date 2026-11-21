@@ -3049,7 +3049,12 @@ Since 2026-11-14 the cutoff of the build is one per bond: it is lowered
 by $m^2$, $m$ the strongest coefficient crossing the weakest bond over
 the largest one, floored at $(10^{-14})^2$ (`bond_cutoff_args` in both
 `mo_terms.h`, `_bond_cutoff_factor` in `pyitensor/mpobuilder.py`), and an
-operator with $m=1$ is built exactly as before. The strict xfails of
+operator with $m=1$ is built exactly as before. Since 2026-11-21 $m$ also
+takes the weakest multi-site coefficient below $10^{-5}$ of the largest
+one, whatever else crosses its bonds. A term crosses the bonds from its
+leftmost site that is not Jordan-Wigner strings cancelling in pairs to
+its last site (2026-11-21 record, findings 18 and 19;
+`tests/test_audit_2026_11_21_mpo_cutoff.py`). The strict xfails of
 `tests/test_audit_2026_09_25_scale.py` are plain tests now (2026-09-25
 record, small-units).
 
@@ -3387,9 +3392,14 @@ Notable, deliberate implementation details (not bugs to "fix"):
   `imaginarytime.py` under a given MPO, on v3 and `"python"`) with `H`
   itself, the shift at the running Re<H>, a Rayleigh-Ritz in the span of
   the last 24 states with a residual per Ritz pair from the Gram matrices,
-  the selected Ritz vector as one weighted sum (`Chain.sum_mps_weighted`),
-  and the left state from the same steps under `H^\dagger` started at the
-  conjugate of the right one. The pair goes through `nhdmrg()`'s own
+  the Ritz vector of smallest real part among the pairs whose relative
+  residual is below the certificate's tolerance, a tie inside NH-DMRG's
+  Ritz tie window going to the best converged one
+  (`nhlevels._select_ground`), as one exact weighted sum
+  (`Chain.sum_mps_weighted(method="exact")`, the direct sum truncated
+  once), and the left state from the same steps under `H^\dagger`
+  started at the conjugate of the right one. The pair goes through
+  `nhdmrg()`'s own
   certificate (`nhdmrg._certificate`) and is stored by
   `nhdmrg.store_nh_pair`, the storage NH-DMRG uses; a failed certificate
   runs `nhdmrg()` and keeps the pair of smaller residual (marked
@@ -4311,22 +4321,29 @@ iterations of `cvm_nit`, and $H-e$ below the spectrum, positive definite,
 stopped at once on its truncated recurrence with a true relative residual
 of $10^{-2}$. Since 2026-11-21 every BiCGSTAB solve of `applyinverse` on
 DMRG measures its true relative residual $\lVert Ax-b\rVert/\lVert
-b\rVert$ once (`mpsalgebra.check_bicgstab`, $A$ applied and the
-difference summed exactly, the `maxm` cap lifted and the cutoff at 0,
-since a cutoff acts relative to $\lVert Ax\rVert$ and its floor would
-reach a tight tolerance; one MPO application next to the two of every
-iteration), warns above `BICGSTAB_WARN` = 10 times the
-requested `delta`, and raises above `BICGSTAB_RAISE` = 1, where $x$ is
-worse than $x=0$ (picked for the author). A converged solve measured
+b\rVert$ once (`mpsalgebra.check_bicgstab`: on `"python"`, on v3
+without a conserved sector and on `"julia_live"`, $Ax$ and the difference
+are formed with nothing truncated and the norm is read off the
+orthogonality centre, through the session's `residual_norm` or
+`mps_residual_norm`, since the density-matrix apply has a floor set by
+$\lVert A\rVert\lVert x\rVert$ that reads 1.0 for a true residual of
+$1.4\times10^{-7}$ next to a level; v2, and v3 in a sector, apply and sum
+by the session's routes with the `maxm` cap lifted and the cutoff at 0;
+one MPO application next to the two of every iteration), warns above
+`BICGSTAB_WARN` = 10 times the requested `delta`, and raises above
+`BICGSTAB_RAISE` = 1, where $x$ is worse than $x=0$ (picked for the
+author). A converged solve measured
 $1.1\times10^{-5}$ at `delta` = $10^{-5}$. The recurrence itself is
 unchanged: a guard inside it that returns the iterate of smallest
 residual (C++ on v2/v3, `pyitensor`'s `_bicstab`, `bicgstab.jl`) is a lead
 (`tests/test_bicgstab_residual_check.py`). The check is not cheap: on 20
 sites on v3 it took 122 s next to a solve of 111 s at `maxm=40`, and
-164 s of 272 s at `maxm=60`, since it forms $Ax$ without truncation. A
-cheaper form, $\langle x|A^\dagger A|x\rangle-2\,\mathrm{Re}\langle
-b|A|x\rangle+\langle b|b\rangle$ from an $A^\dagger A$ MPO built at cutoff
-0, was tried on 2026-11-21 and was slower still (not understood, not
+164 s of 272 s at `maxm=60`, since it forms $Ax$ without truncation.
+These times were measured on the density-matrix route before 2026-11-21
+and were not measured again on the exact route. A cheaper form,
+$\langle x|A^\dagger A|x\rangle-2\,\mathrm{Re}\langle
+b|A|x\rangle+\langle b|b\rangle$ from an $A^\dagger A$ MPO built at
+cutoff 0, was tried on 2026-11-21 and was slower still (not understood, not
 committed); a cheaper check is a lead.
 Nothing guarantees convergence for an indefinite $A$. In a seeded run
 (8 sites), shift-invert Arnoldi with a target 0.05 above a triplet warned
@@ -7785,10 +7802,30 @@ The pieces:
   more states at the default p_cut for nothing the default accuracy needs;
   the 1% window dependence it was added for was the homodyne tail below,
   not the relaxation (zooming onto a line moves the DC part by 1.7e-5 on
-  6 spins with one term). Lines further out than the margin are dropped,
-  with their DC tails, 1/(4 WINDOW_MARGIN^2) of a line. The DMRG route
-  raises when its highest state is below `emax`; that guard is only as
-  good as the order in which the excited-state solver finds states.
+  6 spins with one term). On mode="ED" the margin is counted in the
+  power-broadened width of the strongest line, `lineshape.band_margin`:
+  WINDOW_MARGIN sqrt(1 + xi^2)/(pi T2), with xi^2 = (4 pi rabi ||V||)^2
+  T1 T2. This is an estimate, with ||V|| from power iteration on the ED
+  matrix of V. In free-spin widths, a saturated line just above the band
+  leaves (1 + xi^2)/(4 WINDOW_MARGIN^2) of its peak in the window, 5.0e-2
+  at xi = 14 and T = 0. The kept band also follows the drive.
+  `Lines._carrying` estimates which kept states carry population above
+  p_cut, either thermally or through a driven pair, which moves
+  s/(2(1+s)) of its source, s its saturation at the closest frequency of
+  the window. `esrstm._ed_band` then sets emax to h(f_max + band) above
+  the highest of them and rebuilds until it stops rising, one pass per
+  photon. Without it a spin 1 at 50 mK lost the rung |0> to |+1>, 4.3e-2
+  at the default drive and 50% at rabi = 0.05. The DMRG eigenstate route
+  keeps the free-spin band, since more states cost solves. It warns when
+  it keeps less than `BAND_WARN` = 0.5 of band_margin above that state,
+  which is a tail up to 1.1e-3 of a line, or a missing line when negative.
+  It raises when its highest state is below its own `emax`; that guard is
+  only as good as the order in which the excited-state solver finds
+  states. The Krylov routes keep the free-spin band and do not warn. T1
+  and T2 are those of the tip spin: the Korringa scale is divided by
+  `site_weights[site]` when it is positive (`rates.korringa_scale(weight=)`),
+  so only the ratios of the weights matter, and a tip weight of 0 keeps the
+  scale of a site of weight 1.
 - The homodyne part of a line is dispersive, with a 1/detuning tail, so a
   sum over the kept states depends on where `emax` ends: it moved by 1e-2
   (6 spins) to 4e-2 (12 spins) of the DC line when the window was zoomed
@@ -7809,19 +7846,38 @@ The pieces:
   the counter-rotating terms, and experiments subtract a smooth
   background.
 - `submode="KRYLOV"` (`spectrum.ed_krylov_spectrum`, ED only, opt-in)
-  takes as eigenstates only the populated ones, up to kT ln(1/p_cut), and
-  one block Krylov space from V|m> for every populated m, with H
-  diagonalized in the span (the pattern of `krylovkondo.block_krylov`).
+  takes as eigenstates the populated ones and every state below the
+  window, up to max(kT ln(1/p_cut), the window bottom). It adds one block
+  Krylov space from V|m> for every populated m (the pattern of
+  `krylovkondo.block_krylov`), and a closing block Krylov space from
+  S^z_k|n>, S^+_k|n>, S^-_k|n> and V|n> of those states and of the
+  converged final states of the window lines. That closing space starts
+  from the vectors themselves up to `CLOSE_WIDTH` = 128 of them, and from
+  128 random combinations above. It stops when its Ritz states up to emax,
+  and the lowest one above, are converged to `RITZ_TOL` of a free-spin
+  half width, and H is then diagonalized in the span of everything.
+  Without the closing stage a tip moment along the field (H and V
+  conserving Sz_tot) kept only the Sz_tot sector of the populated states:
+  2 of the 4 states of the dimer, and a line -5.0 times the eigenstate one
+  (2026-11-21 hunt, findings 1 to 3). `_ed_guard` then checks the closure.
+  For each final state n of a window line it takes the part of W|n>
+  outside the kept states, where W is one of six witnesses of the Korringa
+  operators (the operators themselves up to two sites, random combinations
+  whose mean |<m|W|n>|^2 is K[m,n] above), and the same part of V|n>.
+  Each part is resolved in energy by six Lanczos steps of H. The guard
+  raises, naming submode=None, when the part below emax takes more than
+  `GUARD_TOL` = 1e-6 of the relaxation rate out of n, or of |V|n>|^2.
   The relaxation needs one common basis: a two-level Bloch line per
   transition, which separate spaces would give, was 46 to 61% of the peak
   off. The final states of the lines in the window (|V_nm|^2 p_m above
   `LINE_TOL` of the strongest, |E_n - E_m| in the window) must have a
   residual below `RITZ_TOL` of a free-spin half width or the call raises;
   the other Ritz states are kept as relaxation partners, which halves the
-  space against asking every state below emax to converge. Measured
-  against the eigsh route: 3.2 times faster on 16 spins at J = 30 GHz,
-  T = 0.05 K (5 to 10 populated states of about 100 kept), but 0.45 times
-  on 16 spins at J = 240 GHz, T = 1.2 K (80% of the kept states
+  space against asking every state below emax to converge. Against the
+  eigsh route, measured before the closing stage: 3.2 times faster on 16
+  spins at J = 30 GHz, T = 0.05 K (5 to 10 populated states of about 100
+  kept), but 0.45 times on 16 spins at J = 240 GHz, T = 1.2 K (80% of the
+  kept states
   populated, each one seeding a block), hence opt-in, not a default
   (picked for the author on 2026-11-21). A full MPS Krylov space does not
   carry over: it needs 3 to 4 vectors per eigenstate it replaces.
@@ -7862,7 +7918,12 @@ The pieces:
   on two MPS sites is refused here (P V|m> would be a projection). On 14
   spins at J = 30 GHz, T = 0.05 K it agrees with ED to 3e-7 of the peak;
   the speed against the eigenstate route is in the plan's Krylov
-  section.
+  section. There is no closing stage on DMRG: seeding the tangent-space
+  Krylov space with S^a_k|n> needs a start block of 3 vectors per site and
+  final state, each with a store of nkry steps. `_mps_guard` runs the same
+  check with MPS when H conserves a charge of the site types that S^+_k
+  changes (`_sector_blocked`, Sz on a spin chain), where whole sectors of
+  partners are out of reach of the tangent spaces.
 - `esrtk/rates.py`: the Korringa rates, their scale from `T1` (a free spin
   1/2 at `f_ref`), the pure dephasing from `T2`, and the
   resolvent G of the relaxation. G is block diagonal over the blocks the

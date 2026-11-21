@@ -126,18 +126,33 @@ pybind` has rebuilt the `.so` and the test ran against the rebuilt one.
   duplicates made wrong (2026-09-25b finding 28). A new MPO built from an
   AutoMPO, or a new `dmrg()` call, should go through the same two, or it
   reintroduces the small-units failure (2026-09-25 record, item 2). A
-  hierarchy inside H, a bond whose strongest term is far below the largest
-  coefficient, is covered by `to_mpo_unit()` too since 2026-11-14:
-  `bond_cutoff_args()` lowers svdMPO's absolute `Cutoff` by m^2, m the
-  strongest coefficient crossing the weakest bond over the largest one
-  (terms merged by operator string), floored at (1e-14)^2, and returns
-  the caller's `Args` untouched when m = 1. Every MPO without such a bond
-  is the same to the bit (v3 site arrays of Heisenberg, XX, dimerized,
-  J1-J2, 1/r^2 and Hubbard chains, compared before and after the rebuild);
-  the offset, field and weak-link cases and the 30-site Wilson chain keep
-  their channels. Do NOT edit the vendored svdMPO for this, and do NOT
-  pass a smaller `Cutoff` to every build: a blanket cutoff stops the
-  compression of long-range MPOs whose singular values decay smoothly.
+  hierarchy inside H is covered by `to_mpo_unit()` too.
+  `bond_cutoff_args()` lowers svdMPO's absolute `Cutoff` by m^2, floored
+  at (1e-14)^2, with the terms merged by operator string. m is the smaller
+  of two ratios to the largest coefficient. The first is the strongest
+  coefficient crossing the weakest bond (2026-11-14), which keeps the
+  channels of the offset, field and weak-link cases and of the 30-site
+  Wilson chain. The second is the weakest multi-site coefficient strictly
+  between 1e-14 and `WEAK_TERM_TAU` = 1e-5, whatever else crosses its
+  bonds (2026-11-21 audit, finding 18: a weak link in a ring, a small XY
+  part on an Ising chain, a chain jumped by a strong term). A term crosses
+  the bonds from `bond_span_start()` to its last site.
+  `bond_span_start()` is its leftmost site that is not Jordan-Wigner
+  strings cancelling in pairs (F, Fup, Fdn, each an even number of times),
+  so the paired strings of native spinful sites no longer count (finding
+  19). A parity-odd term keeps its string. With m = 1 the caller's `Args`
+  come back untouched. The v3 site arrays of the eight reference chains
+  of `tests/test_audit_2026_11_21_mpo_cutoff.py` (Heisenberg, XX,
+  dimerized, J1-J2, 1/r^2, Hubbard, native Hubbard and an NRG head) are
+  the same to the bit before and after the 2026-11-21 rebuild; on v2 this
+  holds by reading only. The window is a rule per term, not a blanket
+  cutoff, but it reaches long power-law tails. On v3, where the realified
+  S+S- carries J/2, a 1/r^2 chain enters it from 225 sites and a 1/r^3
+  chain from 38. On v2 and `"python"` they enter from 318 and 48 sites.
+  These sizes are by reading. Do NOT edit the vendored svdMPO for this,
+  and do NOT pass a smaller `Cutoff` to every build: a blanket cutoff
+  stops the compression of long-range MPOs whose singular values decay
+  smoothly.
   Davidson's absolute 1e-10 is still below it; the ground-state tests at
   s = 1e-7 next to an O(1) term pass at their tolerance anyway.
 - **NH-DMRG is not a `dmrg()` call.** It is unit-scaled once, at the Python

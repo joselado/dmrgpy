@@ -175,8 +175,12 @@ the [Correlators and distributions](correlators.md) page. The keywords are:
 
 - `T`: temperature of `get_correlation_matrix` (default 0). Finite $T$ is
   computed with exact eigenstates, for small chains.
+- `operators`: a list of operators $X_a$, to compute
+  $\langle X_a^\dagger X_b\rangle$ instead, for a subsystem or a rotated
+  basis (default the chain's own `C`).
 - `dmmode`: how $C_{ij}$ is computed (`"fast"`, `"full"`, `"explicit"`,
-  `"simple"`). The default chooses the fastest one for the state.
+  `"simple"`). The default chooses the fastest one for the state and the
+  operators. `"full"` computes the matrix of the chain's own `C` only.
   `"explicit"` works on every backend.
 
 ![Natural orbitals of the Hubbard chain](img/entanglement_natural_orbitals.png#only-light)

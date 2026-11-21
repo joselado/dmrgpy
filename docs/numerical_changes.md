@@ -2060,9 +2060,11 @@ models and the 10-site PT-symmetric XX chain). The stored right and left
 states are now Ritz vectors: on a degenerate eigenvalue they can be a
 different vector of the same eigenspace, and where several levels share
 the smallest real part, the member that comes back can differ from
-NH-DMRG's. The level of smallest real part is taken as it comes, the
-smallest real part of the accepted Ritz values. `nh_gs_method="nhdmrg"`
-gives the NH-DMRG route of before.
+NH-DMRG's. At first the smallest real part of the accepted Ritz values
+was taken. From `ef9a885` the best converged accepted pair within
+$10^{-4}(c+|E-e_{\rm id}|)$ of it was taken, and that could be another
+level; see the non-Hermitian entry of "The 2026-11-21 hole hunt" below.
+`nh_gs_method="nhdmrg"` gives the NH-DMRG route of before.
 
 
 ## The 2026-11-18 tip vertex on a chain with several baths
@@ -2158,3 +2160,327 @@ Heisenberg spins at J = 240 GHz and 1.2 K, with 29 and 45 states instead
 of 56 and 100, and $9\times10^{-6}$ on 12 spins at J = 30 GHz and 50 mK,
 with 56 states instead of 73; with $10^{-8}$ it was about $10^{-7}$. A
 call that wants the old numbers passes `p_cut=1e-8`.
+
+## The 2026-11-21 hole hunt
+
+`docs/audit_2026_11_21_hole_hunt.md` has the evidence. Its 22 findings
+were fixed on 2026-11-21. Most of the fixes move numbers, and in each case
+the old number was wrong. Others raise where a wrong number came back, and
+a few answer where the call raised. The entries follow the order of the
+findings.
+
+- `get_esr_spectrum(mode="ED", submode="KRYLOV")` (findings 1, 2 and the
+  KRYLOV half of 3). The basis now holds every eigenstate below the
+  window, and the states that $S^a_k|n\rangle$ and $V|n\rangle$ reach from
+  them and from the final states of the window lines. The old values,
+  measured in the record:
+  - The dimer of finding 1 (J = 30 GHz, B = 5 GHz, tip field 3 GHz along
+    z, T = 0.03 K, `tip=[0,0,1]`): a DC peak of 5.793588e-05 at
+    30.149627 GHz, against -1.159115e-05 for the eigenstate route. At zero
+    tip field it was exactly 0, against -4.744056e-05.
+  - The 4-spin chain of finding 1: 5.53 of the peak off in its windows W1
+    and W2.
+  - 4 spins with a tilted tip at B = 8, 8.5 and 9 GHz: 1.6e-2, 2.1e-2 and
+    2.7e-2 of the peak off.
+  - The saturated spin 1 at `rabi=5e-3` and 50 mK, with a window that
+    keeps |+1>: 0.2375 against 0.3704. The reviewer read this one off the
+    code; it was not run on the Krylov route.
+
+  The tests of the fix measure the route equal to `submode=None` to 1e-8
+  of the peak on the dimer at both tip fields, on the tilted chain at
+  B = 8.5 GHz, and on the saturated spin 1 at T = 0 and 50 mK, with the
+  two rungs equal or 10 MHz apart. The 4-spin chain of finding 1 on ED and
+  the tilted chain at 8 and 9 GHz were not measured after the fix. The
+  chain of `tests/test_esr_stm.py`, which has a transverse tip field,
+  stays within the 1e-8 of the eigenstate route that its test asked before.
+- `get_esr_spectrum(mode="DMRG", submode="KRYLOV")`: a call that answers
+  returns the same numbers. When H conserves a charge that $S^+_k$ changes
+  (Sz on a spin chain), the call now raises, naming `submode=None`, where
+  the basis misses a relaxation partner below `emax`. Before, these calls
+  came back wrong without a warning: the dimer about 1.2e-4 of the peak
+  off (the record measured this cut on ED; the 2-site DMRG run was not
+  made), and the 4-spin chain of finding 1 1.28e-4 off in W1 and 5.53 in
+  W2.
+- `get_esr_spectrum(mode="ED")` at low T under a drive (finding 3): the
+  state a second photon reaches is now kept. The chain is a spin 1 with
+  H = h F0 Sz, F0 = 20 GHz, the tip at 0.7 rad from the field,
+  T1 = 100 ns, T2 = 50 ns, `f_ref=20` and the window 19.9 to 20.1 GHz,
+  read at 20.000 GHz, at T = 0 and 50 mK. Old and new values:
+  - `rabi=1e-4`: 2.504623e-04 to 2.505795e-04.
+  - `rabi=5e-3`: 2.374778e-01 to 3.703562e-01.
+  - `rabi=0.05`: 3.801012e-01 to 7.574350e-01.
+  - `rabi=1e-3` (the default, 50 mK): up by 4.3e-2 of its value.
+  - `rabi=2e-3`: up by 1.4e-1.
+  - With h d Sz^2, d = 5 MHz, and `rabi=5e-3`: 2.375093e-01 to
+    2.845573e-01 at 19.995 GHz, 1.485821e-01 to 2.112560e-01 at 20.000
+    and 6.997870e-02 to 1.176617e-01 at 20.005.
+
+  The new values are the record's reference, a window that keeps all
+  three levels. At `rabi=1e-3` and 0.05, at T = 0 and 50 mK, the tests
+  measure the new result equal to that window to 1e-12 of the peak and to
+  a three-level rate equation to 1e-8, and `method="floquet"` equal to its
+  own three-level window to 1e-10. The other rows were not measured after
+  the fix. At 0.2 K nothing moves. `method="floquet"` moves the same way,
+  since it reads the same kept states, and `return_poles` lists the new
+  pairs. Any ED call below about 70 mK at 20 GHz whose lines populate an
+  upper state above `p_cut` can move like this.
+- `get_esr_spectrum(mode="ED")`, the band above the window (finding 4): the
+  band now counts power-broadened widths. On one spin 1/2 at 20 GHz with
+  T1 = 100, T2 = 50, `rabi=0.05` (xi = 14.3), T = 0 and the window 19.70
+  to 19.80 GHz, the DC part at 19.80 GHz went from 0 to 1.885591e-02
+  (4.96e-2 of the peak), and with `vrf_over_vdc=0.3` from 0 to
+  1.145991e-02. The tests measure that window equal to the Bloch line to
+  1e-10 of its peak, with and without the homodyne part. With the line put
+  2 MHz above the old band, the record's Bloch reference gives 0 to
+  3.401346e-03 at 1 mK (8.9e-3 of the peak), to 2.975927e-04 at 5 mK
+  (7.8e-4), to 2.241122e-05 at 20 mK (5.9e-5), and to 1.344845e-03
+  (3.5e-3) at T2 = 2 ns, `rabi=0.25` and 50 mK; these were not measured
+  after the fix. At weak drive the band grows by a factor
+  sqrt(1 + xi_est^2), 1 + 4e-5 at `rabi=1e-4` and T2 = 2 ns, and a number
+  moves only when a state lies in that sliver.
+- `get_esr_spectrum` on every route with `site_weights[site]` not 1
+  (finding 5): T1 and T2 are now those of the tip spin.
+  - One spin 1/2 at 20 GHz, T = 1.2 K, T1 = 100, T2 = 50, `rabi=5e-3`,
+    `site_weights=[0.5]`: width 5.5704 to 6.3662 MHz, peak 1.197078e-01
+    to 9.761624e-02.
+  - The same spin with `[2.0]`: width 7.9577 to 6.3662 MHz, peak
+    6.542108e-02 to 9.761624e-02.
+  - The dimer of the guide (J = 15, B = 25, tip field 4 GHz, T = 1.2 K,
+    `rabi=1e-3`, `f_ref=25`) with `[0.5, 0.5]`: widths [6.1149 6.5362
+    6.8941 6.9847 7.406] MHz to the default's [7.4552 8.2977 9.0136
+    9.1948 10.0373], peak 4.202449e-03 to 1.909163e-03.
+
+  On the free spin with both weights the tests measure the weak-drive
+  width 1/(pi T2) to 1e-12, and the line at `rabi=5e-3` equal to the Bloch
+  line of the T1 and T2 passed to 1e-10 of its peak; the dimer with
+  `[0.5, 0.5]` equals the default to 1e-12. An old result comes back with
+  T1/w and T2', 1/T2' = 1/T2 - 1/(2 T1) + w/(2 T1), where
+  w = `site_weights[site]`. Calls with w = 1 or w = 0 do not move. The
+  DMRG eigenstate route and both `submode="KRYLOV"` routes move through
+  this finding only. The DMRG eigenstate route has a new RuntimeWarning,
+  "... can take part under this drive ...", when the drive needs more
+  states than it keeps.
+- `metts_vev` on `julia_live` and `metts_dynamical_correlator` on every
+  backend now raise `ValueError` for a collapse basis frozen in one charge
+  sector (finding 6). Before, `("Sz",)` on a 4-site Heisenberg chain at
+  T=0.5 gave <Sztot^2> = 1, 4 and 0 by seed on `julia_live`, for an exact
+  0.370. C(0) = <(3+Sztot)^2> came out 16, 4, 4 on `"python"`, 16, 1 on
+  `julia_live` and 25, 1, 9 on v3, for an exact 9.370.
+- A non-Hermitian basis name (S+, S-) now raises on every backend and in
+  both METTS calls. Before, `julia_live` froze at <Sztot^2> = 4 with
+  `("S-",)`. The `"python"` dynamical correlator froze with `("S+",)` and
+  gave 9.54 for 9.37 with `("S-",)`.
+- Where the guard ran before, `metts_vev` on `"python"` and v3, it now
+  also raises in four more cases (finding 7):
+  - A single non-diagonal name whose sum H conserves: `("Sx",)` on the
+    isotropic Heisenberg chain gave <Sxtot^2> = 1 on `"python"` and 4, 4,
+    0 on v3, for 0.370.
+  - A spin-1/2 parity: `("Sx",)` on the Ising chain with its field along
+    x gave <Px> = -1 on `"python"` and +1 on v3, for 0.038.
+  - The fermion parity: `("N",)` on a 4-site Kitaev chain gave
+    <(-1)^N> = -1 on `"python"` and +1 on v3, for 0.043.
+  - The aliases n, projOcc, projEmp and FermiPhase of N on a
+    number-conserving chain: <Ntot> = 3, 1, 1 on `"python"` and 4, 0, 2 on
+    v3, for 1.854.
+- METTS on a chain of fermion sites (spinless, `Spinful_Fermionic_Chain`
+  or `Spinful_Fermionic_Chain_Native`) with a parity-even H now always
+  raises, by the author's pick: through the charge Nf when H conserves N,
+  and through the fermion parity when it does not. Such a model is sampled
+  as a spin chain through the Jordan-Wigner transformation. Unchanged: the
+  default basis `("Sz","Sx")` on spin chains draws no witness, so its
+  seeded results are the same.
+- `get_correlation_matrix(operators=X)` in a conserved sector with the
+  default `dmmode`, on `"python"`, v3 and `julia_live` (findings 8 and 9),
+  and every reader that passes `operators=` on: `get_correlation_eigenvalues`,
+  `get_correlation_entropy`, `get_correlated_orbitals`,
+  `get_correlated_density` and `get_correlation_entropy_density`. Before,
+  the answer was the matrix of the chain's own C, whatever X was. Now it is
+  $\langle X_a^\dagger X_b\rangle$ of the operators passed, by
+  `dmmode="explicit"`.
+  - The 4-site hopping chain at Nf=2 of the record, with a Hadamard
+    rotation of modes 0 and 1: entry [0,0] was 0.401066 and is 0.907759.
+    The largest entry change is 0.507.
+  - The 6-site interacting chain at Nf=3: the reversed list changes by
+    0.123 and the momentum basis by 0.541.
+  - `operators=fc.C[:2]` returns a (2, 2) matrix, not the (n, n) one.
+  - The correlation entropy of `operators=fc.C[:3]` on the 6-site free
+    chain at Nf=3 was 0.000000 and is 0.720480 (ED 0.720480).
+  - A call whose operators are exactly the chain's own C, in order, is
+    unchanged.
+- An explicit `dmmode="full"` with `operators=` that are not the chain's
+  own C, in a sector or outside one, now raises `ValueError` naming
+  `dmmode="explicit"`, before the ground state is solved. Before, it
+  returned the matrix of the chain's own C (0.507 off on the 4-site chain
+  above).
+- Two raises became answers, both by `"explicit"` on `"python"` and v3.
+  `get_correlation_matrix()` and `get_correlation_entropy()` with no
+  keywords on `Spinful_Fermionic_Chain_Native` in an Nf sector: on the
+  record's 4-site Hubbard chain at Nf=4 they agreed with ED to 3e-12 on
+  `"python"` and 3e-11 on v3. A `Spin_Chain` in an Sz sector with
+  `operators=[Sz_i]`: 1.5e-13 and 7.5e-14 from ED on the 6-site XXZ chain
+  at Sz=0.
+- No sector: a call whose `operators=` are exactly the chain's own C, in
+  order, now takes the one-sweep `"full"` instead of `"fast"`, on
+  `"python"`, v3 and `julia_live`. The matrix is the same up to the
+  truncation of the operator applications that `"fast"` makes. Every other
+  call without a sector takes the same route as before.
+- `Thermal_Spin_Chain.get_gs()` (finding 10) now purifies again whenever
+  T, `anneal_step`, `anneal_order`, `anneal_method`, `anneal_options` (an
+  edit of the dict in place included), `mode`, the backend of `MBChain` or
+  a solver setting of `MBChain` (`maxm`, `nsweeps`, `cutoff`, `noise`,
+  `mpomaxm`, the bond ramp, the sector, `dmrg_method`) changed after the
+  previous solve. Before, it returned the first state at every later call,
+  so a temperature sweep on one object gave the first temperature's state
+  at every T: on the 3-site Heisenberg chain, -0.206813 at T=0.2 after a
+  solve at T=2.0, against the exact -0.991668, on `mode="ED"` and on
+  `"python"`. It now gives -0.991668, the value of a fresh object, which
+  the tests measure to 1e-6 on both. An invalid T, `anneal_method` or
+  `anneal_options` set after a solve now raises `ValueError`, as on a fresh
+  object; before, it returned the old state. A caller who builds one
+  object per temperature, or who changes nothing between two calls, gets
+  the same numbers as before.
+- On a non-Hermitian Hamiltonian, `gs_energy()`, `get_gs()` and `vev()`
+  now return the eigenvalue of smallest real part, and Im only breaks a
+  tie (findings 11 to 13). This holds on the imaginary-time route of v3
+  and `"python"` (`nh_gs_method="imaginary_time"`, the default) and on
+  `mode="ED"`. Before, the imaginary-time route took the best converged
+  Ritz pair within $10^{-4}(c+|E-e_{\rm id}|)$ of the smallest real part,
+  and ED sorted by $\mathrm{Re}\,E+10^{-3}\,\mathrm{Im}\,E$. Both could
+  return a level of higher real part when it lay close to the lowest one.
+  - The 6-site PT-symmetric XX chain with $0.3i(-1)^iS^z_i$ and a field
+    $5\times10^{-5}S^z_{\rm tot}$. Its lowest level is $-1.39617641$, with
+    $\langle S^z_{\rm tot}\rangle=-1$. The imaginary-time route returned
+    $-1.39612641\pm0.20120744i$ or $-1.39607641$ in 3 of 4 seeded runs on
+    `"python"` and in 3 of 3 runs on v3, and ED returned
+    $-1.39612641-0.20120744i$. The tests now measure the lowest level on
+    `"python"` and v3, three seeds each.
+  - A 4-spin decoupled impurity, $-\sum_{i\geq1}S^z_i+(10^{-4}-0.5i)S^z_0$:
+    ED returned $-1.49995-0.25i$ with $\langle S^z_0\rangle=+0.5$, and the
+    lowest level is $-1.50005+0.25i$ with $-0.5$.
+
+  Only a narrow band of cases moves. On ED, the level returned before had
+  a real part above the minimum by less than $10^{-3}$ times its lower Im;
+  on the imaginary-time route, by less than $10^{-4}(c+|E-e_{\rm id}|)$.
+  Every other result is the same. The non-Hermitian DMRG excited states
+  are sorted the same way. `algebra.biorthogonal_ground_state` and the ED
+  NH-KPM correlator (`get_dynamical_correlator(mode="ED")`, default
+  submode) raised when a complex-conjugate pair shares the smallest real
+  part, and they now answer. On a degenerate ground level the left state
+  is now the one of largest overlap with the right state, so the
+  correlator there can differ from before.
+- `get_kondo_spectrum(mode="ED", submode="KRYLOV", tol=...)` (finding 14).
+  The residual stop now waits for every Ritz state whose energy minus its
+  residual reaches the window of open final states. A call where the old
+  stop fired before a final state of the window had a Ritz value there now
+  gives a different curve, the one of the default call. The 12-spin
+  ferromagnetic chain (J = -1 meV, B = 0.1 meV along z, tip on site 0,
+  T = 0, `nkry=100`, `tol=1e-8`, max|eV| = 0.105 meV) was 0.143 (order 2)
+  and 0.144 (order 3) of the peak below the default call, and the tests
+  now measure it equal to the default call to 1e-10 of the peak at both
+  orders. At order 2 the missing part was the k=0 magnon step,
+  2pi/24 = 0.262. The record measured 0.143 for every max|eV| from B to
+  B + 0.0112 meV, at 2 mK as at T = 0. On the 8-spin AF test chain the old
+  stop lost 0.64 of the peak, but only in a band of 2e-6 of max|eV| at
+  0.31282 meV. A call without `tol=` does not change.
+- `get_kondo_spectrum(mode="ED", submode="KRYLOV")` when H conserves
+  S^z_tot (finding 15). The initial state and its starts are put exactly
+  on their S^z_tot sectors, so the Krylov space stops at the reachable
+  sectors: 13 states instead of 301 on the polarized 12-spin chain. dI/dV
+  moves at roundoff (1.0e-15 of the peak in the record's comparison). On a
+  space truncated by `nkry` the change of basis can move numbers by more
+  than that, as any change at roundoff does there (6.7e-12 on 12 spins for
+  a reordering of the starts, rule (1) of the Krylov route in
+  `.claude/rules/kondo.md`).
+- `mpsalgebra.check_bicgstab`, the residual check of every BiCGSTAB solve
+  of `applyinverse` on DMRG (findings 16 and 17), now forms $Ax$ and
+  $Ax-b$ with nothing truncated and reads the norm off the orthogonality
+  centre. This holds on `"python"`, on `itensor_version=3` without a
+  conserved sector, and on `"julia_live"`. Before, it took the
+  density-matrix apply and sum of the sessions, whose floor is set by
+  $\lVert A\rVert\lVert x\rVert$. On 8 sites next to a level, with
+  $\lVert x\rVert/\lVert b\rVert=9\times10^{7}$, it read 1.0 on `"python"`
+  and 0.54 on v3 for a true residual of $1.4\times10^{-7}$ and
+  $2.4\times10^{-7}$. A converged v3 solve at `delta=1e-4` and a shift of
+  $10^{-6}$ warned at $2.6\times10^{-3}$, for a residual of
+  $1.2\times10^{-4}$. No solve changes. The value of the check changes,
+  and with it which calls warn: a converged solve close to a level no
+  longer warns. v2, and v3 in a sector, keep the old route. The change on
+  `julia_live` was not measured.
+- Every MPO built from terms on v2, v3 and `"python"` now also lowers the
+  cutoff of the build by the square of its weakest multi-site coefficient
+  below $10^{-5}$ of the largest one, whatever else crosses its bonds
+  (findings 18 and 19). The span of a term is now read after the
+  Jordan-Wigner strings that cancel in pairs (`mo_terms.h`'s
+  `bond_cutoff_factor`, `pyitensor/mpobuilder.py`'s `_bond_cutoff_factor`).
+  An operator with no such term and no such string is built exactly as
+  before. The eight reference chains of
+  `tests/test_audit_2026_11_21_mpo_cutoff.py` (Heisenberg, XX, dimerized,
+  $J_1$-$J_2$, $1/r^2$, Hubbard, native Hubbard and an NRG head of 12
+  Wilson sites) build the same MPO to the bit: on `"python"` by the test,
+  which finds their factor unchanged, on v3 by their site arrays compared
+  before and after the rebuild, and on v2 by reading only.
+
+  Before, as measured in the record (6 S=1/2 sites at $s=10^{-7}$ unless
+  said otherwise):
+  - A weak link in a ring, the same link next to a strong $S^z_0S^z_5$,
+    and an Ising chain plus $s(XX+YY)$ read 0 of the weak part on v2, v3
+    and `"python"`.
+  - The ground-state energy of the ring with one weak link was $0.1405\,s$
+    above ED.
+  - A geometric chain jumped by a strong $S_0\cdot S_{11}$ lost its bonds
+    of $10^{-7}$ and $10^{-8}$.
+  - The YSR chain on a metal lost its Wilson hoppings of $10^{-8}$ and
+    below in the `"comb"` layout and in the `"sides"` layout with a left
+    contact. On v3 it kept 0.25 of the $10^{-8}$ hopping. A Wilson chain
+    reaches that depth from about 27 sites at $\Lambda=4$.
+
+  After the fix, the linearity probes of these cases read 1 within
+  $10^{-2}$ in the new tests on `"python"`, v2 and v3; the ground-state
+  energy of the ring was not measured again. Three classes of MPO change
+  without a change of the physics:
+  - Every `"sides"` layout, the default for several contacts, now builds
+    at a lower cutoff, also for short Wilson chains. The size of that
+    change was not measured.
+  - So does any native spinful operator whose fermionic terms near the
+    left end are stronger than its weakest bond. This was not measured
+    either; the uniform native Hubbard chain above does not move.
+  - Long power-law tails enter the window, and their MPO is expected to
+    grow (not measured). By reading, on v3, where the realified $S^+S^-$
+    carries $J/2$, a $1/r^2$ chain enters from 225 sites and a $1/r^3$
+    chain from 38. On v2 and `"python"` they enter from 318 and 48 sites.
+
+  By reading, Wilson heads in the linear order do not move at any length,
+  since their weakest multi-site term is their deepest bond.
+- `nhlevels.py` now combines its Ritz vectors with
+  `sum_mps_weighted(method="exact")`, the direct sum truncated once, on
+  `"python"` and v3 (findings 20 and 21). Before, it took the
+  density-matrix sum on `"python"` and ITensor's tree of truncated pairwise
+  sums on v3. So the vectors of `get_nh_levels(vectors=True)` and the
+  state of the default non-Hermitian `gs_energy()` on DMRG move. Before
+  the fix, on the 10-site PT-symmetric XX chain, one v3 level with
+  sum|c| = 117 was 1.35e-5 off its own Ritz combination, and the
+  `"python"` vectors agreed between the two sums to 1e-6. The values after
+  the fix were not measured. The default of `sum_mps_weighted` is
+  unchanged on both backends, so the ESR-STM Krylov route does not move.
+- `nrgmps.max_sites` no longer reads the band D (finding 22). The default
+  tail of `ysr.get_stm_spectrum(submode="NRG")` (`head="dmrg"` and
+  `head="exact"`) is now min(N_MAX, 2 ln(1/OMEGA_MIN)/ln Lambda) sites at
+  every D, 99 at Lambda = 4. At D = 1 nothing changes, to the bit, for
+  every Lambda. At any other D the default tail length changes: at
+  Lambda = 4 it was 109 sites at D = 1e3, 116 at D = 1e5 and 120 at
+  D = 1e8 (the record), and 89 at D = 1e-3 (computed from the old
+  formula), and it is now 99 at all of them. A result moves only when its
+  NRG run reached the end of the tail (`stop = "chain"`, no fixed point
+  before it); a run that stops at its fixed point is the same as before.
+  Before the fix, on 3 spins with the metal under the middle spin
+  (`head="exact"`, keep 256), the default tail moved the curve by 7.3e-3 of
+  its peak at D = 1e5 and by 9.2e-2 at D = 1e8, against a tail of 113
+  clean sites. After the fix the tests measure the exact head at D = 1e5
+  and 1e8 to be the D = 1 calculation with every energy times D, to 1e-5
+  of the peak of A; the move against the old curves was not measured. With
+  `head="dmrg"`, a correct hand-over raised `ValueError` in `_check_prefix`
+  from D of about 1e4 on, after the DMRG solve of the head; it now runs.
+  The check is now 1e-12 of the largest hopping of the head, so at D = 1
+  it is about 2 times tighter than the old absolute 1e-12 (largest hopping
+  about 0.58 at Lambda = 4); two chains of one mesh agree to about
+  1e-16 D.
