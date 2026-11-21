@@ -4333,10 +4333,22 @@ one MPO application next to the two of every iteration), warns above
 `BICGSTAB_WARN` = 10 times the requested `delta`, and raises above
 `BICGSTAB_RAISE` = 1, where $x$ is worse than $x=0$ (picked for the
 author). A converged solve measured
-$1.1\times10^{-5}$ at `delta` = $10^{-5}$. The recurrence itself is
-unchanged: a guard inside it that returns the iterate of smallest
-residual (C++ on v2/v3, `pyitensor`'s `_bicstab`, `bicgstab.jl`) is a lead
-(`tests/test_bicgstab_residual_check.py`). The check is not cheap: on 20
+$1.1\times10^{-5}$ at `delta` = $10^{-5}$. On `"python"` and, since
+2026-11-21, on v3 without a conserved sector the recurrence forms every
+product and every sum exactly and truncates once (`_bicstab`,
+`Chain::bicstab` with `exact_apply_truncated` and `exact_sum_truncated`;
+v3 in a sector keeps the old body as `bicstab_truncating`). Next to a level
+with every state held this reaches a tolerance the density-matrix routes
+could not: on 8 sites at a shift of $10^{-8}$ and `delta` = $10^{-5}$, v3
+converges to $6.9\times10^{-6}$ in 0.3 s, where the old recurrence stopped
+at 0.62 after 2.5 s. Where `maxm` limits the solve it is 2 to 4 times
+slower and no better, and the cases above diverge as before (20 sites at
+`maxm=40`: 2258 s against 539 s, both raised by the check), so the
+divergence does not come from the route of the apply. A guard inside the
+recurrence that returns the iterate of smallest residual (C++ on v2/v3,
+`pyitensor`'s `_bicstab`, `bicgstab.jl`) is a lead
+(`tests/test_bicgstab_residual_check.py`,
+`tests/test_audit_2026_11_21_exact-arith.py`). The check is not cheap: on 20
 sites on v3 it took 122 s next to a solve of 111 s at `maxm=40`, and
 164 s of 272 s at `maxm=60`, since it forms $Ax$ without truncation.
 These times were measured on the density-matrix route before 2026-11-21

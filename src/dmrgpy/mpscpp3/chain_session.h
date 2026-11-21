@@ -13532,8 +13532,73 @@ class Chain
         return out;
         }
 
+    // K x formed exactly (exact_apply_mpo), made canonical with nothing
+    // truncated and truncated once by the sweep of position(N) at args,
+    // as sum_mps_weighted(method="exact") does for a sum. The density-
+    // matrix applyMPO has a floor of order 1e-8 ||K|| ||x||, which next to
+    // a level (||x|| >> ||b||) is far above the residual a BiCGSTAB step
+    // forms (2.58e-3 for a true 1.19e-4 on 8 sites, 2026-11-21 audit,
+    // finding 17). Dense indices only.
+    MPS
+    exact_apply_truncated(MPO const& K, MPS const& x, Args const& args) const
+        {
+        auto out = exact_sum_right_canonical({exact_apply_mpo(K,x)});
+        int N = length(out);
+        if (N>1) out.position(N,args);
+        return out;
+        }
+
+    // a + b as one direct sum, truncated once (see exact_apply_truncated):
+    // ITensor's sum() truncates relative to the partial sum by
+    // orthogonalize(), and the residuals of BiCGSTAB are differences that
+    // cancel. Dense indices only.
+    MPS
+    exact_sum_truncated(MPS const& a, MPS const& b, Args const& args) const
+        {
+        auto out = exact_sum_right_canonical({a,b});
+        int N = length(out);
+        if (N>1) out.position(N,args);
+        return out;
+        }
+
+    // BiCGSTAB for A x = b. Without a conserved sector every product and
+    // every sum is formed exactly and truncated once, as "python"'s
+    // _bicstab does (17017a9, the author's pick of 2026-11-21 for v3); in
+    // a sector the exact helpers cannot place QN blocks, so the recurrence
+    // keeps ITensor's density-matrix applyMPO and pairwise sum().
     MPS
     bicstab(MPO const& A, MPS const& b, double tol, int max_it, Args const& args) const
+        {
+        if (has_sector_) return bicstab_truncating(A,b,tol,max_it,args);
+        MPS x = b;
+        MPS r_old = exact_sum_truncated(b,(-1.0)*exact_apply_truncated(A,x,args),args);
+        MPS r_ = r_old;
+        MPS p = r_old;
+        MPS s, Ap, As, r_new;
+        Cplx alpha, beta, w;
+        int k = 0;
+        while (k<max_it)
+            {
+            Ap = exact_apply_truncated(A,p,args);
+            alpha = innerC(conjugate(r_old),r_) / innerC(conjugate(Ap),r_);
+            s = exact_sum_truncated(r_old,(-alpha)*Ap,args);
+            As = exact_apply_truncated(A,s,args);
+            w = innerC(conjugate(As),s) / innerC(conjugate(As),As);
+            x = exact_sum_truncated(x,exact_sum_truncated(alpha*p,w*s,args),args);
+            r_new = exact_sum_truncated(s,(-w)*As,args);
+            double res = std::sqrt(std::abs(innerC(conjugate(r_new),r_new).real()));
+            if (res<=tol) break;
+            beta = (alpha/w) * innerC(conjugate(r_new),r_) / innerC(conjugate(r_old),r_);
+            p = exact_sum_truncated(r_new,beta*exact_sum_truncated(p,(-w)*Ap,args),args);
+            r_old = r_new;
+            k++;
+            }
+        return x;
+        }
+
+    // the recurrence before 2026-11-21, kept for a conserved sector
+    MPS
+    bicstab_truncating(MPO const& A, MPS const& b, double tol, int max_it, Args const& args) const
         {
         MPS x = b;
         MPS r_old = sum(b,(-1.0)*apply_mpo(A,x,args),args);

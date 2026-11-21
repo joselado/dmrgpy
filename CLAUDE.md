@@ -595,7 +595,12 @@ Do not undo one without reading its finding first.
   to 2e6 times. A sum whose coefficients cancel passes
   `sum_mps_weighted(method="exact")`, as `nhlevels._combine` does; do NOT
   make it the default, the ESR Krylov route sums hundreds of states
-  (`test_audit_2026_11_21_exact-arith.py`).
+  (`test_audit_2026_11_21_exact-arith.py`). The recurrence itself applies
+  and sums exactly, truncating once per step, on `"python"` and on v3
+  without a sector (the author's pick for v3): next to a level it converges
+  where the density-matrix routes stopped at 0.62, and where `maxm` limits
+  the solve it costs 2 to 4 times more and diverges in the same cases, so
+  the divergence is not from the route of the apply.
 - **NH-DMRG sweeps the transposed left state.** Inside every v2, v3 and
   `"python"` sweep the left state is ITensorNHDMRG.jl's own,
   H^T|wl> = E|wl>, solved against the conjugate of the adjoint MPO and
@@ -687,8 +692,9 @@ DMRG guard runs only when H conserves a charge that S^+_k changes; the
 ESR Krylov routes keep the free-spin band and neither grow nor warn; the
 `julia_live` side of the exact BiCGSTAB check was not measured; the cost
 of the exact check and of the ESR closing stage at real size was not
-measured; and whether v3's `bicstab` recurrence should take the exact
-apply is the author's pick.
+measured; and v3's exact `bicstab` recurrence costs 2 to 4 times more
+where `maxm` limits the solve, with the divergence under truncation still
+open.
 
 ## Architecture
 

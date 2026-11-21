@@ -288,6 +288,21 @@ pybind` has rebuilt the `.so` and the test ran against the rebuilt one.
   any other operator (see `mult_mpo()`'s comment, and ITensor v3's own
   `unittest/mpo_test.cc` "nmultMPO" section, which documents exactly this
   usage).
+- **`Chain::bicstab` applies and sums exactly** without a conserved
+  sector (2026-11-21, the author's pick): `exact_apply_truncated` and
+  `exact_sum_truncated` form the product or the direct sum with nothing
+  truncated (`exact_apply_mpo`, `exact_sum_right_canonical`) and truncate
+  once by `position(N,args)`, as `"python"`'s `_bicstab` does. The
+  density-matrix `applyMPO` and the pairwise `sum()` have a floor of order
+  1e-8 ||A|| ||x||, so next to a level the old recurrence stopped at 0.62
+  where this one converges (`test_v3_bicgstab_recurrence_converges_next_to_a_level`).
+  The exact helpers are dense only, so a sector keeps the old body,
+  `bicstab_truncating`. Where `maxm` limits the solve it costs 2 to 4
+  times more and diverges in the same cases as the old one, so the
+  divergence under truncation is not from the route of the apply; going
+  back to the old routes only brings the floor back.
+  `cvm_dynamical_correlator` (v3 `submode="CVM"`) takes the same
+  recurrence.
 - **Plain `inner()` throws on complex MPS/MPO** ("Cannot use inner(...) with
   complex MPS/MPO, use innerC(...) instead"), unlike v2's `overlap()` (which
   just silently returns the real part regardless). Since `MOTerm::coef` is

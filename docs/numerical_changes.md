@@ -2148,6 +2148,36 @@ and IRAM solvers, and the non-Hermitian dynamics. The numbers of a solve
 that converges do not change; a call that returned such a vector now
 raises.
 
+## The 2026-11-21 exact recurrence of BiCGSTAB on `itensor_version=3`
+
+On v3 without a conserved sector, the BiCGSTAB recurrence now forms every
+MPO application and every sum exactly and truncates once, with the chain's
+`maxm` and `cutoff`, as the `"python"` recurrence does. Before, it took
+ITensor's density-matrix `applyMPO` and its pairwise `sum()`, whose floor
+is of order $10^{-8}\lVert A\rVert\lVert x\rVert$. It serves `applyinverse`
+(the calls of the entry above) and v3's `submode="CVM"`. In a conserved
+sector the old recurrence is kept.
+
+The numbers change where that floor was above the tolerance, that is, next
+to a level with every state held, the regime of shift-invert. On 8 sites
+at a shift of $10^{-8}$ ($\lVert x\rVert/\lVert b\rVert=9\times10^{7}$)
+and `delta` = $10^{-5}$, the old recurrence stopped at a relative residual
+of 0.62 with a norm 10% off, after 2.5 s, and the new one converges to
+$6.9\times10^{-6}$ in 0.3 s. At a shift of $10^{-4}$ and `delta` =
+$10^{-9}$ the residual goes from $4.8\times10^{-9}$ to
+$8.4\times10^{-10}$. At shifts of $10^{-6}$ and $10^{-4}$ with `delta` of
+$10^{-4}$ and $10^{-6}$ the residuals are the same as before.
+
+Where `maxm` limits the solve nothing gets better, and the solve is 2 to 4
+times slower. On 10 sites at `maxm=12`, $H-e$ below the spectrum stops at
+the same floor ($1.3\times10^{-2}$, 0.35 s against 0.16 s), and $z-H$ with
+$z=E_0+1+0.1i$ diverges with both recurrences, as it does on 20 sites at
+`maxm=40` (2258 s against 539 s); the residual check raises on both. An
+8-site Hubbard chain at `maxm=100` diverged on the old recurrence after
+3981 s and was not run on the new one. Since both recurrences diverge in
+the same cases, the divergence under truncation does not come from the
+route of the apply.
+
 ## The 2026-11-21 default `p_cut` of the ESR-STM spectrum
 
 The default `p_cut` of `get_esr_spectrum` is $10^{-6}$ (it was $10^{-8}$),

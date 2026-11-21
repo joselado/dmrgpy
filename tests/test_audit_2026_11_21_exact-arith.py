@@ -287,6 +287,42 @@ def test_public_applyinverse_does_not_warn_on_a_converged_v3_solve():
     assert not any("BiCGSTAB" in str(m.message) for m in w)
 
 
+@NEEDS3
+def test_v3_bicgstab_recurrence_converges_next_to_a_level():
+    """v3's BiCGSTAB recurrence applies and sums exactly, truncating once
+    per step, like "python"'s _bicstab. At shift 1e-8 (||x||/||b|| = 9e7)
+    and delta = 1e-5, with every state held, the old recurrence (the
+    density-matrix apply and ITensor's pairwise sum) did not converge: a
+    dense residual of 5.6e2 here, and 0.62 with a norm 10% off from
+    another ground state of the same chain, after 2.5 s; the exact one
+    converges (6.9e-6 there) in 0.3 s"""
+    np.random.seed(2)
+    s3c = spinchain.Spin_Chain(["S=1/2"]*N, itensor_version=3)
+    h3 = heis(s3c)
+    s3c.set_hamiltonian(h3)
+    s3c.maxm, s3c.nsweeps, s3c.cutoff = 32, 12, 0.0
+    s3 = s3c._session
+    s3.set_sweep_params(s3c.maxm, s3c.nsweeps, s3c.cutoff, s3c.noise)
+    s3c.gs_energy()
+    gs = s3c.get_gs()
+    gs = gs*(1./np.sqrt(abs(gs.dot(gs))))
+    E0 = s3c.vev(h3, wf=gs).real
+    b3 = gs + s3c.Sx[0]*gs
+    nb3 = np.sqrt(abs(b3.dot(b3)))
+    shift, delta = 1e-8, 1e-5
+    A3 = h3 - (E0 - shift)*multioperator.identity()
+    s3.set_sweep_params(s3c.maxm, s3c.nsweeps, s3c.cutoff, s3c.noise)
+    s3.set_mpomaxm(max(s3c.maxm, s3c.mpomaxm))
+    x3 = dmps.MPS(MBO=s3c, cpp_handle=s3.apply_inverse(
+        A3.to_terms(), b3.cpp_handle, delta*nb3, 1000))
+    rd3 = dense_residual3(s3c, A3, x3, b3)
+    assert rd3 <= 10.*delta, rd3
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        s3c.applyinverse(A3, b3, delta=delta, maxn=1000)
+    assert not any("BiCGSTAB" in str(m.message) for m in w)
+
+
 @pytest.mark.parametrize("iv", BACKENDS)
 def test_exact_weighted_sum_keeps_what_survives_a_cancellation(iv):
     """[A, B, A] with [M, 1, -M] on 10 sites: method="exact" returns B, to
