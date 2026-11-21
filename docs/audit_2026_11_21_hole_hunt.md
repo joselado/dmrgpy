@@ -4498,7 +4498,7 @@ the two docs.
 
 `bug` &middot; severity **MEDIUM** &middot; CONFIRMED &middot; lens `pyitensor` &middot; candidate found by the reviewer of `pyitensor-2`
 
-**Status**: FIXED in `834f1c7` on v3 without a conserved sector. `Chain::residual_norm` (`exact_apply_mpo`, then `exact_sum_right_canonical` of A x and -b, then the norm of the centre tensor) is bound in `bindings.cc`, and `check_bicgstab` takes it. v3 in a sector and v2 keep the old route. Whether `bicstab` should take the exact apply inside its recurrence is still a pick. NUMBERS CHANGE: the check only. Pinned by the same file, `test_public_applyinverse_does_not_warn_on_a_converged_v3_solve` included.
+**Status**: FIXED in `834f1c7` on v3 without a conserved sector. `Chain::residual_norm` (`exact_apply_mpo`, then `exact_sum_right_canonical` of A x and -b, then the norm of the centre tensor) is bound in `bindings.cc`, and `check_bicgstab` takes it. v3 in a sector and v2 keep the old route. Since `736a1f3` (the author's pick) the recurrence of `bicstab` itself applies and sums exactly and truncates once per step, through `exact_apply_truncated` and `exact_sum_truncated`, and a sector keeps the old recurrence as `bicstab_truncating`. Next to a level it converges where the old routes stopped: at shift 1e-8 and delta 1e-5 on 8 sites, 6.9e-6 in 0.3 s against 0.62, with a norm 10% off, in 2.5 s. Where `maxm` limits the solve it costs 2 to 4 times more and diverges in the same cases. NUMBERS CHANGE: the check, and since `736a1f3` the v3 solve next to a level. Pinned by the same file, `test_public_applyinverse_does_not_warn_on_a_converged_v3_solve` and `test_v3_bicgstab_recurrence_converges_next_to_a_level` included.
 
 **Where**: `src/dmrgpy/mpsalgebra.py:430-468 (check_bicgstab)`; `src/dmrgpy/mpscpp3/chain_session.h (Chain::apply_operator passes no Method to applyMPO, whose default is DensityMatrix)`
 
@@ -6449,8 +6449,10 @@ name `N_MAX` as the default, which contradicts the code.
   routes keep the free-spin band above the window and neither grow it nor
   warn. The cost of the ESR closing stage and of the exact BiCGSTAB check at
   real size was not measured, nor was the `julia_live` side of the exact
-  check. Whether v3's `bicstab` recurrence should take the exact apply is the
-  author's pick.
+  check. v3's `bicstab` recurrence takes the exact apply and the exact sum
+  since `736a1f3`, outside a sector (the author's pick); where `maxm` limits
+  the solve it costs 2 to 4 times more, and the divergence under truncation
+  is still open.
 - Found while fixing, by reading: a product with a constant, such as the
   charge penalty `Upen*(N_i - 1)^2` of the YSR builders, carries an `Id`
   factor that the per-bond factor reads as part of the span. Since the weak
@@ -6483,11 +6485,15 @@ name `N_MAX` as the default, which contradicts the code.
   measured while other sessions held the CPU). A shortcut
   would need `[H, S^a_tot] = 0` checked on the ED matrices, since the
   canonical-form proof cannot show it, and it touches a "Do NOT go back to
-  the single member" rule, so it is the author's pick.
-- v3's `bicstab` recurrence takes ITensor's pairwise `sum()` at every step,
-  the same sum the v3 `sum_mps_weighted` finding measures, while its
-  `"python"` twin moved to exact sums in `17017a9`. `check_bicgstab` now
-  catches a bad answer, so this was not raised as a candidate.
+  the single member" rule, so it is the author's pick. The author chose to
+  leave it as it is.
+- FIXED in `736a1f3`, outside a sector: v3's `bicstab` recurrence took
+  ITensor's pairwise `sum()` at every step, the same sum the v3
+  `sum_mps_weighted` finding measures, while its `"python"` twin moved to
+  exact sums in `17017a9`. `check_bicgstab` now catches a bad answer, so
+  this was not raised as a candidate. Measured afterwards, next to a level
+  this sum and the density-matrix apply were what stopped the solve, at 0.62
+  for shift 1e-8 and delta 1e-5 on 8 sites.
 - The BiCGSTAB check may in principle also pass a bad solve, since its
   density-matrix floor drops real directions; not measured. On
   `julia_live` the check sums with `add(alg="densitymatrix")` and would warn
