@@ -152,10 +152,11 @@ class KondoSpectrumMixin():
               states (nkry, default 100). The sums are those of
               mode="ED", and they are exact once each Krylov space is
               exhausted. tol (default None) stops a Krylov space
-              earlier, once every Ritz state that can be an open final
-              state (up to max|eV|, plus 40 kT at T>0, above the
-              initial state) has a residual below tol*onenorm(H);
-              tol=1e-8 pays off at large nkry and a narrow window. su2=None (the default) takes one member per
+              earlier, once every Ritz state that can still be an open
+              final state (its energy minus its residual up to max|eV|,
+              plus 40 kT at T>0, above the initial state) has a residual
+              below tol*onenorm(H); tol=1e-8 pays off at large nkry and
+              a narrow window. su2=None (the default) takes one member per
               spin multiplet with the weight 2S+1 when the Hamiltonian
               commutes with the total spin (checked) and every state
               otherwise; su2=True raises instead when it does not

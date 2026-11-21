@@ -21,7 +21,12 @@ three separate sets of Ritz states count the shared directions two or
 three times; this gave errors of order one in the project this route comes
 from. The block space is orthonormalized as a whole (two passes of
 reorthogonalization against every earlier block, then an SVD that drops
-the dependent directions), so every direction is counted once.
+the dependent directions), so every direction is counted once. When H does
+conserve S^z_tot, the initial state and the three starts are put exactly on
+their sectors before the recursion (KrylovKondoSpectrum._start_block): the
+roundoff an eigensolver leaves in other sectors, about 1e-14, is not below
+DROP_TOL once the sectors are spanned, and it would keep the space growing
+past its exhausted size.
 
 The initial state is projected out of the starting block, and the space
 stays orthogonal to it. So [i] + Ritz states is an orthonormal basis with
@@ -68,10 +73,14 @@ DROP_TOL = 1e-9
 # entry are taken as real.
 REAL_TOL = 1e-13
 # With tol set (opt-in, see KrylovKondoSpectrum), the Krylov space of an
-# initial state stops before 3*nkry states once the Ritz residual of every
-# Ritz state that can be an open final state (an energy at most E_i +
-# max|eV|, plus conductance.THETA_CUT kT at T>0, the window of
-# conductance._final_states) is below tol times onenorm(H). A check is a
+# initial state stops before 3*nkry states once the Ritz residual r of every
+# Ritz state that can still be an open final state is below tol times
+# onenorm(H). The window of open final states is that of
+# conductance._final_states, an energy at most E_i + max|eV|, plus
+# conductance.THETA_CUT kT at T>0, and a Ritz state counts when its energy
+# minus r is in it: a Ritz value lies above the eigenvalue it approaches and
+# has an eigenvalue of H within r, so a final state of the window can still
+# sit under a Ritz value above it. A check is a
 # diagonalization of the Krylov matrix, so it is made after CHECK_EVERY
 # blocks, and then each time the space has grown by CHECK_EVERY blocks and
 # by the factor CHECK_GROWTH, or by a factor 2 while fewer than half of the
@@ -80,6 +89,16 @@ REAL_TOL = 1e-13
 # diagonalizations of the final size.
 CHECK_EVERY = 10
 CHECK_GROWTH = 1.25
+# When H conserves S^z_tot, an initial state counts as of definite S^z_tot
+# when the norm of its part outside the sector of its largest component is
+# below this (the state being normalized), and a start S_a|i> is put on the
+# sectors S_a reaches when it loses at most this fraction of its norm there.
+# What is removed is the roundoff of the eigensolver (1.8e-14 on a 12-spin
+# chain), and it moves the sums at its square.
+SECTOR_LEAK = 1e-10
+# Two values of S^z_tot are the same sector below this difference (they are
+# multiples of 1/2).
+SZ_LABEL_TOL = 1e-9
 
 
 class StateSpectrum():
@@ -208,12 +227,13 @@ def block_krylov(H, starts, psi, nkry, tol=None, top=None):
     DROP_TOL of the scale of H).
 
     tol (absolute; None, the default, for no stop): the space also stops
-    when every Ritz state with an energy at most top (None: every Ritz
-    state) has a residual below tol, checked on the schedule of CHECK_EVERY
-    and CHECK_GROWTH. Hk[:n, :n] is complete once the coefficients of the
-    last block are in, so a check is one eigh of the matrix a stop returns,
-    and the result is then the one of a fixed size equal to the size it
-    stopped at."""
+    when every Ritz state whose energy minus its residual is at most top
+    (None: every Ritz state) has a residual below tol, checked on the
+    schedule of CHECK_EVERY and CHECK_GROWTH; when no Ritz state reaches
+    top, nothing is waited for and the check stops. Hk[:n, :n] is complete
+    once the coefficients of the last block are in, so a check is one eigh
+    of the matrix a stop returns, and the result is then the one of a fixed
+    size equal to the size it stopped at."""
     dim, cap = len(psi), 3*nkry
     dtype = np.result_type(H.dtype, starts.dtype, psi.dtype)
     size = min(cap, dim) # the space never holds more than dim columns
@@ -254,9 +274,12 @@ def block_krylov(H, starts, psi, nkry, tol=None, top=None):
         if (tol is not None and nblocks >= check
                 and B.shape[1] > 0 and n + B.shape[1] <= size):
             theta, y = np.linalg.eigh((Hk[:n, :n] + Hk[:n, :n].conj().T)/2.)
-            win = y if top is None else y[:, theta <= top]
-            converged = 1. if win.shape[1] == 0 else float(
-                np.mean(np.linalg.norm(W @ win[n-k:], axis=0) < tol))
+            r = np.linalg.norm(W @ y[n-k:], axis=0)
+            # a Ritz state is in the window when its residual interval
+            # reaches it: a Ritz value above top can still have a final
+            # state of the window under it, and the stop waits for it
+            win = r if top is None else r[theta - r <= top]
+            converged = 1. if win.size == 0 else float(np.mean(win < tol))
             if converged == 1.:
                 ritz = theta, y
                 break
@@ -392,6 +415,33 @@ def su2_initial_states(chain, H, kT, p_cut=P_CUT, degeneracy_tol=1e-9):
     return E, full, w/np.sum(w), spins
 
 
+def conserved_sz(chain, edobj, H):
+    """The diagonal of S^z_tot in the ED basis when S^z_tot is diagonal
+    there and H commutes with it (checked on a random state, as in
+    su2_initial_states); None otherwise."""
+    M = _total_spin(chain, edobj, "Sz")
+    offdiag = M - sp.diags(M.diagonal())
+    if offdiag.nnz and np.max(np.abs(offdiag.data)) > 1e-12:
+        return None
+    dim = H.shape[0]
+    rng = np.random.default_rng(1)
+    v = rng.standard_normal(dim) + 1j*rng.standard_normal(dim)
+    v /= np.linalg.norm(v)
+    c = np.linalg.norm(H @ (M @ v) - M @ (H @ v))
+    if c > SU2_TOL*onenorm(H)*max(onenorm(M), 1e-300):
+        return None
+    return np.real(M.diagonal())
+
+
+def _on_sectors(v, sz, values):
+    """(v with its components outside the S^z_tot sectors values set to 0,
+    the norm of the part set to 0); sz is the diagonal of S^z_tot."""
+    keep = np.zeros(len(sz), dtype=bool)
+    for x in values:
+        keep |= np.abs(sz - x) < SZ_LABEL_TOL
+    return np.where(keep, v, 0.), float(np.linalg.norm(v[~keep]))
+
+
 class KrylovKondoSpectrum():
     """The thermal initial states of a chain's sparse ED Hamiltonian, their
     weights, and for each one a StateSpectrum from its Krylov space (see the
@@ -406,11 +456,13 @@ class KrylovKondoSpectrum():
     takes every state; None, the default, takes the reduction when its
     checks pass and every state otherwise. self.su2 says which was taken.
     tol (opt-in, None by default): the Krylov space of a state stops before
-    3*nkry states once every Ritz state in the window of open final states
-    has a residual below tol*onenorm(H) (see CHECK_EVERY and block_krylov);
-    the window needs max|eV|, which spectra() and state_spectrum() take as
-    emax (None: every Ritz state counts). tol=1e-8 moved dI/dV by 1e-11 of
-    the peak where it fired."""
+    3*nkry states once every Ritz state that can still be an open final
+    state (its energy minus its residual in the window of open final
+    states) has a residual below tol*onenorm(H) (see CHECK_EVERY and
+    block_krylov); the window needs max|eV|, which spectra() and
+    state_spectrum() take as emax (None: every Ritz state counts). On the
+    8-spin chain of the tests tol=1e-8 moved dI/dV by 1e-11 of the peak
+    where it fired."""
     def __init__(self, chain, site, T, kB=8.617333262e-5, nkry=100, p_cut=P_CUT,
                  su2=None, degeneracy_tol=1e-9, tol=None):
         if T < 0.:
@@ -453,6 +505,9 @@ class KrylovKondoSpectrum():
             self._ladder = None
         self._S = S
         self.H = H
+        # the diagonal of S^z_tot when H conserves it (None otherwise), so
+        # that each Krylov space can be kept in its sectors (_start_block)
+        self._sz_tot = conserved_sz(chain, edobj, H)
         kT = kB*self.T
         self.scale = onenorm(H)
         self.tol_degenerate = degeneracy_tol*2.*self.scale
@@ -483,18 +538,48 @@ class KrylovKondoSpectrum():
             return None
         return float(emax) + (conductance.THETA_CUT*self.kB*self.T if self.T > 0. else 0.)
 
+    def _start_block(self, psi):
+        """(psi, starts): the normalized initial state and the starting
+        block of its Krylov space, S+|i>, S-|i>, Sz|i> of the tip site in a
+        real basis and Sx|i>, Sy|i>, Sz|i> otherwise. When H conserves
+        S^z_tot and psi has a definite S^z_tot = m (up to SECTOR_LEAK), psi
+        is put on the sector m and each start on the sectors its operator
+        reaches (m+1, m-1 and m; m-1 and m+1 for Sx and Sy). H maps a sector
+        to itself, so the space then stops when the sectors are spanned;
+        the roundoff of the eigensolver outside them would otherwise keep
+        the recursion going up to 3*nkry states. Nothing is projected when
+        psi or a start would lose more than SECTOR_LEAK of its norm."""
+        if self.real:
+            ops, shifts = self._ladder, ((1.,), (-1.,), (0.,))
+        else:
+            ops, shifts = self._S, ((-1., 1.), (-1., 1.), (0.,))
+        starts = np.stack([M @ psi for M in ops], axis=1)
+        sz = self._sz_tot
+        if sz is None:
+            return psi, starts
+        m = sz[int(np.argmax(np.abs(psi)))]
+        p, lost = _on_sectors(psi, sz, (m,))
+        if lost > SECTOR_LEAK:
+            return psi, starts
+        if lost > 0.: # a state already in its sector is kept bit for bit
+            p = p/np.linalg.norm(p)
+        cols = []
+        for M, dm in zip(ops, shifts):
+            v = M @ p
+            w, lost = _on_sectors(v, sz, [m + d for d in dm])
+            if lost > SECTOR_LEAK*np.linalg.norm(v):
+                return psi, starts
+            cols.append(w)
+        return p, np.stack(cols, axis=1)
+
     def state_spectrum(self, n, emax=None):
         """The StateSpectrum of the initial state n. emax (max|eV|) sets
         the window of the residual stop when tol is set; None counts every
         Ritz state."""
         psi = self.V[:, n]
         psi = psi/np.linalg.norm(psi)
+        psi, starts = self._start_block(psi)
         Ei = float(np.real(psi.conj() @ (self.H @ psi)))
-        if self.real:
-            Sp, Sm, Sz = self._ladder
-            starts = np.stack([Sp @ psi, Sm @ psi, Sz @ psi], axis=1)
-        else:
-            starts = np.stack([M @ psi for M in self._S], axis=1)
         tol = None if self.tol is None else self.tol*self.scale
         w = self.window(emax)
         theta, y, Q, residual = block_krylov(self.H, starts, psi, self.nkry, tol=tol,
