@@ -1018,7 +1018,9 @@ the reference for close lines (1e-3 of the peak on a dimer with two lines
 sharing a level, 6e-5 on one saturated spin). (5) The kept states end
 `lineshape.WINDOW_MARGIN` = 30 free-spin widths above the window, plus ONE
 kT ln(1/p_cut) (2026-11-21, picked for the author): p_cut is then the
-accuracy of the DC part (1.8e-8 at the default 1e-8 on 10 spins), with
+accuracy of the DC part (1.8e-8 at 1e-8 on 10 spins; the default is
+1e-6 since the author's pick of 2026-11-21, about 1e-5 of the DC peak with
+half the states), with
 6.6 times fewer states than the second kT ln(1/p_cut) of the first
 version; do NOT put the second term back for a window dependence, that
 1% was the homodyne tail of (7), and the DC part moves by 1.7e-5 on a

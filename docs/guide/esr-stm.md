@@ -182,7 +182,8 @@ otherwise. The keywords are:
 
 - `mode`: `"ED"` or `"DMRG"`.
 - `nstates`: the number of DMRG eigenstates.
-- `p_cut`: the relative Boltzmann weight below which a state is empty.
+- `p_cut`: the relative Boltzmann weight below which a state is empty,
+  $10^{-6}$ by default.
   It is also roughly the relative accuracy of the result, since the
   states above are left out of the relaxation too. A larger value needs
   fewer states.

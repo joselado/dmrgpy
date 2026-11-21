@@ -7776,9 +7776,12 @@ The pieces:
   plus kT ln(1/p_cut): the populated states and those a line in the
   window reaches. The states above, which the upper state of a line
   reaches only by a thermal upward rate, are left out, so p_cut is also
-  the accuracy of the DC part: 1.3e-4 at p_cut=1e-4 and 1.8e-8 at the
-  default 1e-8 against a converged curve on 10 spins (J = 240 GHz,
-  T = 1.2 K). The first version kept a second kT ln(1/p_cut), 6.6 times
+  the accuracy of the DC part: 1.3e-4 at p_cut=1e-4 and 1.8e-8 at
+  p_cut=1e-8 against a converged curve on 10 spins (J = 240 GHz,
+  T = 1.2 K). The default is 1e-6 (the author's pick of 2026-11-21, it
+  was 1e-8): 29 states instead of 56 there, 45 instead of 100 on 12
+  spins, for a DC part 1.1e-5 to 1.2e-5 of its peak off instead of about
+  1e-7. The first version kept a second kT ln(1/p_cut), 6.6 times
   more states at the default p_cut for nothing the default accuracy needs;
   the 1% window dependence it was added for was the homodyne tail below,
   not the relaxation (zooming onto a line moves the DC part by 1.7e-5 on

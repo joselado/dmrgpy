@@ -2145,3 +2145,16 @@ the analytic continuation of the correlators, the shift-invert Arnoldi
 and IRAM solvers, and the non-Hermitian dynamics. The numbers of a solve
 that converges do not change; a call that returned such a vector now
 raises.
+
+## The 2026-11-21 default `p_cut` of the ESR-STM spectrum
+
+The default `p_cut` of `get_esr_spectrum` is $10^{-6}$ (it was $10^{-8}$),
+by the author's pick. It is the relative Boltzmann weight below which a
+state is empty, and since the kept states end $kT\ln(1/p_{\rm cut})$ above
+the window it is also roughly the accuracy of the DC part. Against a
+converged curve ($p_{\rm cut}=10^{-10}$), with the default the DC part is
+$1.1\times10^{-5}$ to $1.2\times10^{-5}$ of its peak off on 10 and 12
+Heisenberg spins at J = 240 GHz and 1.2 K, with 29 and 45 states instead
+of 56 and 100, and $9\times10^{-6}$ on 12 spins at J = 30 GHz and 50 mK,
+with 56 states instead of 73; with $10^{-8}$ it was about $10^{-7}$. A
+call that wants the old numbers passes `p_cut=1e-8`.

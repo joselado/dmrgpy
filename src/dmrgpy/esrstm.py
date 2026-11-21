@@ -20,8 +20,13 @@ from .esrtk import floquet, lineshape, spectrum
 
 H_EV_GHZ = 4.135667696e-6 # Planck's constant in eV/GHz
 KB_EV_K = 8.617333262e-5 # Boltzmann's constant in eV/K
-# The relative Boltzmann weight below which a state is not populated
-P_CUT = 1e-8
+# The relative Boltzmann weight below which a state is not populated, and
+# so roughly the accuracy of the DC part. 1e-6 by the author's pick of
+# 2026-11-21 (it was 1e-8): about half the states (29 against 56 on 10
+# Heisenberg spins at J = 240 GHz, 1.2 K; 56 against 73 on 12 spins at
+# J = 30 GHz, 50 mK) for a DC part 1e-5 of its peak off a converged curve
+# instead of 1e-7
+P_CUT = 1e-6
 # submode="KRYLOV" keeps a Ritz state when its residual is below RITZ_TOL of
 # the half width 1/(2 pi T2) of a free-spin line (in energy, h/(2 pi T2)):
 # its energy is then within that of an eigenvalue
@@ -224,7 +229,8 @@ class ESRSpectrumMixin():
               secular and rotating-wave approximations, nharm harmonics,
               mode="ED" and up to 64 kept states, as a reference).
           p_cut: relative Boltzmann weight below which a state is empty,
-              and so roughly the relative accuracy of the DC part.
+              and so roughly the relative accuracy of the DC part (1e-6 by
+              default: 1e-5 of the DC peak on 10 and 12 spins).
           h, kB: Planck's constant in energy/GHz and Boltzmann's in
               energy/K, eV by default (pass h=1 and kB=20.8366 for H in GHz).
           return_parts: also return dict(dc=..., homodyne=...).
