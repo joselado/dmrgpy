@@ -130,13 +130,15 @@ def get_esr_spectrum(chain, f, tip=None, site=0, drive=None, detection=None,
     elif mode == "ED":
         spec = spectrum.ed_spectrum(chain, V, D, emax, site_weights)
     elif submode == "KRYLOV":
+        rm = lineshape.READ_MARGIN/(2.*np.pi*T2)
         epop = kT*np.log(1./p_cut) if kT > 0. else 0.
         ritz_tol = RITZ_TOL*h/(2.*np.pi*T2)
         window = (h*(np.min(f) - margin), h*(np.max(f) + margin))
         spec = spectrum.mps_krylov_spectrum(chain, V, D, emax, epop, window,
                                             kT, nkry, ritz_tol, nstates,
                                             site_weights,
-                                            read=(h*np.min(f), h*np.max(f)))
+                                            read=(h*(np.min(f) - rm),
+                                                  h*(np.max(f) + rm)))
     else:
         spec = spectrum.mps_spectrum(chain, V, D, emax, nstates, site_weights)
     lines = lineshape.Lines(spec, f, h, kT, T1, T2, rabi, p_cut, f_ref)

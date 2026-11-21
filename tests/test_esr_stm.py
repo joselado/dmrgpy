@@ -483,3 +483,18 @@ def test_pair_traces_match_amb(iv):
         R = np.array([[sc.aMb(a, op, b) for b in ws] for a in ws])
         assert np.max(np.abs(M - R)) < 1e-12
     assert spectrum.local_operator(sc, sc.Sz[0]*sc.Sz[1]) is None
+
+
+def test_dmrg_krylov_refuses_a_two_site_drive():
+    """The spin of a spinful fermion spans two spin-orbital sites, so P V|m>
+    would only be a projection: the DMRG Krylov route refuses it"""
+    fc = fermionchain.Spinful_Fermionic_Chain(3, itensor_version="python")
+    h = 0
+    for i in range(2):
+        h = h + fc.Cdagup[i]*fc.Cup[i+1] + fc.Cdagdn[i]*fc.Cdn[i+1]
+    h = h + h.get_dagger()
+    for i in range(3):
+        h = h + 4.*fc.Nup[i]*fc.Ndn[i]
+    fc.set_hamiltonian(H*20.*h)
+    with pytest.raises(NotImplementedError, match="more than one MPS site"):
+        fc.get_esr_spectrum(F, mode="DMRG", submode="KRYLOV", **KW)

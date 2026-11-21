@@ -1000,7 +1000,12 @@ the window lines of each populated state relative to its own strongest
 line (relative to the strongest of all, the final states of a weakly
 populated state were lost: 1.9e-5 against 2.3e-6), and diagonalizes H in
 one common basis; do NOT replace that basis by one two-level line per
-transition (46 to 61% off).
+transition (46 to 61% off). Its energy errors count only for lines read
+in the window (`lineshape.READ_MARGIN`, give or take the error): above
+the margin the basis does not span every eigenstate and its eigenstates
+are mixtures (0.1 to 2 GHz of error on 12 spins, not noise: the same at
+cutoff 1e-14 and at any overlap cut). A drive on two MPS sites is
+refused on that route.
 (3) The relaxation is block diagonal over what S connects (the charge
 sectors of a fermion chain), each block at its thermal weight; a drive
 across two blocks raises. (4) Only an exact degeneracy coupled by V, D or K

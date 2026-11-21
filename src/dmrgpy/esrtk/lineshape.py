@@ -56,6 +56,11 @@ WINDOW_MARGIN = 30.
 # to the exchange scale and the counter-rotating terms, and experiments
 # subtract a smooth background anyway.
 HOMODYNE_INNER = 15.
+# A line is read, for the position warning and for the energy errors the
+# DMRG Krylov route keeps, when its position, give or take the error bound
+# of its two energies, comes within READ_MARGIN half widths 1/(2 pi T2) of
+# a free spin of the window; a line further out adds only a tail.
+READ_MARGIN = 5.
 
 
 def homodyne_taper(det, T2):
@@ -260,15 +265,17 @@ class Lines():
     def warn_positions(self, h):
         """On the MPS route, warn when the bound on the position of a strong
         line (sigma_n + sigma_m, which has an eigenvalue within it) is
-        larger than its half width. Only lines inside the window count: one
-        outside adds a tail to it, and on submode="KRYLOV" the states such a
-        line ends on can be relaxation partners whose energies are not
-        converged."""
+        larger than its half width. Only lines read in the window count
+        (READ_MARGIN): one further out adds only a tail, and on
+        submode="KRYLOV" the states such a line ends on can be relaxation
+        partners whose energies are not converged."""
         if self.spec.sigma is None or self.npairs == 0: return
         s = self.spec.sigma
         bound = (s[self.u] + s[self.l])/h
         strength = np.abs(self.v2*self.y0)
-        near = (self.f_p >= self.fmin) & (self.f_p <= self.fmax)
+        rm = READ_MARGIN/(2.*np.pi*self.T2)
+        near = ((self.f_p + bound >= self.fmin - rm)
+                & (self.f_p - bound <= self.fmax + rm))
         strength = strength*near
         if not np.any(strength > 0.): return
         strong = strength > WARN_WEIGHT*np.max(strength)

@@ -7825,9 +7825,17 @@ The pieces:
   matrix (linearly dependent directions, from two populated states
   reaching one final state, dropped at 1e-10), and the eigenstates up to
   `emax` are formed as MPS sums and read by `_states_spectrum`, the code
-  of the eigenstate route, sigma included. On 14 spins at J = 30 GHz,
-  T = 0.05 K it agrees with ED to 3e-7 of the peak; the speed against the
-  eigenstate route is in the plan's Krylov section.
+  of the eigenstate route. Their energy errors sigma are kept for the
+  states below the window and the final states of lines read in the window
+  (`lineshape.READ_MARGIN` half widths around it, reached give or take
+  the error): above the margin the basis does not span every eigenstate,
+  and those eigenstates are mixtures with errors of 0.1 to 2 GHz on 12
+  spins, which in the degeneracy tolerance made a "level crossing". The
+  position warning reads the same lines on every route. A drive with terms
+  on two MPS sites is refused here (P V|m> would be a projection). On 14
+  spins at J = 30 GHz, T = 0.05 K it agrees with ED to 3e-7 of the peak;
+  the speed against the eigenstate route is in the plan's Krylov
+  section.
 - `esrtk/rates.py`: the Korringa rates, their scale from `T1` (a free spin
   1/2 at `f_ref`), the pure dephasing from `T2`, and the
   resolvent G of the relaxation. G is block diagonal over the blocks the

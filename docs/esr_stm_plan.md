@@ -99,14 +99,22 @@ measured and built:
   projection. With the states below the window from DMRG, nkry=600 (300
   left 14 window lines unconverged) and one common basis, the curve agrees
   with ED to 3e-7 of the peak on 14 spins at J = 30 GHz, T = 0.05 K.
-  It took 318 s on v3 on one E-core, where the eigenstate route spent
-  1376 s on its 58 eigenstates alone and then refused the result: two of
-  its states were closer than their energy errors at maxm=64. On 12 spins
-  two final states 31 GHz above the second populated state came out with
-  an energy error of 3 GHz, since the tangent space of an excited state
-  holds states far above it only roughly; they end lines in the margin,
-  not in the window, so their error is left out of the degeneracy
-  tolerance and of the position warning.
+  It took 318 s on v3 on one E-core (328 s after the last changes, at the
+  same accuracy), where the eigenstate route spent 1376 s on its 58
+  eigenstates alone and then refused the result: two of its states were
+  closer than their energy errors at maxm=64. On 12 spins the eigenstates
+  of the common basis between 35.9 and 39.2 GHz, above the window and its
+  margin, where the basis does not span every eigenstate, came out with
+  energy errors of 0.1 to 2 GHz (1.4 to 25 free-spin half widths), the
+  same for a cutoff of 1e-12 or 1e-14 and for an overlap cut of 1e-10,
+  1e-7 or 1e-4: they are mixtures, not noise. Their lines from the second
+  populated state end in the margin, so their errors are kept only for
+  lines that reach the window give or take the error
+  (`lineshape.READ_MARGIN`), in the degeneracy tolerance and in the
+  position warning; the first version of this said 3 GHz, which was the
+  error of a pair misread. A drive with terms on two MPS sites (the spin
+  of a spinful fermion) is refused on this route, since its start in the
+  tangent space would only be a projection.
 - Left open: the crossover between the routes, as a function of the
   populated fraction; chains above 14 spins; the MPS sums that form the
   eigenstates of the common basis, a third of the time; how nkry has to

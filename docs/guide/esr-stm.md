@@ -186,19 +186,11 @@ otherwise. The keywords are:
   It is also roughly the relative accuracy of the result, since the
   states above are left out of the relaxation too. A larger value needs
   fewer states.
-- `submode="KRYLOV"`, `nkry`: the final states of the lines come from a
-  Krylov space started from $V|m\rangle$ for every populated state $m$,
-  instead of from all eigenstates up to the top of the window. With
-  `mode="ED"` these are the populated eigenstates and one block Krylov
-  space of `nkry` blocks. With `mode="DMRG"` (`itensor_version=3` and
-  `"python"`) the `nstates` lowest DMRG states must reach every populated
-  state and every state below the window, and the Krylov space of `nkry`
-  steps runs in the tangent space of each populated state. It pays when
-  few states are populated and many lie in the window: with an exchange of
-  30 GHz at 50 mK, 3 times faster on 16 spins with ED, and on 14 spins
-  with DMRG 318 s, where the 58 DMRG eigenstates alone took 1376 s. When
-  most of the needed states are populated it is slower. The call raises when `nkry` is too small to converge the final
-  states of the lines.
+- `submode="KRYLOV"`, `nkry`: the final states come from a Krylov space
+  started from $V|m\rangle$ for every populated state $m$, on ED or in the
+  tangent space of $m$ with DMRG, where `nstates` must reach every state
+  below the window. Use it when few states are populated and many lie in
+  the window; it raises when `nkry` is too small.
 - `method="floquet"`: the driven Lindblad equation in the same
   eigenbasis, without the secular and rotating-wave approximations, on
   `mode="ED"` with up to 64 states. It is the reference for close lines

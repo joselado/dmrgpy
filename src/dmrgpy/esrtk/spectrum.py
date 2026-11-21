@@ -57,6 +57,10 @@ DENSE_MAX = 16384
 DROP_TOL = 1e-9
 # The Ritz vectors are formed and tested in chunks of this many columns
 CHUNK = 64
+# submode="KRYLOV" on DMRG: directions of the common basis with an overlap
+# eigenvalue below OVERLAP_CUT of the largest are dropped (two populated
+# states reaching one final state give two nearly parallel Ritz vectors)
+OVERLAP_CUT = 1e-10
 # submode="KRYLOV": a line out of a populated state m into n counts as a line
 # of the window when |V_nm|^2 p_m is above LINE_TOL of the strongest
 LINE_TOL = 1e-6
@@ -434,6 +438,17 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
             "get_esr_spectrum(mode=\"DMRG\", submode=\"KRYLOV\") runs on "
             "itensor_version=3 and \"python\" only (got %r)"
             % (chain.itensor_version,))
+    # P V|m> is exact for a sum of terms each on one MPS site (task.py's
+    # project_operator); a term on two (the spin of a spinful fermion spans
+    # its two spin-orbital sites) would start the space from a projection
+    # and could miss final states without a word
+    if any(len({f[1] for f in fs}) > 1 for _, fs in V.to_terms()):
+        raise NotImplementedError(
+            "get_esr_spectrum(mode=\"DMRG\", submode=\"KRYLOV\"): the drive "
+            "has terms on more than one MPS site (the spin of a spinful "
+            "fermion spans its two spin-orbital sites), so its start in the "
+            "tangent space would only be a projection of V|m>; use "
+            "submode=None (the lowest eigenstates) or mode=\"ED\"")
     s = chain._session
     ecut = max(epop, window[0])
     es, ws = chain.get_excited_states(n=int(nstates))
@@ -511,7 +526,7 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
         Hb[a, c] = Hop.aMb(basis[a], basis[c])
         S[c, a], Hb[c, a] = np.conj(S[a, c]), np.conj(Hb[a, c])
     sv, Us = np.linalg.eigh(S)
-    ind = sv > 1e-10*np.max(sv)
+    ind = sv > OVERLAP_CUT*np.max(sv)
     X = Us[:, ind]/np.sqrt(sv[ind])
     E, C = np.linalg.eigh(X.conj().T @ Hb @ X)
     Cf = X @ C
@@ -522,21 +537,24 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
     spec = _states_spectrum(chain, states, E[sel] - E[sel][0], V, D,
                             site_weights, route="KRYLOV", reached=e[-1])
     # The energy error sigma counts for the states below the window and the
-    # final states of the lines inside the frequency window itself (read,
-    # without the margin), whose positions are read. The other eigenstates
-    # of the basis are relaxation partners or ends of lines in the margin,
-    # which act through their tails, and some are far from converged: 3 GHz
-    # on 12 spins for two states 31 GHz above the second populated state,
-    # whose tangent space holds them only roughly, and their sigma in the
-    # degeneracy tolerance made them a "level crossing". As on ED
-    # (ed_krylov_spectrum), theirs is set to 0.
+    # final states of the lines that are read (read: the window and
+    # lineshape.READ_MARGIN half widths around it, reached give or take the
+    # error of the two energies), whose positions matter. The other
+    # eigenstates of the basis are relaxation partners or ends of lines
+    # further out, which act through their tails, and those above the top
+    # of the margin, where the basis does not span every eigenstate, are
+    # mixtures: on 12 spins (cutoff 1e-14) their errors were 0.1 to 2 GHz
+    # between 35.9 and 39.2 GHz, the same for an overlap cut of 1e-10,
+    # 1e-7 or 1e-4, and in the degeneracy tolerance they made two of them a
+    # "level crossing". As on ED (ed_krylov_spectrum), theirs is set to 0.
     if read is None:
         read = window
     ee = spec.e
     popm = ee <= epop
     v2 = np.abs(spec.V)**2
     de = np.abs(ee[:, None] - ee[None, :])
-    inwin = (de >= read[0]) & (de <= read[1])
+    err = spec.sigma[:, None] + spec.sigma[None, :]
+    inwin = (de + err >= read[0]) & (de - err <= read[1])
     line = np.zeros(len(ee), dtype=bool)
     for m in np.flatnonzero(popm):
         col = v2[:, m]*inwin[:, m]
