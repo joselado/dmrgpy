@@ -11,8 +11,12 @@ import numpy as np
 import pytest
 
 from dmrgpy import cppext, multioperator, spinchain
+from _helpers import julia_live_param
 
 BACKENDS = ["python"] + ([3] if cppext.available(3) else [])
+# julia_live too: the check runs on its own branch of applyinverse_dmrg
+# (mpsjulialive/bicgstab.jl), measured converged at 6.5e-13 on 6 sites
+WITH_JULIA = BACKENDS + [julia_live_param()]
 
 
 def heisenberg(n, iv, maxm):
@@ -28,7 +32,7 @@ def heisenberg(n, iv, maxm):
     return sc, h, e0, b
 
 
-@pytest.mark.parametrize("iv", BACKENDS)
+@pytest.mark.parametrize("iv", WITH_JULIA)
 def test_diverged_solve_raises(iv):
     """z - H under truncation (maxm=12 on 10 sites): the recurrence leaves
     the solution, and after 20 iterations x is worse than x = 0"""
@@ -39,7 +43,7 @@ def test_diverged_solve_raises(iv):
         sc.applyinverse(A, b)
 
 
-@pytest.mark.parametrize("iv", BACKENDS)
+@pytest.mark.parametrize("iv", WITH_JULIA)
 def test_converged_solve_is_quiet(iv):
     """Every state held (maxm=30 on 8 sites): the true residual is at the
     tolerance (measured 1.1e-5 at delta = 1e-5), no warning"""
