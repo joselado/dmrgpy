@@ -4321,7 +4321,13 @@ worse than $x=0$ (picked for the author). A converged solve measured
 $1.1\times10^{-5}$ at `delta` = $10^{-5}$. The recurrence itself is
 unchanged: a guard inside it that returns the iterate of smallest
 residual (C++ on v2/v3, `pyitensor`'s `_bicstab`, `bicgstab.jl`) is a lead
-(`tests/test_bicgstab_residual_check.py`).
+(`tests/test_bicgstab_residual_check.py`). The check is not cheap: on 20
+sites on v3 it took 122 s next to a solve of 111 s at `maxm=40`, and
+164 s of 272 s at `maxm=60`, since it forms $Ax$ without truncation. A
+cheaper form, $\langle x|A^\dagger A|x\rangle-2\,\mathrm{Re}\langle
+b|A|x\rangle+\langle b|b\rangle$ from an $A^\dagger A$ MPO built at cutoff
+0, was tried on 2026-11-21 and was slower still (not understood, not
+committed); a cheaper check is a lead.
 Nothing guarantees convergence for an indefinite $A$. In a seeded run
 (8 sites), shift-invert Arnoldi with a target 0.05 above a triplet warned
 of a residual of $1.2\times10^{-5}$ against $10^{-6}$ and returned

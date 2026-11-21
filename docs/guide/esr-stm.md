@@ -168,7 +168,7 @@ f, ied = sc.get_esr_spectrum(f, mode="ED", **kw)
 f, idm = sc.get_esr_spectrum(f, mode="DMRG", nstates=24, **kw)
 ```
 
-The two agree to $7\times10^{-8}$ of the peak. The states needed are the
+The two agree to a few $10^{-7}$ of the peak. The states needed are the
 populated ones, up to $kT\ln(1/p_{\rm cut})$ above the ground state, and
 those reached from them by a line in the window. When the `nstates`
 lowest states do not reach that energy the call raises and asks for more
