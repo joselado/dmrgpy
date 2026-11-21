@@ -569,6 +569,13 @@ Do not undo one without reading its finding first.
   (`groundstate.warn_unconverged`). Entropies of a site or a pair are those
   of the normalized state, with a relative eigenvalue floor
   (`test_audit_2026_10_23_leads.py`).
+- **A BiCGSTAB solve checks its answer.** After BiCGSTAB, `applyinverse`
+  on DMRG measures ||Ax-b||/||b|| once with the maxm cap lifted
+  (`mpsalgebra.check_bicgstab`), warns above 10 delta and raises above 1;
+  before, v3 returned a vector 3e64 times the right-hand side on 10 sites
+  at maxm=12, silently. Do NOT loosen it to quiet a test; the divergence
+  of the recurrence itself is still open
+  (`test_bicgstab_residual_check.py`).
 - **NH-DMRG sweeps the transposed left state.** Inside every v2, v3 and
   `"python"` sweep the left state is ITensorNHDMRG.jl's own,
   H^T|wl> = E|wl>, solved against the conjugate of the adjoint MPO and

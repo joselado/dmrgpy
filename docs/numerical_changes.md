@@ -2126,3 +2126,21 @@ $kT\ln(1/p_{\rm cut})$ above the window instead of two, so that
 T = 1.2 K) the DC part changes by 1.8e-8 of the peak at the default
 `p_cut=1e-8`, with 56 states instead of 372, and by 1.3e-4 at
 `p_cut=1e-4`. On DMRG fewer `nstates` are needed for the same call.
+
+## The 2026-11-21 residual check of BiCGSTAB
+
+`applyinverse` on DMRG, when it takes BiCGSTAB (always on
+`itensor_version=2` and 3, and for a Hermitian operator or a conserved
+sector on `"python"` and `"julia_live"`), now measures the true relative
+residual $\lVert Ax-b\rVert/\lVert b\rVert$ of its answer. Above 10 times
+the requested `delta` it warns; above 1, where the answer is worse than
+zero, it raises `RuntimeError`. Before, it returned whatever its recurrence
+held: on 10 sites at `maxm=12`, $(z-H)^{-1}S^z|\mathrm{GS}\rangle$ came back
+with a norm $3\times10^{64}$ times that of the right-hand side on v3, and
+earlier records found $3\times10^{73}$ of the peak in
+`submode="CVM_explicit"` on `"python"` and $3\times10^{9}$ for one
+resolvent on 24 sites. Calls that reach it: `CVM_explicit`, `CVMimag` and
+the analytic continuation of the correlators, the shift-invert Arnoldi
+and IRAM solvers, and the non-Hermitian dynamics. The numbers of a solve
+that converges do not change; a call that returned such a vector now
+raises.

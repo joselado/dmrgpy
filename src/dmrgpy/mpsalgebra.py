@@ -390,7 +390,9 @@ def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
         # mpsjulialive/bicgstab.jl, the same BiCGSTAB
         jlmps = Main.mps_bicgstab(_julia_mpo(self,A),wf.jlmps,
                 float(delta*norm),int(maxn),int(self.maxm),float(self.cutoff))
-        return _julia_mps(self,jlmps)
+        x = _julia_mps(self,jlmps)
+        check_bicgstab(self,A,x,wf,norm,delta)
+        return x
     self._session.set_sweep_params(self.maxm,self.nsweeps,self.cutoff,self.noise)
     self._session.set_verbose(self.verbose)
     self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
@@ -406,7 +408,62 @@ def applyinverse_dmrg(self,A,wf,delta=None,maxn=None):
         return mps.MPS(self,cpp_handle=handle).copy()
     handle = self._session.apply_inverse(A.to_terms(),wf.cpp_handle,
             delta*norm,int(maxn))
-    return mps.MPS(self,cpp_handle=handle).copy()
+    x = mps.MPS(self,cpp_handle=handle).copy()
+    check_bicgstab(self,A,x,wf,norm,delta)
+    return x
+
+
+# A BiCGSTAB solve stops on the residual of its own recurrence, which is
+# built from truncated sums, and returned whatever it held after maxn
+# iterations, without a word: on itensor_version=3, the default, z - H
+# with z = E0 + 1 + 0.1i on 10 sites at maxm=12 came back with
+# ||x||/||b|| = 3e64 (2026-11-21, the lead left open in docs/development.md
+# since 2026-11-15, where "python" returned 3e73 of the peak in
+# CVM_explicit). check_bicgstab measures the true relative residual once,
+# warns above BICGSTAB_WARN times the requested delta, and raises above
+# BICGSTAB_RAISE, where x is worse than x = 0. A converged solve measured
+# 1.1e-5 at delta = 1e-5 (8 sites, maxm=30).
+BICGSTAB_WARN = 10.
+BICGSTAB_RAISE = 1.
+
+
+def check_bicgstab(self,A,x,wf,norm,delta):
+    """The true relative residual ||A x - wf||/||wf|| of a BiCGSTAB solve,
+    with A applied and the difference summed with the maxm cap lifted (as
+    vev.energy_variance does), so that only the cutoff acts, relative to
+    the residual itself. Warns above BICGSTAB_WARN*delta, raises
+    RuntimeError above BICGSTAB_RAISE or when it is not finite. Returns it."""
+    from . import vev
+    julia = _is_julia(wf)
+    old = self.maxm
+    self.maxm = vev._UNCAPPED
+    try:
+        if not julia:
+            self._session.set_sweep_params(self.maxm,self.nsweeps,
+                    self.cutoff,self.noise)
+            self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+        ax = applyoperator_dmrg(self,A,x)
+        r = summps_dmrg(self,ax,wf*(-1.))
+        res = np.sqrt(abs(r.dot(r)))/norm
+    finally:
+        self.maxm = old
+        if not julia:
+            self._session.set_sweep_params(self.maxm,self.nsweeps,
+                    self.cutoff,self.noise)
+            self._session.set_mpomaxm(max(self.maxm,self.mpomaxm))
+    remedy = ("raise maxm (now %d), or take inverse_solver=\"sweep\" on "
+              "itensor_version=\"python\" and \"julia_live\""%(old,))
+    if not np.isfinite(res) or res>BICGSTAB_RAISE:
+        raise RuntimeError("applyinverse (BiCGSTAB) did not converge: the "
+            "relative residual ||A x - wf||/||wf|| of its answer is %.1e, "
+            "so x is worse than x = 0; %s"%(res,remedy))
+    if res>BICGSTAB_WARN*delta:
+        import warnings
+        warnings.warn("applyinverse (BiCGSTAB): the relative residual "
+            "||A x - wf||/||wf|| is %.1e, above %g times the requested "
+            "%.1e; %s"%(res,BICGSTAB_WARN,delta,remedy),
+            RuntimeWarning,stacklevel=3)
+    return res
 
 
 

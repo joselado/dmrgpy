@@ -4304,7 +4304,22 @@ $2\times10^{-7}$, with a warning of a residual of $6.4\times10^{-2}$:
 the overlap is far more accurate than the residual. BiCGSTAB took 1893 s
 and returned $3\times10^{9}$, without a warning. That divergence of
 BiCGSTAB, still the solver of every other backend and of a Hermitian $A$,
-is left open; both measurements are single runs.
+reproduces in a second on `itensor_version=3`: $z-H$ with
+$z=E_0+1+0.1i$, $\psi=S^z_5|\mathrm{GS}\rangle$, 10 sites at `maxm=12`,
+returned $\lVert x\rVert/\lVert b\rVert=3\times10^{64}$ after the 1000
+iterations of `cvm_nit`, and $H-e$ below the spectrum, positive definite,
+stopped at once on its truncated recurrence with a true relative residual
+of $10^{-2}$. Since 2026-11-21 every BiCGSTAB solve of `applyinverse` on
+DMRG measures its true relative residual $\lVert Ax-b\rVert/\lVert
+b\rVert$ once (`mpsalgebra.check_bicgstab`, $A$ applied and the
+difference summed with the `maxm` cap lifted, one MPO application next to
+the two of every iteration), warns above `BICGSTAB_WARN` = 10 times the
+requested `delta`, and raises above `BICGSTAB_RAISE` = 1, where $x$ is
+worse than $x=0$ (picked for the author). A converged solve measured
+$1.1\times10^{-5}$ at `delta` = $10^{-5}$. The recurrence itself is
+unchanged: a guard inside it that returns the iterate of smallest
+residual (C++ on v2/v3, `pyitensor`'s `_bicstab`, `bicgstab.jl`) is a lead
+(`tests/test_bicgstab_residual_check.py`).
 Nothing guarantees convergence for an indefinite $A$. In a seeded run
 (8 sites), shift-invert Arnoldi with a target 0.05 above a triplet warned
 of a residual of $1.2\times10^{-5}$ against $10^{-6}$ and returned
