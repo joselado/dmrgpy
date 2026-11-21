@@ -78,13 +78,23 @@ CHUNK = 64
 # eigenvalue below OVERLAP_CUT of the largest are dropped (two populated
 # states reaching one final state give two nearly parallel Ritz vectors)
 OVERLAP_CUT = 1e-10
-# submode="KRYLOV" on DMRG: a relaxation partner is dropped as a copy when a
-# vector already in the basis (a state below the window, the final state of
-# a line, or a partner kept before it) lies within ritz_tol of its energy
-# and has an overlap of modulus above COPY_OVERLAP with it (_drop_copies).
-# Two distinct eigenstates closer than ritz_tol have an overlap near zero,
-# so both are kept.
-COPY_OVERLAP = 0.5
+# submode="KRYLOV" on DMRG: a relaxation partner is dropped as a copy when
+# more than COPY_WEIGHT of its norm squared lies in the span of the vectors
+# already in the basis (the states below the window, the final states of
+# the lines, the partners kept before it) within ritz_tol of its energy
+# (_drop_copies). The span, not the largest single overlap, decides: two
+# levels A and B closer than ritz_tol that a tangent space returns rotated,
+# (A+B)/sqrt2 and (A-B)/sqrt2, each have an overlap of 0.71 with a line at
+# A, and a test on single overlaps dropped both and lost B. The weights of
+# the two members in the span of A add up to 1, so any COPY_WEIGHT in
+# [1/2, 1) keeps B; at 1/2 itself rounding dropped both members of a pair
+# at equal mixing, and every copy measured on 10 and 14 spins had a weight
+# of 0.994 or more.
+COPY_WEIGHT = 0.9
+# the pseudo-inverse of the Gram matrix of those vectors drops directions
+# below SPAN_RCOND of the largest (two populated states reaching one final
+# state give two nearly parallel lines)
+SPAN_RCOND = 1e-10
 # submode="KRYLOV": a line out of a populated state m into n counts as a line
 # of the window when |V_nm|^2 p_m is above LINE_TOL of the strongest
 LINE_TOL = 1e-6
@@ -482,21 +492,34 @@ def _tangent_to_mps(ts, T):
     return out
 
 
+def _span_weight(chain, Q, p):
+    """The weight of the unit MPS p in the span of the MPS Q"""
+    G = np.array([[chain.overlap(a, b) for b in Q] for a in Q])
+    c = np.array([chain.overlap(a, p) for a in Q])
+    w = c.conj() @ np.linalg.pinv(G, rcond=SPAN_RCOND, hermitian=True) @ c
+    return float(np.real(w))
+
+
 def _drop_copies(chain, low, elow, finals, isline, efin, tol):
     """The final states of the lines (finals with isline), then the
-    relaxation partners that are not copies of a vector already kept: a
-    partner within tol of the energy (efin, elow) of a state below the
-    window, of a line or of a partner kept before it, and with an overlap
-    of modulus above COPY_OVERLAP with it, is dropped. The tangent spaces
+    relaxation partners that are not copies of the vectors already kept: a
+    partner with more than COPY_WEIGHT of its weight in the span of the
+    states below the window, the lines and the partners kept before it
+    within tol of its energy (efin, elow) is dropped. The tangent spaces
     of the populated states reach the same eigenstates, so most partners
-    are copies: 52 of 60 on 14 spins (J = 30 GHz, T = 0.05 K), where the
-    copies left the common eigenproblem ill-conditioned and moved V and D
-    of the ground state by 3e-6 (an overlap cut of 1e-12 or 1e-8 instead of
-    1e-10 gave 6.3e-7 and 4e-5 of the peak). With them the curve was 1.1e-6
-    of the peak off ED in 306 s, without them 1.6e-7 in 215 s, and 3.3e-7
-    without any partner, which misses two of the 58 states ED keeps; on 10
-    spins with no tip field in H, 1.1e-6 and 4.8e-7. The low states are
-    already normalized."""
+    are copies: 52 of 60 on 14 spins (J = 30 GHz, T = 0.05 K), many of them
+    poorly converged (true residuals up to 0.6 GHz). They left the common
+    eigenproblem ill-conditioned and moved V and D of the ground state by
+    3e-6 (an overlap cut of 1e-12 or 1e-8 instead of 1e-10 gave 6.3e-7 and
+    4e-5 of the peak; keeping only the 23 partners with a true residual
+    below ritz_tol, mostly well converged copies, 1.6e-7). With every
+    partner the curve was 1.1e-6 of the peak off ED in 306 s, without the
+    copies 1.6e-7 in 216 s, and 3.3e-7 without any partner, which misses
+    two of the 58 states ED keeps; on 10 spins with no tip field in H,
+    1.1e-6 and 4.8e-7. On both chains every copy had a weight of 0.994 or
+    more and every partner kept had no vector within tol of its energy, so
+    COPY_WEIGHT decides nothing there. The low states are already
+    normalized."""
     def unit(w):
         return w*(1./np.sqrt(abs(chain.overlap(w, w))))
     ref = list(zip(low, elow))
@@ -505,8 +528,8 @@ def _drop_copies(chain, low, elow, finals, isline, efin, tol):
     for f, l, x in zip(finals, isline, efin):
         if l: continue
         fu = unit(f)
-        if any(abs(chain.overlap(q, fu)) > COPY_OVERLAP
-               for q, y in ref if abs(y - x) < tol):
+        near = [q for q, y in ref if abs(y - x) < tol]
+        if near and _span_weight(chain, near, fu) > COPY_WEIGHT:
             continue
         out.append(f)
         ref.append((fu, x))
@@ -539,7 +562,7 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
     (the other eigenstates of the basis are relaxation partners, with
     sigma set to 0, as on ED).
     On 14 spins at J = 30 GHz, T = 0.05 K with a tip field it agrees with
-    ED to 1.6e-7 of the peak, in 215 s on one core (189 s and 3.3e-7
+    ED to 1.6e-7 of the peak, in 216 s on one core (189 s and 3.3e-7
     without the relaxation partners, which miss two of the 58 states).
 
     The partners above the window are only those the tangent spaces of the

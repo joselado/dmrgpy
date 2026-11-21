@@ -487,12 +487,16 @@ def test_dmrg_krylov_route_matches_ed(iv):
 def test_partner_copies_are_dropped(iv):
     """The relaxation partners of the DMRG Krylov route are the converged
     Ritz states of every populated state, and the tangent spaces of the
-    populated states reach the same eigenstates: a partner within ritz_tol
-    of the energy of a vector already kept and with an overlap above
-    COPY_OVERLAP with it is dropped (a copy of a low state, of a line, of a
-    partner kept before, also up to a factor), while a state orthogonal to
-    it at the same energy, or the same state further than ritz_tol, is
-    kept"""
+    populated states reach the same eigenstates: a partner with more than
+    COPY_WEIGHT of its weight in the span of the vectors already kept
+    within ritz_tol of its energy is dropped (a copy of a low state, of a
+    line, of a partner kept before, also up to a factor), while a state
+    orthogonal to them at the same energy, or the same state further than
+    ritz_tol, is kept; and two levels closer than ritz_tol that come
+    rotated next to a line at A, (A+B)/sqrt2 and (A-B)/sqrt2 or with
+    weights 0.95 and 0.05, keep B in the basis with one of the two (a test
+    on the largest single overlap, 0.71 for both at equal mixing, lost
+    it)"""
     sc = chain(6, iv)
     _, ws = sc.get_excited_states(n=4)
     w0, w1, w2, w3 = [w*(1./np.sqrt(abs(sc.overlap(w, w)))) for w in ws]
@@ -502,6 +506,20 @@ def test_partner_copies_are_dropped(iv):
     efin = [1., 1. + tol/2, 1., 1., tol/3, 5., 1. + 2*tol]
     out = spectrum._drop_copies(sc, [w0], [0.], finals, isline, efin, tol)
     assert [id(x) for x in out] == [id(finals[i]) for i in (0, 2, 5, 6)]
+    # two levels closer than ritz_tol that a tangent space returns rotated:
+    # each partner has an overlap of 0.71 with the line, but B is kept
+    a, b = w1*np.sqrt(0.5), w2*np.sqrt(0.5)
+    finals = [w1, a + b, a + b*(-1.)]
+    for t in (np.pi/4, 0.22): # equal mixing, and weights 0.95 and 0.05
+        a, b = w1*np.cos(t), w2*np.sin(t)
+        finals = [w1, a + b, w1*np.sin(t) + w2*(-np.cos(t))]
+        out = spectrum._drop_copies(sc, [w0], [0.], finals,
+                                    [True, False, False], [1., 1., 1.], tol)
+        kept = [x*(1./np.sqrt(abs(sc.overlap(x, x)))) for x in out]
+        G = np.array([[sc.overlap(x, y) for y in kept] for x in kept])
+        c = np.array([sc.overlap(x, w2) for x in kept])
+        assert len(out) == 2
+        assert np.real(c.conj() @ np.linalg.solve(G, c)) > 1. - 1e-8
 
 
 @pytest.mark.skipif(not cppext.available(3), reason="needs itensor_version=3")

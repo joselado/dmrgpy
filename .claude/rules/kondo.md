@@ -1028,12 +1028,17 @@ refused on that route. Its basis also holds the converged Ritz states
 between the window bottom and emax as partners: do NOT drop them for
 speed, without them a chain with no tip field in H (V never reaches its
 singlets and quintets) was 4.3e-5 off instead of 1.1e-6. Only the copies
-go: a partner within ritz_tol in energy of a vector already kept and with
-an overlap above `COPY_OVERLAP` = 1/2 with it (`_drop_copies`, the
-author's pick of 2026-11-21). Do NOT go back to keeping every copy (52 of
-60 on 14 spins, which moved V and D of the ground state by 3e-6 and the
-curve from 1.6e-7 to 1.1e-6), and do NOT drop by energy alone, which
-merges two levels closer than ritz_tol (`tests/test_esr_stm.py`,
+go: a partner with more than `COPY_WEIGHT` = 0.9 of its weight in the
+span of the vectors already kept within ritz_tol of its energy
+(`_drop_copies`, the author's pick of 2026-11-21). Do NOT go back to
+keeping every copy (52 of 60 on 14 spins, many poorly converged, which
+moved V and D of the ground state by 3e-6 and the curve from 1.6e-7 to
+1.1e-6), do NOT drop by energy alone, which merges two levels closer than
+ritz_tol, and do NOT test the largest single overlap instead of the span:
+two such levels returned rotated, (A+B)/sqrt2 and (A-B)/sqrt2 next to a
+line at A, both have overlap 0.71 and B was lost; at a COPY_WEIGHT of
+1/2 rounding dropped both members of that pair, so keep it above 1/2
+(`tests/test_esr_stm.py`,
 `test_partner_copies_are_dropped`,
 `test_dmrg_krylov_partners_without_copies_match_ed`). On ED the
 Krylov basis also holds every eigenstate below the window and a closing

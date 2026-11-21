@@ -134,7 +134,7 @@ measured and built:
   That loss came from partners that copy vectors already in the basis
   (52 of 60), which left the common eigenproblem ill-conditioned; since
   the copies are dropped (the author's pick of 2026-11-21) the 14-spin
-  chain is 1.6e-7 off in 215 s, against 3.3e-7 in 189 s without partners
+  chain is 1.6e-7 off in 216 s, against 3.3e-7 in 189 s without partners
   on the same states.
   The same review found the homodyne cut inside a power-broadened line;
   it now counts in the width of the line.

@@ -7916,15 +7916,19 @@ The pieces:
   V never reaches the singlets and quintets, was 4.3e-5 of the peak off on
   10 spins, and 1.1e-6 with them, for 15% more time (on 14 spins with a
   tip field 1.1e-6 in 488 s against 3.3e-7 in 328 s). A partner that
-  copies a vector already in the basis, within `ritz_tol` in energy and
-  with an overlap above `COPY_OVERLAP` = 1/2, is dropped (`_drop_copies`):
-  the tangent spaces of the populated states reach the same eigenstates,
-  so 52 of the 60 partners of that 14-spin chain were copies, and they
-  left the common eigenproblem ill-conditioned, with V and D of the ground
-  state 3e-6 off. Without the copies the 14-spin chain is 1.6e-7 off in
-  215 s (1.1e-6 in 306 s with them, on the same states), and the 10-spin
-  chain without a tip field 4.8e-7. An energy test alone would merge two
-  levels closer than `ritz_tol`, so the overlap decides. The populated states
+  copies the vectors already in the basis, with more than `COPY_WEIGHT` =
+  0.9 of its weight in the span of those within `ritz_tol` of its energy,
+  is dropped (`_drop_copies`): the tangent spaces of the populated states
+  reach the same eigenstates, so 52 of the 60 partners of that 14-spin
+  chain were copies, many of them poorly converged, and they left the
+  common eigenproblem ill-conditioned, with V and D of the ground state
+  3e-6 off. Without the copies the 14-spin chain is 1.6e-7 off in 216 s
+  (1.1e-6 in 306 s with them, on the same states), and the 10-spin chain
+  without a tip field 4.8e-7. Every copy there had a weight of 0.994 or
+  more, and every partner kept had no vector near its energy. An energy
+  test alone would merge two levels closer than `ritz_tol`, and a test on
+  the largest single overlap would drop both members of such a pair when
+  a tangent space returns them rotated, so the span decides. The populated states
   are handled one at a time, so only one Krylov store, about 0.5 GB on 14
   spins at `nkry`=600, is alive. Their energy errors sigma are kept for the
   states below the window and the final states of lines read in the window
