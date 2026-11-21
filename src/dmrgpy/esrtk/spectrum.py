@@ -178,6 +178,87 @@ def ed_spectrum(chain, V, D, emax, site_weights=None):
     return ESRSpectrum(e[keep], Vm, Dm, K, route="ED", reached=e[-1])
 
 
+def local_operator(chain, op):
+    """(site, matrix) of an operator whose terms all act on one MPS site k:
+    the d x d matrix (bra, ket) o with op = 1 x ... x o x ... x 1, read off
+    its MPO as the partial trace over every other site, divided by their
+    dimensions (one site at a time), which holds for any bond dimension of
+    the MPO. None for an operator on several sites (a spinful fermion's S
+    spans the two spin-orbital sites) or on a backend that does not export
+    MPO arrays."""
+    if chain.itensor_version not in (3, "python"):
+        return None
+    try:
+        terms = op.to_terms()
+    except Exception:
+        return None
+    sites = {f[1] for _, fs in terms for f in fs}
+    if len(sites) != 1:
+        return None
+    k = sites.pop() - 1 # to_terms counts from 1
+    s = chain._session
+    M = s.build_operator(terms)
+    if chain.itensor_version == "python":
+        from ..pyitensor import task
+        Ws = task.mpo_arrays(M)
+    else:
+        Ws = s.mpo_site_arrays(M)
+    Ws = [np.asarray(W) for W in Ws]
+    left = np.ones(1)
+    for W in Ws[:k]:
+        left = left @ (np.einsum("aiib->ab", W)/W.shape[1])
+    right = np.ones(1)
+    for W in Ws[:k:-1]:
+        right = (np.einsum("aiib->ab", W)/W.shape[1]) @ right
+    return k, np.einsum("a,aijb,b->ij", left, Ws[k], right)
+
+
+def site_traces(Aa, Ab):
+    """G[k][s, t] = <a| with the site-k legs open |b> (s the bra leg, t the
+    ket leg) for every site k, from the site arrays of the two MPS: one
+    left and one right sweep of the overlap, so that <a|O_k|b> =
+    sum_st O[s, t] G[k][s, t] for every one-site operator at once."""
+    L = len(Aa)
+    left = [None]*(L + 1)
+    left[0] = np.ones((1, 1))
+    for l in range(L):
+        X = np.tensordot(left[l], Ab[l], axes=(1, 0)) # (x, t, y')
+        left[l + 1] = np.tensordot(Aa[l].conj(), X, axes=([0, 1], [0, 1]))
+    right = np.ones((1, 1))
+    G = [None]*L
+    for l in range(L - 1, -1, -1):
+        X = np.tensordot(Ab[l], right, axes=(2, 1)) # (y, t, x')
+        Y = np.tensordot(left[l], X, axes=(1, 0)) # (x, t, x')
+        G[l] = np.tensordot(Aa[l].conj(), Y, axes=([0, 2], [0, 2]))
+        right = np.tensordot(Aa[l].conj(), X, axes=([1, 2], [1, 2]))
+    return G
+
+
+class _PairTraces():
+    """site_traces for every pair a <= b of a list of states, and the
+    matrices of one-site operators from them: one sweep per pair instead
+    of one per pair and operator (the n sites of the Korringa kernel take
+    3n/2 operators)."""
+    def __init__(self, chain, ws):
+        s = chain._session
+        arrs = [[np.asarray(x) for x in s.mps_site_arrays(w.cpp_handle)]
+                for w in ws]
+        n = len(arrs)
+        self.n = n
+        self.G = {}
+        for a in range(n):
+            for b in range(a, n):
+                self.G[a, b] = site_traces(arrs[a], arrs[b])
+
+    def matrix(self, site, O):
+        M = np.zeros((self.n, self.n), dtype=complex)
+        for (a, b), G in self.G.items():
+            M[a, b] = np.sum(O*G[site])
+            if a != b:
+                M[b, a] = np.sum(O*G[site].T.conj())
+        return M
+
+
 def mps_spectrum(chain, V, D, emax, nstates, site_weights=None):
     """ESRSpectrum from the nstates lowest DMRG eigenstates. Raises when the
     highest of them is not above emax, so that no state below emax can be
@@ -241,14 +322,27 @@ def mps_spectrum(chain, V, D, emax, nstates, site_weights=None):
                 M[a, b] = amb(ws[a], ws[b])
         return M
 
-    Vm = hermitian(V)
-    Dm = hermitian(D)
-    K = np.zeros((n, n))
+    # every one-site operator from one sweep per pair of states, on the
+    # backends that export site arrays; aMb otherwise, and for a drive or a
+    # detection that is not a one-site operator
     Sz, Sp = site_operators(chain)
+    pt = None
+    if chain.itensor_version in (3, "python"):
+        pt = _PairTraces(chain, ws)
+
+    def matrix(op, herm=True):
+        loc = local_operator(chain, op) if pt is not None else None
+        if loc is not None:
+            return pt.matrix(*loc)
+        return hermitian(op) if herm else full(op)
+
+    Vm = matrix(V)
+    Dm = matrix(D)
+    K = np.zeros((n, n))
     for k in range(len(w)):
         if w[k] == 0.: continue
-        z2 = np.abs(hermitian(Sz[k]))**2
-        p2 = np.abs(full(Sp[k]))**2
+        z2 = np.abs(matrix(Sz[k]))**2
+        p2 = np.abs(matrix(Sp[k], herm=False))**2
         K += w[k]*(z2 + 0.5*(p2 + p2.T))
     return ESRSpectrum(e[keep], Vm, Dm, K, sigma=sigma, route="DMRG",
                        reached=e[-1])

@@ -7736,10 +7736,18 @@ The pieces:
   lowest eigenpairs of the sparse H from eigsh above it (`_low_states`, the
   rule of `krylovkondo.low_states`); on DMRG it is the `nstates` lowest
   states of `get_excited_states` (orthogonalized and rediagonalized in their
-  span there), with every matrix element an overlap with an MPO built once
-  per operator (`StaticOperator`, 1.7 times faster per element than
-  `aMb` with a MultiOperator, which builds the MPO on every call) and the
-  energy variance of each state from `vev.energy_variance`. K is built per site from S^z and
+  span there), and the energy variance of each state from
+  `vev.energy_variance`. Every one-site operator (V and D by default, and
+  the 3n/2 spin operators of K) is read from one sweep per pair of states
+  on v3 and `"python"`: `_PairTraces` keeps, for each pair, the overlap
+  with the legs of each site open (`site_traces`, a d x d matrix per
+  site), and `local_operator` reads the d x d matrix of the operator off
+  its MPO as the partial trace over the other sites. Equal to `aMb` to
+  1e-15, and 6 to 7 times faster on 10 and 14 spins. An operator on
+  several MPS sites (the S of a spinful fermion spans two spin-orbital
+  sites, a drive on two sites) takes an overlap with an MPO built once
+  (`StaticOperator`, 1.7 times faster per element than `aMb` with a
+  MultiOperator, which builds the MPO on every call). K is built per site from S^z and
   S^+, real for real eigenvectors.
 - `emax` is h(f_max + `lineshape.WINDOW_MARGIN` widths of a free spin)
   plus kT ln(1/p_cut): the populated states and those a line in the

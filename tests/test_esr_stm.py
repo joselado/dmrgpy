@@ -444,3 +444,22 @@ def test_krylov_route_inputs():
         sc.get_esr_spectrum(F, submode="KRYLOV", mode="DMRG", **KW)
     with pytest.raises(ValueError, match="nkry"):
         sc.get_esr_spectrum(F, submode="KRYLOV", nkry=0, **KW)
+
+
+@pytest.mark.parametrize("iv", BACKENDS)
+def test_pair_traces_match_amb(iv):
+    """The DMRG route reads every one-site operator from one sweep per pair
+    of states (spectrum._PairTraces), with the local matrix read off the
+    MPO by a partial trace (spectrum.local_operator); against aMb. An
+    operator on two sites is not read that way."""
+    sc = chain(6, iv)
+    sc.maxm = 16
+    es, ws = sc.get_excited_states(n=4)
+    ws = [w*(1./np.sqrt(abs(sc.overlap(w, w)))) for w in ws]
+    pt = spectrum._PairTraces(sc, ws)
+    Sz, Sp = spectrum.site_operators(sc)
+    for op in [Sz[2], Sp[2], Sp[5], 0.5*sc.Sx[0] + 0.866*sc.Sz[0], sc.Sy[3]]:
+        M = pt.matrix(*spectrum.local_operator(sc, op))
+        R = np.array([[sc.aMb(a, op, b) for b in ws] for a in ws])
+        assert np.max(np.abs(M - R)) < 1e-12
+    assert spectrum.local_operator(sc, sc.Sz[0]*sc.Sz[1]) is None
