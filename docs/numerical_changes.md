@@ -2191,6 +2191,23 @@ of 56 and 100, and $9\times10^{-6}$ on 12 spins at J = 30 GHz and 50 mK,
 with 56 states instead of 73; with $10^{-8}$ it was about $10^{-7}$. A
 call that wants the old numbers passes `p_cut=1e-8`.
 
+## The 2026-11-21 relaxation partners of the DMRG Krylov ESR route
+
+`get_esr_spectrum(mode="DMRG", submode="KRYLOV")` drops a relaxation
+partner that copies a vector already in its basis: a converged Ritz state
+within `ritz_tol` of the energy of a state below the window, of the final
+state of a window line or of a partner kept before it, and with an overlap
+of modulus above 1/2 with it. The tangent spaces of the populated states
+reach the same eigenstates, so most partners were copies (52 of 60 on 14
+spins at J = 30 GHz and 50 mK with a tip field). The copies left the
+common eigenproblem ill-conditioned: V and D of the ground state moved by
+3e-6, while the energies stayed within 1e-8 GHz of ED. On that chain the
+curve goes from 1.1e-6 of the peak off ED in 306 s to 1.6e-7 in 215 s, on
+one core. On 10 spins it goes from 1.1e-6 to 4.8e-7 without a tip field
+in H, and from 1.2e-7 to 6.6e-8 with it. Without any partner the 14-spin
+curve was 3.3e-7 off, and 2.4e-7 of that comes from the two states that
+only the partners supply.
+
 ## The 2026-11-21 hole hunt
 
 `docs/audit_2026_11_21_hole_hunt.md` has the evidence. Its 22 findings

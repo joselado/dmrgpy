@@ -1027,7 +1027,15 @@ cutoff 1e-14 and at any overlap cut). A drive on two MPS sites is
 refused on that route. Its basis also holds the converged Ritz states
 between the window bottom and emax as partners: do NOT drop them for
 speed, without them a chain with no tip field in H (V never reaches its
-singlets and quintets) was 4.3e-5 off instead of 1.1e-6. On ED the
+singlets and quintets) was 4.3e-5 off instead of 1.1e-6. Only the copies
+go: a partner within ritz_tol in energy of a vector already kept and with
+an overlap above `COPY_OVERLAP` = 1/2 with it (`_drop_copies`, the
+author's pick of 2026-11-21). Do NOT go back to keeping every copy (52 of
+60 on 14 spins, which moved V and D of the ground state by 3e-6 and the
+curve from 1.6e-7 to 1.1e-6), and do NOT drop by energy alone, which
+merges two levels closer than ritz_tol (`tests/test_esr_stm.py`,
+`test_partner_copies_are_dropped`,
+`test_dmrg_krylov_partners_without_copies_match_ed`). On ED the
 Krylov basis also holds every eigenstate below the window and a closing
 block Krylov space from S^a_k|n> and V|n> (2026-11-21 hunt, findings 1
 to 3). Do NOT drop it: with the tip moment along the field it is the only

@@ -78,6 +78,13 @@ CHUNK = 64
 # eigenvalue below OVERLAP_CUT of the largest are dropped (two populated
 # states reaching one final state give two nearly parallel Ritz vectors)
 OVERLAP_CUT = 1e-10
+# submode="KRYLOV" on DMRG: a relaxation partner is dropped as a copy when a
+# vector already in the basis (a state below the window, the final state of
+# a line, or a partner kept before it) lies within ritz_tol of its energy
+# and has an overlap of modulus above COPY_OVERLAP with it (_drop_copies).
+# Two distinct eigenstates closer than ritz_tol have an overlap near zero,
+# so both are kept.
+COPY_OVERLAP = 0.5
 # submode="KRYLOV": a line out of a populated state m into n counts as a line
 # of the window when |V_nm|^2 p_m is above LINE_TOL of the strongest
 LINE_TOL = 1e-6
@@ -475,6 +482,37 @@ def _tangent_to_mps(ts, T):
     return out
 
 
+def _drop_copies(chain, low, elow, finals, isline, efin, tol):
+    """The final states of the lines (finals with isline), then the
+    relaxation partners that are not copies of a vector already kept: a
+    partner within tol of the energy (efin, elow) of a state below the
+    window, of a line or of a partner kept before it, and with an overlap
+    of modulus above COPY_OVERLAP with it, is dropped. The tangent spaces
+    of the populated states reach the same eigenstates, so most partners
+    are copies: 52 of 60 on 14 spins (J = 30 GHz, T = 0.05 K), where the
+    copies left the common eigenproblem ill-conditioned and moved V and D
+    of the ground state by 3e-6 (an overlap cut of 1e-12 or 1e-8 instead of
+    1e-10 gave 6.3e-7 and 4e-5 of the peak). With them the curve was 1.1e-6
+    of the peak off ED in 306 s, without them 1.6e-7 in 215 s, and 3.3e-7
+    without any partner, which misses two of the 58 states ED keeps; on 10
+    spins with no tip field in H, 1.1e-6 and 4.8e-7. The low states are
+    already normalized."""
+    def unit(w):
+        return w*(1./np.sqrt(abs(chain.overlap(w, w))))
+    ref = list(zip(low, elow))
+    ref += [(unit(f), x) for f, l, x in zip(finals, isline, efin) if l]
+    out = [f for f, l in zip(finals, isline) if l]
+    for f, l, x in zip(finals, isline, efin):
+        if l: continue
+        fu = unit(f)
+        if any(abs(chain.overlap(q, fu)) > COPY_OVERLAP
+               for q, y in ref if abs(y - x) < tol):
+            continue
+        out.append(f)
+        ref.append((fu, x))
+    return out
+
+
 def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
                         nstates, site_weights=None, read=None):
     """ESRSpectrum on DMRG from the eigenstates below the window and the
@@ -490,15 +528,19 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
     (|<n|V|m>|^2 above LINE_TOL of the strongest line out of m) must have a
     tangent-space residual below ritz_tol, or the call raises and asks for
     more nkry. They are formed as MPS (_tangent_to_mps, truncated to maxm
-    by a sum), H is diagonalized in the span of all of them and of the low
-    states (generalized eigenproblem, linearly dependent directions
-    dropped), and the eigenstates up to emax are formed as MPS sums and
-    read as on the eigenstate route (_states_spectrum), sigma included for
+    by a sum), together with the converged Ritz states between the window
+    bottom and emax as relaxation partners, those that copy a vector
+    already kept dropped (_drop_copies). H is diagonalized in the span of
+    all of them and of the low states (generalized eigenproblem, linearly
+    dependent directions dropped), and the eigenstates up to emax are
+    formed as MPS sums and read as on the eigenstate route
+    (_states_spectrum), sigma included for
     the states below the window and the final states of the window lines
     (the other eigenstates of the basis are relaxation partners, with
     sigma set to 0, as on ED).
-    On 14 spins at J = 30 GHz, T = 0.05 K it agrees with ED to 3e-7 of the
-    peak and takes a fifth of the time of the 58 eigenstates.
+    On 14 spins at J = 30 GHz, T = 0.05 K with a tip field it agrees with
+    ED to 1.6e-7 of the peak, in 215 s on one core (189 s and 3.3e-7
+    without the relaxation partners, which miss two of the 58 states).
 
     The partners above the window are only those the tangent spaces of the
     populated states reach from V|m>, so a sector that V and H never reach
@@ -550,7 +592,7 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
     # the tangent-space Krylov space of every populated state, one at a
     # time: a store of nkry steps is about 0.5 GB on 14 spins at maxm=64,
     # so each is dropped before the next is built
-    finals, nbad, nneed, worst = [], 0, 0, 0.
+    finals, isline, efin, nbad, nneed, worst = [], [], [], 0, 0, 0.
     for m, x in zip(low, elow):
         if x > epop: continue
         ts = task.TangentSpace(s.mps_site_arrays(m.cpp_handle), Ws)
@@ -584,7 +626,9 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
             # too, as relaxation partners: with the window lines alone a
             # chain without a tip field in H was 4.3e-5 of the peak off on
             # 10 spins (the states V never reaches), 1.1e-6 with them, for
-            # 15% more time (a review of 2026-11-21)
+            # 15% more time (a review of 2026-11-21); those that copy a
+            # vector already in the basis are dropped after the loop
+            # (_drop_copies)
             keep = line | ((res <= ritz_tol) & (x + th <= emax)
                            & (x + th > ecut))
             for k in np.flatnonzero(keep):
@@ -592,6 +636,8 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
                 h = s.mps_from_site_arrays(_tangent_to_mps(ts, T))
                 h = s.sum_mps_weighted([h, h], [0.5, 0.5]) # truncated to maxm
                 finals.append(MPS(chain, cpp_handle=h))
+                isline.append(bool(line[k]))
+                efin.append(float(x + th[k]))
         del ts, store, b
     if nbad:
         raise ValueError(
@@ -599,6 +645,7 @@ def mps_krylov_spectrum(chain, V, D, emax, epop, window, kT, nkry, ritz_tol,
             "%d final states of the lines in the window are not converged "
             "in the tangent space (largest residual %.3g, ritz_tol %.3g); "
             "raise nkry (%d)" % (nbad, nneed, worst, ritz_tol, nkry))
+    finals = _drop_copies(chain, low, elow, finals, isline, efin, ritz_tol)
     # one basis: the low states and the final states, which are nearly
     # parallel when two populated states reach the same final state
     basis = low + finals

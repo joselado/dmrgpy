@@ -14,10 +14,11 @@ tip moment; the singlet to T0 line of a dimer has no DC part at zero tip
 field; the four lines of the Ti dimer of Yang et al. (PRL 119, 227206,
 Supplemental Material eqs. S7 to S14) carry the matrix elements of S14 and
 the form factors sin^2(xi/2) and cos^2(xi/2); a zero field raises; the
-sparse ED route and the MPS route agree with full ED; the saturated
-solve agrees with the null vector of the dense rate matrix; the rates do
-not depend on the window once f_ref is given; and the paths that must
-raise do."""
+sparse ED route and the MPS route agree with full ED; the DMRG Krylov
+route drops the relaxation partners that copy a vector of its basis; the
+saturated solve agrees with the null vector of the dense rate matrix; the
+rates do not depend on the window once f_ref is given; and the paths that
+must raise do."""
 import numpy as np
 import pytest
 
@@ -222,15 +223,18 @@ def test_zero_field_raises():
                                               tip=[0.5, 0, 0.8], f_ref=1.)
 
 
-def chain(n, iv="python"):
+def chain(n, iv="python", tip=True):
     """An AF chain, J around 30 GHz, in a 20 GHz field, with a tip field of
-    2 GHz along z and 0.5 GHz along x on site 0 (no conserved quantity)"""
+    2 GHz along z and 0.5 GHz along x on site 0 (no conserved quantity);
+    with tip=False, no tip field (S^z_tot conserved)"""
     sc = spinchain.Spin_Chain(["S=1/2"]*n, itensor_version=iv)
     h = 0
     for i in range(n-1):
         J = 30.*(1 + 0.2*np.cos(i))
         h = h + H*J*(sc.Sx[i]*sc.Sx[i+1] + sc.Sy[i]*sc.Sy[i+1] + sc.Sz[i]*sc.Sz[i+1])
-    h = h + H*20.*sum(sc.Sz) + H*2.0*sc.Sz[0] + H*0.5*sc.Sx[0]
+    h = h + H*20.*sum(sc.Sz)
+    if tip:
+        h = h + H*2.0*sc.Sz[0] + H*0.5*sc.Sx[0]
     sc.set_hamiltonian(h)
     sc.maxm, sc.nsweeps, sc.cutoff = 64, 20, 1e-14
     return sc
@@ -477,6 +481,49 @@ def test_dmrg_krylov_route_matches_ed(iv):
     with pytest.raises(ValueError, match="raise nstates"):
         chain(8, iv).get_esr_spectrum(F, mode="DMRG", submode="KRYLOV",
                                       nstates=1, **KW)
+
+
+@pytest.mark.parametrize("iv", BACKENDS)
+def test_partner_copies_are_dropped(iv):
+    """The relaxation partners of the DMRG Krylov route are the converged
+    Ritz states of every populated state, and the tangent spaces of the
+    populated states reach the same eigenstates: a partner within ritz_tol
+    of the energy of a vector already kept and with an overlap above
+    COPY_OVERLAP with it is dropped (a copy of a low state, of a line, of a
+    partner kept before, also up to a factor), while a state orthogonal to
+    it at the same energy, or the same state further than ritz_tol, is
+    kept"""
+    sc = chain(6, iv)
+    _, ws = sc.get_excited_states(n=4)
+    w0, w1, w2, w3 = [w*(1./np.sqrt(abs(sc.overlap(w, w)))) for w in ws]
+    tol = 1e-3
+    finals = [w1, w1*(-1.), w2, w2*2., w0*1., w3, w1*1.]
+    isline = [True, False, False, False, False, False, False]
+    efin = [1., 1. + tol/2, 1., 1., tol/3, 5., 1. + 2*tol]
+    out = spectrum._drop_copies(sc, [w0], [0.], finals, isline, efin, tol)
+    assert [id(x) for x in out] == [id(finals[i]) for i in (0, 2, 5, 6)]
+
+
+@pytest.mark.skipif(not cppext.available(3), reason="needs itensor_version=3")
+def test_dmrg_krylov_partners_without_copies_match_ed(monkeypatch):
+    """10 spins with no tip field in H, so that V never reaches the
+    singlets and quintets the lines relax into: without partners the curve
+    was 4.3e-5 of the peak off ED, with every partner 1.1e-6 (10 of the 18
+    partners are copies, which leave the common eigenproblem
+    ill-conditioned), and without the copies 4.8e-7 in three runs"""
+    kw = dict(KW)
+    _, a = chain(10, tip=False).get_esr_spectrum(F, **kw)
+    seen = []
+    drop = spectrum._drop_copies
+    def spy(*args):
+        out = drop(*args)
+        seen.append((len(args[3]), len(out)))
+        return out
+    monkeypatch.setattr(spectrum, "_drop_copies", spy)
+    _, b = chain(10, 3, tip=False).get_esr_spectrum(
+        F, mode="DMRG", submode="KRYLOV", nstates=8, **kw)
+    assert seen and seen[0][1] < seen[0][0]
+    assert np.max(np.abs(a - b)) < 7e-7*np.max(np.abs(a))
 
 
 @pytest.mark.parametrize("iv", BACKENDS)
