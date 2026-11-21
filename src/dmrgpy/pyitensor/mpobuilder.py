@@ -291,20 +291,57 @@ def _unit_scale_up(cmax):
 
 MPO_CUTOFF_FLOOR = 1e-28  # (1e-14)^2, as mo_terms.h
 
+# A multi-site term below this fraction of the largest coefficient lowers
+# the cutoff by its own square, whatever else crosses its bonds (as
+# mo_terms.h's WEAK_TERM_TAU).
+WEAK_TERM_TAU = 1e-5
+
+# The Jordan-Wigner string names product2jw writes. Each is diagonal with
+# entries +-1 on its site, so they commute and each squares to the identity.
+_JW_STRINGS = ("F", "Fup", "Fdn")
+
+
+def _span_start(ops):
+    """The first site of a term for _bond_cutoff_factor: its leftmost site
+    whose factors are not Jordan-Wigner strings cancelling in pairs (every
+    name a string, each an even number of times), as mo_terms.h's
+    bond_span_start(). product2jw dresses every fermionic factor with its
+    own string from site 0, so a parity-even term carries F_k F_k = 1 on
+    every site left of its leftmost fermion; read from its first listed
+    site, every hopping and every spin term of a native spinful chain
+    crossed every bond to its left (2026-11-21 audit, finding 19). An odd
+    number of strings on a site is a real string, so a parity-odd term
+    still starts where its string starts."""
+    by_site = {}
+    for name, i in ops:
+        by_site.setdefault(i, []).append(name)
+    for i in sorted(by_site):
+        names = by_site[i]
+        if not all(nm in _JW_STRINGS and names.count(nm) % 2 == 0
+                   for nm in names):
+            return i
+    return min(by_site)  # every site cancels: the plain first site
+
 
 def _bond_cutoff_factor(ampo):
-    """mo_terms.h's bond_cutoff_factor(): m^2, m the strongest coefficient
-    crossing the weakest bond relative to the largest coefficient, with the
-    terms merged by operator string first (this AutoMPO keeps duplicates,
-    and a cancelling pair counts as what is left). The return sweep of
-    to_mpo cuts each bond relative to its own operator-Schmidt weight, of
-    which the identity and the finished-term channels are O(1), so a bond
-    whose strongest term sits far below the largest coefficient lost its
-    channels: a Wilson hopping one bond above v3's depth floor, a weak
-    link, a small H next to an O(1) term (2026-09-25 audit, left open
-    until 2026-11-14). Its cutoff is lowered by this factor, floored at
-    MPO_CUTOFF_FLOOR; 1.0 when every crossed bond holds a term of the
-    largest size, which keeps the build exactly as before."""
+    """mo_terms.h's bond_cutoff_factor(): m^2, with the terms merged by
+    operator string first (this AutoMPO keeps duplicates, and a cancelling
+    pair counts as what is left). m is the smaller of two numbers, both
+    relative to the largest coefficient: the strongest coefficient crossing
+    the weakest bond, and the weakest multi-site coefficient below
+    WEAK_TERM_TAU (and above the 1e-14 every term below which is skipped).
+    The return sweep of to_mpo cuts each bond relative to its own
+    operator-Schmidt weight, of which the identity and the finished-term
+    channels are O(1), so a weak term lost its channels: a Wilson hopping
+    one bond above v3's depth floor, a weak link, a small H next to an
+    O(1) term (2026-09-25 audit). The first number covers a bond held by
+    weak terms only; the second a weak term on a bond an O(1) term also
+    crosses, a weak link in a ring, a small XY part on an Ising chain, a
+    chain jumped by a strong coupling (2026-11-21 audit, finding 18). A
+    term crosses the bonds from its _span_start to its last site. The
+    cutoff is lowered by this factor, floored at MPO_CUTOFF_FLOOR; 1.0
+    when every crossed bond holds a term of the largest size and no term
+    lies in the window, which keeps the build exactly as before."""
     merged = {}
     for t in ampo.terms:
         key = tuple(t.ops)
@@ -313,14 +350,20 @@ def _bond_cutoff_factor(ampo):
     if not cmax > 0.0:
         return 1.0
     bmax = {}
+    weak = 1.0
     for ops, c in merged.items():
         c = abs(c)
         if c <= 1e-14*cmax or len(ops) < 2:
             continue
-        sites = [i for _, i in ops]
-        for b in range(min(sites), max(sites)):
+        lo = _span_start(ops)
+        hi = max(i for _, i in ops)
+        if hi <= lo:
+            continue  # one site: it crosses no bond
+        for b in range(lo, hi):
             bmax[b] = max(bmax.get(b, 0.0), c)
-    m = min([1.0] + [v/cmax for v in bmax.values()])
+        if c < WEAK_TERM_TAU*cmax:
+            weak = min(weak, c/cmax)
+    m = min([weak] + [v/cmax for v in bmax.values()])
     return m*m
 
 

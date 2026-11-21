@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <string>
+#include <vector>
 
 struct OpFactor
     {
@@ -75,14 +77,56 @@ unit_scale_up(double cmax)
 // floor of docs/new_methods/kondo_nrg_mps/README.md section 9), a weak
 // link, a small H next to an O(1) term (the 2026-09-25 audit's open
 // bond-local truncation). The vendored svdMPO is not edited; the Cutoff
-// it gets is lowered by m^2 instead, m the strongest coefficient crossing
-// the weakest bond relative to the largest coefficient (terms merged by
-// operator string first, so a cancelling pair counts as what is left),
-// and floored at MPO_CUTOFF_FLOOR = (1e-14)^2, the square of ITensor's own
-// coefficient skip. An operator whose every crossed bond holds a term of
-// the largest size has m = 1 and keeps its Args exactly. The same rule is
-// pyitensor/mpobuilder.py's _bond_cutoff_factor.
+// it gets is lowered by m^2 instead, floored at MPO_CUTOFF_FLOOR =
+// (1e-14)^2, the square of ITensor's own coefficient skip. The terms are
+// merged by operator string first, so a cancelling pair counts as what is
+// left, and m is the smaller of two numbers, both relative to the largest
+// coefficient: the strongest coefficient crossing the weakest bond, and
+// the weakest multi-site coefficient below WEAK_TERM_TAU (and above the
+// 1e-14 every term below which is skipped). The first covers a bond held
+// by weak terms only; the second a weak term on a bond an O(1) term also
+// crosses, a weak link in a ring, a small XY part on an Ising chain, a
+// chain jumped by a strong coupling (2026-11-21 audit, finding 18). A
+// term crosses the bonds from its bond_span_start() to its last site. An
+// operator whose every crossed bond holds a term of the largest size, and
+// with no term in the window, has m = 1 and keeps its Args exactly. The
+// same rule is pyitensor/mpobuilder.py's _bond_cutoff_factor.
 constexpr double MPO_CUTOFF_FLOOR = 1e-28;
+constexpr double WEAK_TERM_TAU = 1e-5;
+
+// Whether the factors of one site are Jordan-Wigner strings that cancel:
+// every name one of the strings product2jw writes (F, Fup, Fdn, diagonal
+// with entries +-1, so they commute and square to the identity), each an
+// even number of times.
+inline bool
+bond_strings_cancel(std::vector<std::string> const& names)
+    {
+    for (auto const& nm : names)
+        {
+        if (nm != "F" && nm != "Fup" && nm != "Fdn") return false;
+        if (std::count(names.begin(),names.end(),nm) % 2 != 0) return false;
+        }
+    return true;
+    }
+
+// The first site of a term for bond_cutoff_factor: its leftmost site whose
+// factors are not strings cancelling in pairs. product2jw dresses every
+// fermionic factor with its own string from site 1, and HTerm::add keeps
+// every factor, so a parity-even term carries F_k F_k = 1 on every site
+// left of its leftmost fermion; read from its first listed site, every
+// hopping and every spin term of a native spinful chain crossed every bond
+// to its left (2026-11-21 audit, finding 19). An odd number of strings on
+// a site is a real string, so a parity-odd term still starts where its
+// string starts. The same rule is pyitensor/mpobuilder.py's _span_start.
+inline int
+bond_span_start(SiteTermProd const& ops)
+    {
+    std::map<int,std::vector<std::string>> by_site; // ascending sites
+    for (auto const& st : ops) by_site[st.i].push_back(st.op);
+    for (auto const& kv : by_site)
+        if (!bond_strings_cancel(kv.second)) return kv.first;
+    return by_site.begin()->first; // every site cancels: the plain first site
+    }
 
 double inline
 bond_cutoff_factor(AutoMPO const& ampo)
@@ -93,15 +137,18 @@ bond_cutoff_factor(AutoMPO const& ampo)
     for (auto const& kv : merged) cmax = std::max(cmax,std::abs(kv.second));
     if (!(cmax > 0.0)) return 1.0;
     std::map<int,double> bmax; // bond b (sites b, b+1) -> strongest crossing |coef|
+    double weak = 1.0; // weakest multi-site |coef|/cmax below WEAK_TERM_TAU
     for (auto const& kv : merged)
         {
         double c = std::abs(kv.second);
         if (c <= 1e-14*cmax || kv.first.size() < 2) continue;
-        int lo = kv.first.front().i, hi = lo;
-        for (auto const& st : kv.first) { lo = std::min(lo,st.i); hi = std::max(hi,st.i); }
+        int lo = bond_span_start(kv.first), hi = lo;
+        for (auto const& st : kv.first) hi = std::max(hi,st.i);
+        if (hi <= lo) continue; // one site: it crosses no bond
         for (int b = lo; b < hi; ++b) { auto& v = bmax[b]; v = std::max(v,c); }
+        if (c < WEAK_TERM_TAU*cmax) weak = std::min(weak,c/cmax);
         }
-    double m = 1.0;
+    double m = weak;
     for (auto const& kv : bmax) m = std::min(m,kv.second/cmax);
     return m*m;
     }
