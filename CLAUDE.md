@@ -2,17 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with
 code in this repository. It holds what every session needs: how to build, how
-to test, the architecture, and the rules the audits taught. Three parts of
-the codebase have their own notes under `.claude/rules/`, loaded only when a
-file they cover is read or edited: `cpp-backend.md` (the pybind11 extension,
-`mpscpp2/` and `mpscpp3/`), `infinite-chain.md` (iDMRG and VUMPS on both
-backends) and `kondo.md` (`kondospectrumtk/`). They load when the Read,
-Write or Edit tool touches a matching file, not when a shell command prints
-it, so a session that reads with `cat` or `sed` opens the matching one by
-hand before touching those files; a pointer at the place each used to live
-says where it went. The history of every fix, with its repro and its reviewer, is in
-`docs/audit_*.md`, and the ledger of every result that changed is
-`docs/numerical_changes.md`.
+to test, the architecture, and the rules the audits taught. The detail that
+only matters for one part of the codebase is in a rule file under
+`.claude/rules/`, loaded only when a file it covers is read, written or
+edited:
+
+- `cpp-backend.md`: the pybind11 extension, `mpscpp2/` and `mpscpp3/`.
+- `pyitensor.md`: the pure-Python backend, its MPO builder and its GPU rule.
+- `infinite-chain.md`: iDMRG and VUMPS on both backends.
+- `kondo.md`: `kondospectrumtk/`, YSR, the NRG routes and ESR-STM.
+- `multioperator.md`: the canonical form and the Hermiticity proof.
+- `install.md`, `packaging.md`, `benchmarks.md`: `install.py` and
+  `installtk/`, the PyPI wheel, and `benchmarks/`.
+
+A rule file loads when the Read, Write or Edit tool touches a matching
+file, not when a shell command prints it, so a session that reads with
+`cat` or `sed` opens the matching one by hand before touching those files;
+a pointer at the place each used to live says where it went. The history of
+every fix, with its repro and its reviewer, is in `docs/audit_*.md`, and
+the ledger of every result that changed is `docs/numerical_changes.md`.
 
 ## What this is
 
@@ -52,136 +60,35 @@ python install.py --doctor           # only the requirement checks, no multi-min
 python install_julia.py              # alternative: Julia backend instead of/alongside C++
 ```
 
-`install.py` runs in two phases: `installtk/requirements.py` first checks
-every build requirement (OS, `make`, a C++ compiler, LAPACK/BLAS,
-`pybind11`), actually trial-compiling and trial-linking each one rather
-than checking a version string, and only once everything checks out does
-`installtk/install2.py` compile the vendored ITensor static library and the
-`pybind` Makefile target for whichever backend(s) `--itensor-version`
-selects (`2` = mpscpp2/ITensor v2; `3` = mpscpp3/ITensor v3, the default;
-`both` builds both, one after the other). `install2.py` picks the right
-`mpscppN` directory and C++ language standard per version (v2 needs only
-C++14; v3 needs C++17 with the concepts TS extension, `-fconcepts`, see
-`mpscpp3/ITensor/options.mk.sample`'s own `CCCOM` line) but otherwise runs
-the identical compiler/BLAS/LAPACK configuration resolved in phase 1.
-`pybind11` is a hard requirement (auto-installed via `pip` into the current
-interpreter if missing, since the pybind11 extension is the only DMRG
-backend besides ED and `"python"`).
+`install.py` first checks every build requirement by a real trial compile
+and link (`installtk/requirements.py`), and only then compiles the vendored
+ITensor and the `pybind` target of the backend that `--itensor-version`
+selects (`installtk/install2.py`). The compiler and the LAPACK/BLAS are
+each found by a cascade of candidates, a conda compiler first under a conda
+Python, and `pybind11` is installed with `pip` if it is missing. The
+details, with the reason for each choice, are in `.claude/rules/install.md`,
+which loads with `install.py` and `installtk/`. There is no lint config,
+and the only CI is the build of the user guide.
 
-The compiler is auto-detected via a cascade of candidates rather than a
-single guess: `installtk/requirements.py::_compiler_candidates()` yields a
-conda-provided compiler first when running under a conda Python
-(`installtk/cppversion.py::find_conda_compiler()` looks for one, e.g. the
-`gxx_linux-64` package, next to the running interpreter; preferred because
-the extension is loaded into the same process as conda's own numpy/scipy,
-which bundle their own libstdc++, and building against the system compiler
-instead has reproducibly segfaulted in the past, see the long comment in
-`mpscpp2/Makefile`), then falls back to the system `g++`/`c++` on PATH if
-that candidate does not actually work (`--gpp` overrides the whole cascade
-with a single hard choice). Each candidate is verified for real: besides an
-actual trial compile and link (`cppversion.trial_compile()`),
-`cppversion.backend_missing()` asks the driver (`gpp -print-prog-name=cc1plus`)
-whether it can even locate its own compilation backend, since `--version`
-and `shutil.which()` both pass for a compiler binary that is present but
-incomplete. This is not hypothetical: Aalto's Triton cluster ships a
-conda-style Python distribution with exactly such a broken
-`x86_64-conda-linux-gnu-g++` wrapper (no matching `cc1plus`), and the
-cascade falls back to the system compiler there and prints a note.
-`installtk/cppversion.py::lmod_state()` detects environment-module systems
-(Lmod, via `$LMOD_CMD`/`$MODULEPATH`) so failure messages can suggest
-`module load ...` instead of sudo-based apt-get/brew hints; `check()` also
-prints a reminder to reload the same modules or conda environment in any
-later session that imports `dmrgpy`, since the compiled extension depends
-on them being present again at import time.
-`installtk/blaslapack.py::find_working_config()` similarly tries several
-LAPACK/BLAS candidates (conda's own libs, system `-lblas -llapack`,
-OpenBLAS, and a Debian/Ubuntu-multiarch workaround that asks the system
-compiler where it actually finds `libblas.so`/`liblapack.so`) and picks the
-first one that actually links. Finally, `install.py` adds the repo's `src`
-to the Python path and to the user's shell rc file
-(`installtk/addpythonpath.py`, `installtk/addsystem.py`, both idempotent
-across reruns). There is no separate lint or CI config in this repo.
-
-Both `mpscppN/Makefile`s list `$(wildcard *.h)` among the extension's
-prerequisites: without that, editing `chain_session.h`, where the actual
-DMRG implementation lives, leaves `make pybind` reporting "Nothing to be
-done" while the `.so` keeps the old code. A C++ change is not tested until
-the `.so` has been rebuilt.
+A C++ change is not tested until `make pybind` has rebuilt the `.so`.
 
 ## Packaging / PyPI
 
-`pyproject.toml` builds a **pure-Python** distribution: a `py3-none-any`
-wheel (~450KB) containing the ED backend, the `itensor_version="python"`
-pyitensor DMRG/TDVP backend, and the Julia bridge. It deliberately ships no
-C++ at all. `[tool.setuptools.packages.find]` excludes `dmrgpy.mpscpp2` and
-`dmrgpy.mpscpp3`, which are ~400MB of vendored ITensor plus a build that
-needs a compiler, LAPACK/BLAS and pybind11, none of which belongs in a pip
-install. Users who want the compiled backends clone the repo and run
-`install.py`; without them everything still works via `"python"`/ED
-(`mode.py`), so the wheel is fully usable as installed.
+`pyproject.toml` builds a **pure-Python** distribution (`python -m build`):
+the ED backend, the `itensor_version="python"` backend and the Julia
+bridge, with no C++ at all. Users who want the compiled backends clone the
+repo and run `install.py`. The release steps and what is load-bearing in
+`pyproject.toml` are in `.claude/rules/packaging.md`, which loads with
+`pyproject.toml`, `release_pypi.py`, `.gitignore` and `juliapkg.json`.
+Three of its rules matter outside those files:
 
-```bash
-python -m build                  # -> dist/*.whl + dist/*.tar.gz
-python -m twine check dist/*     # metadata/README validation
-python -m twine upload --repository testpypi dist/*   # dry run on TestPyPI first
-python -m twine upload dist/*    # the real thing
-```
-
-Things in here that are load-bearing and easy to break:
-
-- **`numba` is a core dependency, not an extra.** `algebra/kpmextrapolate.py`
-  imports it at module level and sits on the unconditional
-  `manybodychain -> dynamics -> kpmdmrg -> algebra.kpm` import path, so
-  without it even `import dmrgpy.spinchain` raises `ModuleNotFoundError`.
-  This is unrelated to pyitensor's own opt-in numba/JAX matvec kernel
-  (`pyitensor/kernels.py`), which is properly `try/except`-guarded and
-  genuinely optional.
-- **`requires-python = ">=3.10"` is set by numba**, which declares
-  `>=3.10`. Claiming a lower floor does not make dmrgpy work on 3.9; pip
-  just backtracks onto an ancient, untested numba/numpy pair.
-- **`setuptools>=77` in `[build-system]`**, not the more common 61: the
-  `[project]` table uses PEP 639 licensing (bare SPDX `license` string plus
-  `license-files`), which older setuptools rejects outright.
-- **The `julia` extra is `juliacall`, not `julia`.** The live backend
-  migrated from PyJulia to juliacall/PythonCall.jl. The only surviving
-  `import julia` is `juliarun.py`, part of the legacy subprocess path that
-  is not reachable from the public API, so PyJulia is intentionally not
-  pulled in.
-- **`src/dmrgpy/juliapkg.json` must stay in `package-data`.** juliacall/
-  juliapkg reads it at import time to resolve and precompile ITensors,
-  ITensorMPS 0.4, KrylovKit (used directly by `mpsjulialive/vumps.jl` and
-  `cbe.jl`) and VectorInterface; if it is missing from the wheel,
-  `pip install dmrgpy[julia]` yields a Julia backend with no ITensors.jl.
-  `.gitignore`'s unanchored `julia*` pattern would also swallow it, hence
-  the explicit `!src/dmrgpy/juliapkg.json` un-ignore. Do not remove either
-  one.
-- **ITensorNHDMRG.jl is a copy, not a dependency.** Its compat entry
-  refuses ITensorMPS 0.4, so its `src/` lives unchanged in
-  `src/dmrgpy/mpsjulialive/ITensorNHDMRG/` (LICENSE and commit hash in
-  `UPSTREAM.md`), `juliasession.py` includes it as a module before any
-  other Julia file, and `get_gs.jl`/`nhdmrg.jl` load it with
-  `using .ITensorNHDMRG`. Its files are in `package-data`; its
-  VectorInterface dependency is in `juliapkg.json`. The folder name must
-  not start with `julia`, because of the same `.gitignore` pattern.
-- **The classifiers say `OS Independent`**: the pip-installed package (ED
-  and `itensor_version="python"` backends) works on Windows. Nothing in the
-  Python layer shells out any more (`sites.py::initialize()` used to run
-  `mkdir -p` via `subprocess`, removed in `1f7b7a9` along with the
-  `.mpsfolder` it created and `Many_Body_Chain.clean()`, whose only job was
-  removing that folder). The compiled C++ backends (`install.py`) remain
-  POSIX-only and are not part of the wheel regardless.
-- Every module in the wheel must at least byte-compile, or pip prints a
-  `SyntaxError` on install; `python -m compileall` over the installed
-  package is the cheap check.
-
-Verify a release candidate by installing the built wheel into a clean
-virtualenv (not from `src/`, so import bugs and missing package-data
-actually surface) and cross-checking the two shipped backends against each
-other: `itensor_version="python"` DMRG against `mode="ED"` on a small chain
-should agree to ~1e-15. `dist/`/`build/` are gitignored; build artifacts are
-not committed. A given version can never be re-uploaded to PyPI (or
-TestPyPI) once published, so bump the version rather than trying to replace
-a release.
+- `numba` is a core dependency, not an extra: `algebra/kpmextrapolate.py`
+  imports it at module level, on the import path of every chain.
+- Every module in the wheel must byte-compile, and new code in the Python
+  layer does not shell out, since the wheel says `OS Independent`.
+- `.gitignore` has an unanchored `julia*` pattern, so a new file or folder
+  whose name starts with `julia` is ignored unless it is un-ignored, as
+  `src/dmrgpy/juliapkg.json` is.
 
 ## Running / verifying changes
 
@@ -304,62 +211,22 @@ something to "fix" by removing.
 
 ### Cross-backend performance benchmarking
 
-**Before benchmarking anything, check BLAS thread counts.** DMRG is a great
-many small dense linear-algebra calls (a two-site tensor at `maxm=30` on
-spin-1/2 sites is 60x60), and at that size more BLAS threads is slower, not
-faster: measured 1 thread against 2, `svd` 1.6x and `eigh` 2.3x slower. End
-to end that alone is minor (~1.13x for `"python"`, nothing for v3), but
-under oversubscription (a shared cluster node, or several dmrgpy runs in
-parallel, where every process's BLAS thinks it owns the machine) it
-dominates every other effect in this file: on a 14-core host with another
-job holding 10 cores, MKL's default thread count turned a 9.4s `"python"`
-solve into 28.2s and a 1.6s v3 solve into 26.7s. Pin threads before
-importing numpy (`MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 ...`) when
-timing anything, or timings across runs are not comparable.
-`src/dmrgpy/blasthreads.py` has the full measurements and an opt-in
-`limit()` context manager (needs `threadpoolctl`; the env-var route is more
-effective, since some BLAS libraries fix threading on first use). dmrgpy
-never changes thread counts on its own. The same cap applies to agents: at
-most three Python processes at once across all subagents of a hunt or
-workflow (`run3.sh` in the 2026-09-24b record's "Shared helpers").
+**Pin BLAS threads before timing anything**
+(`MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 ...`, set before numpy is
+imported), or timings across runs are not comparable. DMRG is a great many
+small dense linear-algebra calls, where more threads are slower, and under
+oversubscription this dominates every other effect: on a 14-core host with
+another job holding 10 cores, a 9.4s `"python"` solve became 28.2s and a
+1.6s v3 solve 26.7s. dmrgpy never changes thread counts on its own. The
+same cap applies to agents: at most three Python processes at once across
+all subagents of a hunt or workflow (`run3.sh` in the 2026-09-24b record's
+"Shared helpers").
 
-`benchmarks/run_benchmarks.py` answers a different question than
-`tests/`/`examples/`: not "is this backend correct" but "which backend is
-fastest, and by how much, for each kind of calculation". It runs on every
-backend available in the current environment (`v2`, `v3`, `"python"`,
-`"julia_live"`, auto-detected via `cppext.available()` and a live Julia
-import) and sweeps two families of calculation over a uniform S=1/2
-Heisenberg chain: **finite**, swept over chain length (ground-state energy,
-static correlator, KPM and TD dynamical correlators, first excited state,
-bond entanglement entropy, real-time evolution after a quench, and the
-ground state confined to the `Sz=0` sector), cross-checked against ED at
-every size cheap enough for it (the ED entropy reference is an SVD of the
-ED state vector, since `entropy.py` is `self._session`-only and has no ED
-path); and **infinite**, swept over bond dimension (`infinitechain.py`):
-energy density and `<Sz>` under both `gs_method="idmrg"` and
-`gs_method="vumps"`, checked against the Bethe-ansatz density and against
-`<Sz>=0`. The catalogue of what is covered is `benchmarks/calctk.py`'s
-`CALCS` list; adding a capability is one entry there plus a label in
-`reporttk.CALC_LABELS`. Calculations only some backends implement (the
-sector, METTS, the non-Hermitian ground state, SECTOR and TASK, on v3,
-`"python"` and `"julia_live"`; the infinite chain, on v3 and `"python"`)
-are restricted to those backends and show up as blank-by-construction
-rather than as failures in the coverage table. The sector section tabulates
-the sector-against-dense ratio per size (block sparsity scales, its
-bookkeeping does not), and the `<Sz>` sections catch a wrongly gauged iDMRG
-unit cell, which an energy-only check cannot see.
-
-It writes `benchmarks/output/report.tex` (tables, matplotlib plots and an
-auto-generated "which backend is worth optimizing" paragraph) and compiles
-it to `report.pdf` with `pdflatex` if available; `benchmarks/output/` is
-gitignored. Run `python run_benchmarks.py --help` from `benchmarks/` for
-the full option list; `--from-json results.json` regenerates the report
-from a previous run's raw data. `--repeats>1` re-prepares each calculation
-from a fresh chain per repeat, because the DMRG session caches its
-ground-state energy (`groundstate.py`'s send-cache) and timing a second
-`gs_energy()` on the same chain would record that backend as instantaneous.
-The script always runs one untimed warm-up call on the Julia backend before
-the timed sweep, for the JIT reason above.
+`benchmarks/run_benchmarks.py` answers "which backend is fastest, and by
+how much, for each kind of calculation" on every backend available, and
+writes `benchmarks/output/report.pdf`. Its catalogue is the `CALCS` list of
+`benchmarks/calctk.py`. The full notes are in `.claude/rules/benchmarks.md`,
+which loads with `benchmarks/` and `src/dmrgpy/blasthreads.py`.
 
 ## The audits, and what to know before touching the code
 
@@ -728,43 +595,16 @@ backend (`edtk/edchain.py`). `multioperatortk/` holds supporting machinery
 construction, the canonical form below).
 
 **Canonical form and the Hermiticity proof.**
-`multioperatortk/canonical.py` rewrites every term into one spelling
-(factors sorted by site, stable so same-site factors keep their order, the
-coefficient carrying the sign of every fermionic exchange the sort makes,
-identity factors dropped) so that terms which are the same operator have
-the same signature and collect in a dict.
+`multioperatortk/canonical.py` rewrites every term into one spelling, so
+that terms which are the same operator collect, and
 `MultiOperator.simplify()`/`is_zero()`/`is_hermitian()`/`is_antihermitian()`
-all read off it. It replaced a sympy round trip (`sympymultioperator.py`,
-deleted with it, taking sympy out of the dependencies) that collected only
-terms already spelled identically: 0.834 s on an n=20 spin-1/2 chain to
-report `False` for an ordinary Heisenberg Hamiltonian, now proven Hermitian
-in 0.5 ms. The rewrite is exact, so the proof is **one-sided**: an empty
-canonical form of `H-H^dagger` means Hermitian, full stop, while a nonempty
-one means not proven, since a same-site identity (`Sx Sx = 1/4`) or a name
-alias (`Sp = Sx + i Sy`, `Sz = (Nup-Ndn)/2`) needs the site type, which
-lives on the chain and not on the operator. Two factors sharing a site are
-reordered only when both are diagonal (`_DIAGONAL`), which is what makes the
-Hubbard `Nup[i]*Ndn[i]` provable while leaving `Sx[i]*Sz[i]` alone; do NOT
-widen that to a general same-site sort, those two are both even and do not
-commute. Nor is a term reordered when it names both a pre-transform
-`C`-type name and a bare `A`-type one (`_LOCAL_LADDER`): with
-`C_j = F_0...F_{j-1} A_j`, `A_i` anticommutes with `C_j` for j>i and
-commutes for j<i, so their exchange sign depends on the site order and is
-not a parity (2026-09-24 audit finding 1). Do NOT fix that by giving the
-`A`-type names no parity: they are also the boson ladder operators, and the
-boson and Jordan-Wigner-transformed proofs need them even. So
-`Many_Body_Chain.is_hermitian()` takes the proof when it lands and falls
-back to its random-witness probe otherwise; do not turn that fallback into
-a rejection. Only the names in `canonical.py`'s `_PARITY` table are
-reordered; anything else (parafermionic `Sig`/`Tau`, which reorder with a
-Z_n phase, or a caller's own name) is left spelled as written, and the
-Hermiticity proof refuses outright when any name is off the table, since
-`get_dagger()` leaves an unrecognized name untouched (and carries a phase
-for a name whose adjoint is a multiple of itself, `_dagger_phase`, so far
-only `ISy` -> `-ISy`) and such an operator would otherwise cancel against
-its own "dagger". See `docs/development.md` 4.2a,
-`tests/test_multioperator_canonical.py` and
-`examples/algebra/operator_canonical_form`.
+all read off it. The proof is **one-sided**: an empty canonical form of
+`H-H^dagger` means Hermitian, and a nonempty one means not proven, so
+`Many_Body_Chain.is_hermitian()` falls back to its random-witness probe; do
+not turn that fallback into a rejection. Do NOT widen the same-site
+reordering beyond two diagonal factors, and do NOT give the `A`-type names
+no parity. The reasons are in `.claude/rules/multioperator.md`, which loads
+with `multioperator.py` and `multioperatortk/`.
 
 ### Backend dispatch (DMRG vs ED, C++ vs Julia)
 
@@ -841,36 +681,12 @@ cross-validated between solvers.
   than compiled ITensor (no block-sparsity, no JIT); see
   `pyitensor/__init__.py`'s docstring and the module docstrings throughout
   `pyitensor/` for the specific simplifications taken and why each one does
-  not affect dmrgpy's own results. MPO construction is no longer one of
-  them: `pyitensor/mpobuilder.py`'s `to_mpo` assembles the finite-state
-  machine over the terms' partial products directly (the shape ITensor's
-  own `toMPO(...,{"Exact",true})` produces), O(L^2) instead of the old
-  O(L^4) sum-and-compress, keeping two sweeps afterwards purely to honour
-  `cutoff`/`maxdim`, the first exact and only the return one truncating (a
-  truncating first sweep compressed any operator whose coefficients were
-  all below about 2e-7 into a different one), and an operator whose largest
-  coefficient is below 1 is built at unit scale and scaled back, like
-  v2/v3's `to_mpo_unit()`. Two rules in there are load-bearing and easy to
-  get subtly wrong: the coefficient goes on the transition into the final
-  state (so terms differing only by a coefficient still share partial
-  states), and transitions into that state accumulate while structural
-  ones are assigned (two syntactically identical terms trace the same path,
-  so their coefficients must sum while their shared structure must not be
-  written twice). The old construction is kept as `_sum_of_term_mpos`, the
-  reference the machine is tested against in
-  `tests/test_mpo_automaton_builder.py`.
-  New `pyitensor` methods are written to run on the GPU as well, whenever
-  that is possible, locked by the author on 2026-10-24 ("whenever we
-  implement a new method, if possible, we should write it so that it also
-  works on the GPU", for pyitensor). The way we do this is by taking the
-  array namespace from `pyitensor/backend.py` (`xp = backend.xp()`, once
-  per function) instead of `np`, moving host data to the backend at one
-  entry point, bringing back only scalars and small matrices
-  (`backend.scalar`, `backend.to_host`), and never writing into an array
-  in place without `backend.setblock`/`backend.setrow`; a new method is
-  then checked under `backend.set_backend("jax")` against its NumPy
-  result. `pyitensor/task.py` is a worked example. When a step cannot run
-  on the device, say so in the method's docstring.
+  not affect dmrgpy's own results. The MPO builder
+  (`pyitensor/mpobuilder.py`, a finite-state machine over the terms'
+  partial products) has two rules that are easy to get wrong, and a new
+  `pyitensor` method takes its array namespace from `pyitensor/backend.py`
+  so that it also runs on the GPU (the author's rule of 2026-10-24); both
+  are in `.claude/rules/pyitensor.md`, which loads with `pyitensor/`.
 - **DMRG, Julia (`itensor_version="julia_live"`)**: a live, in-process
   Julia session (`mpsjulialive/`, via `juliacall`/`juliasession.py`) with
   its own parallel set of modules (`mpsjulialive/groundstate.py`, `vev.py`,
