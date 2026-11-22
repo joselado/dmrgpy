@@ -323,6 +323,17 @@ model-specific rows:
      Hamiltonian is slow to build there. The TEBD route splits H into
      bonds and cannot take it.
 
+10. **Ideas not started, carried over from the first to-do list.**
+   - **Multipartite entanglement.** No backend has a measure beyond the
+     bipartite entropies of section 2.
+   - **A hybrid dynamical correlator:** a coarse KPM or TD run to locate
+     the weight, then CVM, INV or EX to refine it. The plan is
+     `docs/hybrid_dynamical_correlator_plan.md`, not implemented.
+   - **Real-time evolution:** `TDVP_GSE` freezing the bond dimension after
+     `tdvp_gse_sweeps` steps, the absolute thresholds of the v3 Krylov
+     exponentiator, and the other open leads ranked in
+     `docs/time_evolution_improvement_plan.md`.
+
 ## Pointers for extending a backend
 
 - **v3 (C++)**: add/extend a method on `Chain` in
