@@ -628,8 +628,47 @@ def _send_key(self):
             method_key(self))
     if isinstance(self.hamiltonian,StaticOperator):
         return base+(id(self.hamiltonian.cpp_handle),),None
-    terms = self.hamiltonian.to_terms()
+    terms = self.hamiltonian.to_terms(native_strings=native_strings(self))
     return base+(terms,),terms
+
+
+# Above this many F factors in the explicit Jordan-Wigner strings of its
+# hoppings and pairings, the Hamiltonian of a v3 session keeps the names
+# C and Cdag of those terms (native_strings below).
+NATIVE_STRING_FACTORS = 10000
+
+
+def native_strings(self):
+    """True when the Hamiltonian goes to the v3 session with the names of
+    its two-fermion terms kept (MultiOperator.to_terms(native_strings=)).
+
+    ITensor's svdMPO keys its partial terms by their whole operator
+    string, so an explicit string of span s costs it about s^2: the
+    32020 terms of a Gaussian-basis Hamiltonian on 128 orbitals (2.76
+    million factors) took 90 s to build and 18 s with the names kept, the
+    same MPO dimension and the same energy to the solver noise. A name
+    that starts with C is fermionic in ITensor's AutoMPO, which inserts
+    the F string itself, and on a spinless fermion site (FermionSite,
+    type 0) C, Cdag and F are the local matrices dmrgpy's own strings are
+    made of; for a parity-even product the two give the same operator.
+    So it is taken only on v3, only when every site is a spinless
+    fermion (F on every site a string crosses), and only above
+    NATIVE_STRING_FACTORS, so that the MPO of a short-range Hamiltonian
+    is built exactly as before; the switch is for the whole Hamiltonian,
+    since a mixture of both forms would split the channels of the MPO. A
+    parity-odd term and a four-fermion term keep the explicit string in
+    any case, and so does every operator other than the Hamiltonian of
+    the session."""
+    if self.itensor_version != 3:
+        return False
+    if any(s != 0 for s in getattr(self, "sites", [1])):
+        return False
+    total = 0
+    for term in self.hamiltonian.op:
+        if len(term) == 3 and term[1][0] in ("C", "Cdag") \
+                and term[2][0] in ("C", "Cdag"):
+            total += max(abs(term[1][1]-term[2][1])-1, 0)
+    return total > NATIVE_STRING_FACTORS
 
 
 def hamiltonian_on_session(self):

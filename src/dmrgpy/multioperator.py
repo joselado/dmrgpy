@@ -216,7 +216,7 @@ class MultiOperator():
         if use_jordan_wigner: m = jordan_wigner(self)
         else: m = self
         write(m,name)
-    def to_terms(self,jordan_wigner_transform=True):
+    def to_terms(self,jordan_wigner_transform=True,native_strings=False):
         """
         Return this operator as [(coeff, [(name,1-based-site),...]), ...],
         for the in-process pybind11 extension (mpscpp2/bindings.cc). This is
@@ -239,8 +239,18 @@ class MultiOperator():
         distinct sites per term" contract (each explicit F factor lands on
         its own site) and hardcodes a string anchored at a site that does
         not exist.
+
+        `native_strings=True` keeps the names of every term that is a
+        product of exactly two of C and Cdag (a hopping or a pairing, both
+        parity even), and transforms every other term as usual: ITensor's
+        AutoMPO threads the string of such a term itself, since a name
+        that starts with C is fermionic there, instead of reading it
+        factor by factor. groundstate.native_strings decides when the
+        Hamiltonian of a v3 session takes it. A parity-odd term (a bare
+        C) and a four-fermion term always keep the explicit string.
         """
-        if use_jordan_wigner and jordan_wigner_transform: m = jordan_wigner(self)
+        if use_jordan_wigner and jordan_wigner_transform:
+            m = jordan_wigner(self,native_strings=native_strings)
         else: m = self
         return [(complex(term[0]),[(name,i+1) for (name,i) in term[1:]])
                 for term in _filter_small(m.op)]
@@ -399,8 +409,13 @@ def MO2matrix(MO,obj):
 _spinful_fermion_names = {"Cup","Cdagup","Cdn","Cdagdn"}
 
 
-def jordan_wigner(MO):
-    """Use Jordan Wigner transformationin a multioperator"""
+_LADDER_NAMES = ("C","Cdag")
+
+
+def jordan_wigner(MO,native_strings=False):
+    """Use Jordan Wigner transformationin a multioperator. With
+    native_strings a product of exactly two of C and Cdag is left as it
+    is (see MultiOperator.to_terms)."""
     from .multioperatortk import jordanwigner
     from .multioperatortk import jordanwigner_spinful
     # Accumulate into a flat Python list and wrap once at the end, instead
@@ -430,7 +445,10 @@ def jordan_wigner(MO):
                     mi = c*jordanwigner.one_fermion(ls[0],i)
             elif (n==2): # two point operators
                 i,j = opi[1][1],opi[2][1]
-                if "C" in ls or "Cdag" in ls:
+                if native_strings and ls[0] in _LADDER_NAMES \
+                        and ls[1] in _LADDER_NAMES:
+                    pass # left to the AutoMPO, which threads the string
+                elif "C" in ls or "Cdag" in ls:
                     mi = c*jordanwigner.two_fermions(ls[0],i,ls[1],j)
             elif (n==4): # four point operators
                 i,j,k,l = opi[1][1],opi[2][1],opi[3][1],opi[4][1]

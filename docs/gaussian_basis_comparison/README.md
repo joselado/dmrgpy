@@ -70,7 +70,16 @@ site basis, growing roughly as the logarithm of the size
 orbitals the rotated $H$ has 32020 terms, and building its MPO takes 93 s
 before the first sweep (63 s in the AutoMPO of ITensor v3, 28 s in the
 Jordan-Wigner expansion of `MultiOperator.to_terms`). The wall times
-below include this build.
+below include this build, and were taken before the two changes that
+followed this comparison: the Jordan-Wigner strings are now built in one
+step (13.8 s to 3.2 s for that expansion), and on v3 a Hamiltonian with
+that many string factors keeps the names of its hoppings, so that
+ITensor's AutoMPO threads the strings itself
+(`groundstate.native_strings`). With both, the build on 128 orbitals
+takes 11 to 18 s instead of 94 s, and the Gaussian basis at `maxm=8`
+took 43 s in total instead of 128 s, with the same MPO dimension. The
+two routes give energies 6e-8 apart at `maxm=16`, inside the solver
+noise.
 
 At equal accuracy the Gaussian basis is faster from 64 orbitals on. On
 64 orbitals the site basis at `maxm=128` took 239 s and is 3.4e-3 off;
@@ -99,5 +108,6 @@ $U=0$ is unambiguous. Away from it the reference level of the impurity
 (the bare level or a Hartree level) is a choice that was not measured.
 Neither the natural-orbital iteration (the basis of the correlation
 matrix of the interacting state, `cm=`) nor a bath with pairing was
-tried. The cost of the MPO build could be cut by building the MPO of a
-quadratic Hamiltonian directly, which was not done.
+tried. The MPO build, 11 to 18 s on 128 orbitals now, could be cut further
+by building the MPO of a quadratic Hamiltonian directly, which was not
+done.

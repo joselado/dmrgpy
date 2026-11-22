@@ -77,6 +77,23 @@ pybind` has rebuilt the `.so` and the test ran against the rebuilt one.
   (`multioperator.py`) convert a `MultiOperator` into a plain list of
   `(coefficient, [(opname, site), ...])` tuples that `Chain` turns directly
   into an ITensor `HTerm`/`AutoMPO`.
+  The Jordan-Wigner strings are explicit (`A`, `Adag`, `F`), with one
+  exception since 2026-11-22: the Hamiltonian of a v3 session on a chain
+  of spinless fermion sites whose hoppings and pairings would carry more
+  than `groundstate.NATIVE_STRING_FACTORS` = 10000 `F` factors keeps the
+  names `C`/`Cdag` of those two-fermion terms (`to_terms(native_strings=)`,
+  decided by `groundstate.native_strings`), and ITensor's AutoMPO, for
+  which a name starting with `C` is fermionic, threads their strings.
+  svdMPO keys its partial terms by their whole operator string, so an
+  explicit string of span s costs it about s^2: 90 s against 18 s for the
+  32020 terms of a Gaussian-basis Hamiltonian on 128 orbitals. The switch
+  is for the whole Hamiltonian (a mixture splits the MPO channels), the
+  parity-odd and four-fermion terms keep explicit strings (a bare `C`
+  needs its string from site 1, the pitfall of the `julia_live` port), and
+  so does every other operator and the real-time routes, whose TEBD splits
+  terms into bonds. Do NOT lower the threshold to take every fermion
+  Hamiltonian: below it every v3 MPO is built as before, to the bit
+  (`tests/test_native_fermion_strings.py`).
 - **The `cpp_handle` pattern**: `mps.py::MPS` and
   `multioperatortk/staticoperator.py::StaticOperator` both carry an opaque
   `cpp_handle` attribute holding the pybind11-wrapped ITensor object living

@@ -4803,7 +4803,16 @@ rule of threading Jordan-Wigner strings explicitly at the Python level
 for backend-agnosticism (see `multioperatortk/jordanwigner_spinful.py`);
 safe here only because this calculation always builds and discards its
 own fresh, self-contained `AutoMPO`, not a change to the general
-Hamiltonian/MPO pipeline. `entropytk/correlationentropy.py::
+Hamiltonian/MPO pipeline. Since 2026-11-22 there is a second exception, in the
+Hamiltonian pipeline itself but narrow: on v3, a Hamiltonian of a chain
+of spinless fermion sites whose hoppings and pairings would carry more
+than `groundstate.NATIVE_STRING_FACTORS` explicit `F` factors keeps the
+names of those two-fermion terms (`groundstate.native_strings`,
+`MultiOperator.to_terms(native_strings=)`), since svdMPO's cost grows
+with the length of an explicit string (90 s against 18 s on a
+Gaussian-basis Hamiltonian of 128 orbitals). Parity-odd and four-fermion
+terms, every other operator and the real-time routes keep the explicit
+strings, and below the threshold every MPO is built as before. `entropytk/correlationentropy.py::
 get_four_correlation_tensor_cpp` dispatches to whichever C++ method
 matches `type(wf.MBO)`.
 

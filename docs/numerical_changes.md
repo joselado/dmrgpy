@@ -2542,3 +2542,19 @@ call before this date measured the ground state of the chain, not `x`. On
 a 4-site chain with H the total number, $\langle N\rangle$ of a two-fermion
 state came out as 0 (the vacuum), and is now 2. `wf=` at T>0 raises, and a
 `wf` that is not an ED state raises `TypeError` (`tests/test_gaussian_mps.py`).
+
+## The 2026-11-22 fermion strings of a long-range v3 Hamiltonian
+
+On `itensor_version=3` a Hamiltonian whose hoppings and pairings would
+carry more than `groundstate.NATIVE_STRING_FACTORS` = 10000 explicit `F`
+factors in total, on a chain of spinless fermion sites, now goes to
+ITensor's AutoMPO with the names `C` and `Cdag` of those terms kept, and
+the AutoMPO threads their Jordan-Wigner strings itself. The operator is
+the same, but its MPO is built another way, so energies and states move
+at the level of the solver noise: 6e-8 on the 128-orbital Gaussian-basis
+Anderson chain at `maxm=16`, against an error of 2e-4 there. Below the
+threshold nothing changes, to the bit, and that covers every Hamiltonian
+with short-range hopping; a dense complex hopping matrix on spinless
+sites crosses it from 33 sites. Parity-odd terms, four-fermion terms, every other operator and
+the real-time routes keep the explicit strings. ED, `"python"` and
+`julia_live` are untouched (`tests/test_native_fermion_strings.py`).
