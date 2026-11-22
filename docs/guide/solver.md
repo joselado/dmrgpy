@@ -228,6 +228,80 @@ The examples `examples/fermion_models/gaussian_state` and
 `examples/fermion_models/gaussian_state_pairing` compare the correlations
 of a 40-site Fermi sea and of a 40-site Kitaev chain with the exact ones.
 
+## A basis for impurity models
+
+We now see how to choose the single-particle basis of an impurity model,
+so that its ground state needs a small bond dimension. In the site basis
+the bath is a Fermi sea, whose entanglement grows with the length of the
+bath, so DMRG of an Anderson impurity on a long bath needs a large `maxm`
+even though the correlations sit near the impurity. The way we do this
+is by rotating the bath with the circuit that writes the ground state
+without the interaction, the resonant level model, as an MPS (see
+[Free-fermion states](#free-fermion-states)). The new orbitals are
+$f^\dagger_r=\sum_iV_{ri}c^\dagger_i$, with $V$ the product of the
+rotations of the circuit (Wu et al., arXiv:2212.09798). In these
+orbitals the resonant level model is a product state, except for the
+impurity and one partner orbital, and the interacting ground state is
+close to it. The rotations that touch the impurity are dropped, so $V$
+leaves the impurity as it is and $U$ stays local, and the circuit runs
+from the far end of the bath toward the impurity, so the orbitals that
+stay entangled end next to it:
+
+```python
+import numpy as np
+from dmrgpy import fermionchain
+n = 32                                      # the impurity (orbital 0) and 31 bath sites
+fc = fermionchain.Spinful_Fermionic_Chain(n)
+fc.maxm = 16
+h = np.zeros((n,n))
+for i in range(n-1): h[i,i+1] = h[i+1,i] = -1.0          # hopping, and V=t=1 to the impurity
+H = sum(h[i,j]*(fc.Cdagup[i]*fc.Cup[j] + fc.Cdagdn[i]*fc.Cdn[j])
+        for i in range(n) for j in range(n) if h[i,j] != 0)
+H = H + 4.0*(fc.Nup[0]-0.5)*(fc.Ndn[0]-0.5)               # U=4 on the impurity
+basis = fc.get_gaussian_basis(h=h, nf=n, fixed=[0])       # circuit of the U=0 state
+fc.set_hamiltonian(basis.rotate(H))
+e0 = fc.gs_energy()
+d = fc.vev(fc.Nup[0]*fc.Ndn[0])             # the impurity is not rotated
+n5 = fc.vev(basis.rotate(fc.Ntot[5]))       # site 5 of the original bath
+```
+
+The rotation is exact: the rotated Hamiltonian has the spectrum of the
+original one whatever the reference, and the reference only decides how
+weakly entangled the ground state is. On this chain `maxm=16` gives the
+energy to 1e-4 in the rotated basis, while the site basis is still 5e-3
+off at `maxm=64`. The price is a larger MPO, since a hopping of the bath
+becomes a sum over all pairs of rotated orbitals: its bond dimension is
+34 instead of 6 here, and it grows roughly as the logarithm of the
+length of the bath. On a Wilson chain, whose bath is already less
+entangled, the gain is smaller, about a factor 2 in `maxm` at equal
+accuracy. An operator on the impurity is measured as it is, and an
+operator of the original bath goes through `basis.rotate`. For the same
+reason `get_kondo_screening` gives the same `M_imp`, `M_env` and Schmidt
+values in both bases, while its `M_n` is per rotated orbital: there the
+screening sits almost all on the partner orbital of the impurity.
+`basis.occupations` are the occupations of the rotated orbitals in the
+reference: the ones far from 0 and 1 carry the entanglement. The
+keywords are:
+
+- `h=`, `nf=`: the reference, the Slater determinant of `nf` fermions of
+  `h`. For an impurity this is the one-body part without $U$; with $U$
+  written as $U(n_\uparrow-\frac12)(n_\downarrow-\frac12)$ it is the
+  resonant level model at $\epsilon_d=0$. On a spinful chain an
+  $n\times n$ matrix is used for both spins.
+- `cm=`: a correlation matrix $\langle c^\dagger_ic_j\rangle$ instead,
+  for instance that of an interacting state. It does not need to be pure.
+- `fixed=`: the orbitals that are not rotated (modes on a spinless
+  chain). A term with more than two fermion operators must act on them
+  only, and `rotate` raises otherwise. Every bath must lie outside the
+  fixed orbitals, at one end of the chain or at both.
+- `eigval_cutoff` (default 1e-8), `maxblocksize` (default: no limit): as
+  for `get_gaussian_state`. A small `maxblocksize` gives a smaller MPO
+  and a reference that is less disentangled; at `maxblocksize=4` the
+  entanglement in the rotated basis grows again with the bath.
+
+The example `examples/kondo/gaussian_basis_anderson` compares the
+ground-state energy against `maxm` in the two bases.
+
 ## Several chains
 
 `sc.copy()` returns an independent chain with the same Hamiltonian and

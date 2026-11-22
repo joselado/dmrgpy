@@ -1,0 +1,172 @@
+"""The Gaussian basis of an impurity model: bath orbitals rotated by the
+Fishman-White circuit of a reference state, so that the correlated ground
+state is weakly entangled (Wu, Kloss, Krinitsin, Fishman, Pixley and
+Stoudenmire, arXiv:2212.09798).
+
+The reference is a correlation matrix Lambda[i,j] = <c_i^dag c_j>, by
+default the Slater determinant of a hopping matrix h with nf fermions,
+for an impurity model the ground state without the interaction (the
+resonant level model). Its circuit (gaussianmpstk/basis.py) gives a
+unitary V and new modes f_r^dag = sum_i V[r,i] c_i^dag, written on the
+same sites of the chain. The gates touching the fixed modes (the
+impurity) are dropped, so V is the identity there and an interaction on
+them stays as it is, and each bath is rotated from its far end toward
+the impurity. The reference is then a product state except next to the
+impurity, and the interacting ground state is close to it.
+
+GaussianBasis.rotate rewrites an operator of the original modes in the
+new ones, a Hamiltonian as well as an observable. A bilinear of the bath
+becomes a sum over all pairs of new modes, so the rotated Hamiltonian
+has longer-range hoppings and a larger MPO; the gain is a ground state
+that needs a much smaller bond dimension.
+
+On a Spinful_Fermionic_Chain, h, cm and fixed are given per orbital (an
+n x n matrix is taken for both spins, as in get_gaussian_state, and
+fixed lists orbitals, as fc.impurity does), and when the reference does
+not mix the spins each spin is rotated on its own, so that the rotated
+Hamiltonian keeps every conservation law of the original one."""
+
+import numpy as np
+
+from .gaussianmpstk import basis as gbasis
+
+# Distance to [0, 1] above which an eigenvalue is not an occupation.
+OCCUPATION_TOLERANCE = 1e-8
+
+
+def _check_chain(chain):
+    from .fermionchain import Fermionic_Chain, Majorana_Chain
+    if not isinstance(chain, Fermionic_Chain) or isinstance(chain,
+                                                            Majorana_Chain):
+        raise TypeError("get_gaussian_basis needs a Fermionic_Chain or a "
+                        "Spinful_Fermionic_Chain (spinless sites); the "
+                        "native spinful chain is not supported")
+
+
+def _fixed_modes(chain, fixed):
+    from .gaussianmps import _is_spinful
+    fixed = [int(f) for f in np.atleast_1d(fixed)] if fixed is not None \
+        else []
+    nmax = chain.ns//2 if _is_spinful(chain) else chain.ns
+    for f in fixed:
+        if not 0 <= f < nmax:
+            raise ValueError("get_gaussian_basis: fixed %s %d is out of "
+                             "range 0..%d" % ("orbital" if
+                             _is_spinful(chain) else "mode", f, nmax-1))
+    if _is_spinful(chain):
+        return fixed, sorted([2*f for f in fixed]+[2*f+1 for f in fixed])
+    return fixed, sorted(fixed)
+
+
+def _reference(chain, h, nf, cm):
+    """The reference correlation matrix on the chain's modes."""
+    from . import gaussianmps
+    if (h is None) == (cm is None):
+        raise ValueError("get_gaussian_basis: give either h (with nf) or cm")
+    if cm is None:
+        return gaussianmps.correlation_matrix(chain, h, nf)
+    if nf is not None:
+        raise ValueError("get_gaussian_basis: nf goes with h, not cm")
+    cm = gaussianmps._square(cm, "cm")
+    if gaussianmps._is_spinful(chain) and 2*cm.shape[0] == chain.ns:
+        cm = np.kron(cm, np.eye(2))
+    if cm.shape[0] != chain.ns:
+        raise ValueError("get_gaussian_basis: cm is %dx%d but the chain has "
+                         "%d fermionic modes" % (cm.shape[0], cm.shape[1],
+                                                 chain.ns))
+    if np.max(np.abs(cm-cm.conj().T)) > 1e-12*gaussianmps._scale(cm):
+        raise ValueError("get_gaussian_basis: cm must be Hermitian")
+    ev = np.linalg.eigvalsh(cm)
+    if ev[0] < -OCCUPATION_TOLERANCE or ev[-1] > 1.0+OCCUPATION_TOLERANCE:
+        raise ValueError("get_gaussian_basis: cm has an eigenvalue %.3e "
+                         "outside [0, 1], so it is not a correlation matrix "
+                         "<Cdag_i C_j>" % (ev[0] if ev[0] < 0 else ev[-1]))
+    return cm
+
+
+def _rotation(chain, L, fixed_orbitals, fixed_modes, eigval_cutoff,
+              maxblocksize):
+    from .gaussianmps import _is_spinful
+    kw = dict(eigval_cutoff=eigval_cutoff, maxblocksize=maxblocksize)
+    if not _is_spinful(chain) or \
+            np.max(np.abs(L[0::2, 1::2])) > 1e-12:  # the spins mix
+        return gbasis.rotation(L, fixed_modes, **kw)
+    Lup, Ldn = L[0::2, 0::2], L[1::2, 1::2]
+    Vup, iup = gbasis.rotation(Lup, fixed_orbitals, **kw)
+    if np.max(np.abs(Lup-Ldn)) <= 1e-12:
+        Vdn, idn = Vup, iup
+    else:
+        Vdn, idn = gbasis.rotation(Ldn, fixed_orbitals, **kw)
+    V = np.zeros_like(L, dtype=complex)
+    V[0::2, 0::2], V[1::2, 1::2] = Vup, Vdn
+    info = [dict(d, spin="up") for d in iup]+[dict(d, spin="dn") for d in idn]
+    return V, info
+
+
+class GaussianBasis:
+    """The rotated modes f_r^dag = sum_i V[r,i] c_i^dag of a chain.
+
+    V: the unitary, on the chain's modes.
+    fixed: the fixed orbitals (spinful chain) or modes, as given.
+    occupations: <f_r^dag f_r> of the reference, per mode; the modes far
+        from 0 and 1 are the ones that carry the entanglement.
+    info: one dict per rotated run of modes (and spin): the modes, the
+        number of gates, and the largest distance to 0 or 1 of a
+        decoupled occupation."""
+
+    def __init__(self, chain, V, fixed, fixed_modes, reference, info):
+        self.chain = chain
+        self.V = V
+        self.fixed = fixed
+        self.fixed_modes = fixed_modes
+        self.info = info
+        self._reference = reference
+        self._rotated = [i for i in range(chain.ns) if i not in
+                         set(fixed_modes)]
+
+    def correlation_matrix(self):
+        """The reference correlation matrix <f_r^dag f_s> in the new
+        modes, V Lambda V^dagger."""
+        return self.V @ self._reference @ self.V.conj().T
+
+    @property
+    def occupations(self):
+        return np.real(np.diag(self.correlation_matrix()))
+
+    def rotate(self, op):
+        """The operator op of the original modes, written in the new ones:
+        a Hamiltonian to set with set_hamiltonian, or an observable of the
+        original bath to measure in the new basis. On a rotated mode only
+        C, Cdag and N may appear, at most two per term; an interaction
+        must act on the fixed modes only."""
+        from . import multioperator
+        op = multioperator.obj2MO(op)
+        terms = gbasis.rotate_terms(multioperator._filter_small(op.op),
+                                    self.V, self._rotated,
+                                    scale_rule=multioperator.clean_threshold)
+        out = multioperator.MultiOperator(term=False)
+        out.op = terms
+        out.i = len(terms)-1
+        return out
+
+
+def gaussian_basis(chain, h=None, nf=None, cm=None, fixed=None,
+                   eigval_cutoff=1e-8, maxblocksize=None):
+    """The Gaussian basis of the reference state given by the hopping
+    matrix h and the number of fermions nf (its Slater determinant), or
+    by a correlation matrix cm (<Cdag_i C_j>, eigenvalues in [0, 1], not
+    necessarily a pure state), with the fixed orbitals (spinful chain) or
+    modes left out of the rotation.
+
+    eigval_cutoff: how close to 0 or 1 an occupation must be for its mode
+        to be decoupled; it sets how close to a product state the
+        reference is in the new basis.
+    maxblocksize: the largest block of the circuit (default: no limit).
+        A smaller one gives fewer long-range hoppings in the rotated
+        Hamiltonian and a reference that is less disentangled."""
+    _check_chain(chain)
+    fixed, fixed_modes = _fixed_modes(chain, fixed)
+    L = _reference(chain, h, nf, cm)
+    V, info = _rotation(chain, L, fixed, fixed_modes, eigval_cutoff,
+                        maxblocksize)
+    return GaussianBasis(chain, V, fixed, fixed_modes, L, info)

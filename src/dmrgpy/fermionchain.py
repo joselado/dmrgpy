@@ -38,6 +38,18 @@ class Fermionic_Chain(Many_Body_Chain):
         from . import gaussianmps
         return gaussianmps.gaussian_state(self,h=h,nf=nf,cm=cm,delta=delta,
                                           **kwargs)
+    def get_gaussian_basis(self,h=None,nf=None,cm=None,fixed=None,**kwargs):
+        """The basis of modes rotated by the Fishman-White circuit of a
+        reference state (the Slater determinant of h with nf fermions, or
+        the correlation matrix cm), with the fixed orbitals or modes (an
+        impurity) left as they are (arXiv:2212.09798). Its rotate(op)
+        writes a Hamiltonian or an observable in the new modes, where the
+        ground state of an impurity model is weakly entangled. The
+        keywords (eigval_cutoff, maxblocksize) are those of
+        gaussianbasis.gaussian_basis."""
+        from . import gaussianbasis
+        return gaussianbasis.gaussian_basis(self,h=h,nf=nf,cm=cm,fixed=fixed,
+                                            **kwargs)
     def get_charge_gap(self,**kwargs):
         """Return the charge gap"""
         return gap.sector_gap(self,sum(self.N),**kwargs)
