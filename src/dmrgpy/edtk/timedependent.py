@@ -34,7 +34,7 @@ def evolution_ABC(self,h,A=None,B=None,C=None,wf=None,nt=100,dt=0.01):
     if wf is None: # the cached ground state, see evolution_DC below
         wf = self.get_gs_array()
     else: # use the wavefunction provided
-        if type(wf)==State: wf = wf.v # get the vector
+        if isinstance(wf,State): wf = wf.v # get the vector
     wfA = Aop@wf # apply operator
     wfC = Cop@wf # apply operator
     cs = [] # empty list
@@ -110,7 +110,7 @@ def evolution_DC(self,h=None,name=None,nt=100,dt=0.01,wf0=None,e0=None,**kwargs)
     ts = np.array([dt*ii for ii in range(nt)]) # times
     gs = self.get_gs_array() # cached; this is also what sets self.e0
     if wf0 is None: wf0 = gs
-    elif type(wf0)==State: wf0 = wf0.v # get the vector
+    elif isinstance(wf0,State): wf0 = wf0.v # get the vector
     wf0 = np.asarray(wf0).reshape(-1)
     if e0 is None: e0 = self.e0 # +E_0, the ground-state energy
     wf = wf0.copy() # copy wavefunction

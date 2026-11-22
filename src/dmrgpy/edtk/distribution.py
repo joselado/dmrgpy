@@ -7,7 +7,7 @@ from .edchain import State
 def get_distribution(self,X=None,wf=None,method="KPM",**kwargs):
     """Get a certain distribution"""
     if wf is None: wf = self.get_gs_array() # ground state
-    elif type(wf)==State: wf = wf.v
+    elif isinstance(wf,State): wf = wf.v
     X = self.get_operator(X)
     if method=="KPM":
       return distribution_kpm(wf,X=X,**kwargs)

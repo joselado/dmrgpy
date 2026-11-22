@@ -380,7 +380,7 @@ class EDchain():
 class State():
     """This is a dummy class to contain states"""
     def __init__(self,v,MBO):
-        if type(v)==State:
+        if isinstance(v,State):
             self.v = v.v.copy()
             self.MBO = v.MBO
         else:
