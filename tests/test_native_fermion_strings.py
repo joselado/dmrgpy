@@ -40,6 +40,12 @@ def _long_range(fc, n, odd=0.0):
             H = H + d*(fc.Cdag[i]*fc.Cdag[j] + fc.C[j]*fc.C[i])
         if i < n-1:
             H = H + 0.7*fc.N[i]*fc.N[i+1]
+    for (i, j) in [(0, 5), (2, 7), (6, 1)]:  # hoppings written C first
+        s = 0.4*np.exp(0.7j*(i+1))
+        H = H + s*fc.C[i]*fc.Cdag[j] + np.conj(s)*fc.C[j]*fc.Cdag[i]
+    g = 0.3*np.exp(0.4j)  # a pair hopping, four fermions far apart
+    H = H + g*fc.Cdag[0]*fc.Cdag[1]*fc.C[6]*fc.C[5]
+    H = H + np.conj(g)*fc.Cdag[5]*fc.Cdag[6]*fc.C[1]*fc.C[0]
     if odd:
         H = H + odd*(fc.C[3] + fc.Cdag[3])  # a parity-odd field
     return H
@@ -129,3 +135,22 @@ def test_gaussian_basis_hamiltonian_takes_the_native_route():
     fc2 = fermionchain.Spinful_Fermionic_Chain(n, itensor_version="python")
     fc2.set_hamiltonian(b.rotate(H))
     assert not groundstate.native_strings(fc2)  # v3 only
+
+
+def test_exact_free_energy_through_the_default_threshold():
+    """At U=0 the Gaussian-basis Hamiltonian of 32 orbitals takes the
+    native route at the default threshold, and its DMRG energy is twice
+    the sum of the filled levels."""
+    n = 32
+    fc = fermionchain.Spinful_Fermionic_Chain(n, itensor_version=3)
+    fc.maxm, fc.nsweeps = 16, 12
+    h = np.zeros((n, n))
+    for i in range(n-1):
+        h[i, i+1] = h[i+1, i] = -1.0
+    H = sum(h[i, j]*(fc.Cdagup[i]*fc.Cup[j]+fc.Cdagdn[i]*fc.Cdn[j])
+            for i in range(n) for j in range(n) if h[i, j] != 0)
+    b = fc.get_gaussian_basis(h=h, nf=n, fixed=[0])
+    fc.set_hamiltonian(b.rotate(H))
+    assert groundstate.native_strings(fc)
+    exact = 2.0*np.sum(np.linalg.eigvalsh(h)[:n//2])
+    assert fc.gs_energy() == pytest.approx(exact, abs=1e-6)
