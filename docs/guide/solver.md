@@ -272,9 +272,9 @@ energy to 1e-4 in the rotated basis, while the site basis is still 5e-3
 off at `maxm=64`. The price is a larger MPO, since a hopping of the bath
 becomes a sum over all pairs of rotated orbitals: its bond dimension is
 34 instead of 6 here, and it grows roughly as the logarithm of the
-length of the bath. On a Wilson chain, whose bath is already less
-entangled, the gain is smaller, about a factor 2 in `maxm` at equal
-accuracy. An operator on the impurity is measured as it is, and an
+length of the bath. On a Wilson chain ($\Lambda=2$, $U=0.5$, 32
+orbitals) the gain we measured is smaller, about a factor 2 in `maxm` at
+equal accuracy. An operator on the impurity is measured as it is, and an
 operator of the original bath goes through `basis.rotate`. For the same
 reason `get_kondo_screening` gives the same `M_imp`, `M_env` and Schmidt
 values in both bases, while its `M_n` is per rotated orbital: there the
@@ -284,10 +284,12 @@ reference: the ones far from 0 and 1 carry the entanglement. The
 keywords are:
 
 - `h=`, `nf=`: the reference, the Slater determinant of `nf` fermions of
-  `h`. For an impurity this is the one-body part without $U$; with $U$
-  written as $U(n_\uparrow-\frac12)(n_\downarrow-\frac12)$ it is the
-  resonant level model at $\epsilon_d=0$. On a spinful chain an
-  $n\times n$ matrix is used for both spins.
+  `h`. Any `h` gives an exact rotation; it only decides how weakly
+  entangled the ground state is in the new basis. For the particle-hole
+  symmetric impurity, with $U$ written as
+  $U(n_\uparrow-\frac12)(n_\downarrow-\frac12)$, we take the hopping
+  matrix at $\epsilon_d=0$, the resonant level model. On a spinful chain
+  an $n\times n$ matrix is used for both spins.
 - `cm=`: a correlation matrix $\langle c^\dagger_ic_j\rangle$ instead,
   for instance that of an interacting state. It does not need to be pure.
 - `fixed=`: the orbitals that are not rotated (modes on a spinless
