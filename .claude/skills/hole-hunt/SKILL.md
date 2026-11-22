@@ -1,6 +1,6 @@
 ---
 name: hole-hunt
-description: Run a multi-lens hole hunt (audit) of the dmrgpy Python layer, or add a lens, a finding or a fix cluster to an existing one. Use this whenever the user asks to audit, hole-hunt, hunt for bugs, sweep for holes, cross-check the backends against each other, or look for silently-wrong numbers, and also when they ask to record or fix a finding in docs/audit_*_hole_hunt.md. This is the repository's established audit process, run in 2026-08 and 2026-09, and it has a fixed record shape and a fixed evidence standard that a free-form bug hunt will not reproduce.
+description: Run a multi-lens hole hunt (audit) of the dmrgpy Python layer, or add a lens, a finding or a fix cluster to an existing one. Use this whenever the user asks to audit, hole-hunt, hunt for bugs, sweep for holes, cross-check the backends against each other, or look for silently-wrong numbers, and also when they ask to record or fix a finding in docs/audit_*_hole_hunt.md. This is the repository's established audit process, run many times since 2026-08, and it has a fixed record shape and a fixed evidence standard that a free-form bug hunt will not reproduce.
 ---
 
 # Hole hunt

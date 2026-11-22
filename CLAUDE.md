@@ -44,8 +44,8 @@ to `PYTHONPATH` (or a symlink into `site-packages`), which is what
 `install.py` sets up; there is no `setup.py` and no editable install.
 
 ```bash
-python install.py                    # compiles ITensor v2 (mpscpp2) + its pybind11 extension
-python install.py --itensor-version=3    # compiles ITensor v3 (mpscpp3) instead
+python install.py                    # compiles ITensor v3 (mpscpp3) + its pybind11 extension
+python install.py --itensor-version=2    # compiles ITensor v2 (mpscpp2) instead
 python install.py --itensor-version=both # compiles both v2 and v3 backends
 python install.py --gpp=g++-6        # use a specific compiler (needs g++ >= 6, LAPACK/BLAS)
 python install.py --doctor           # only the requirement checks, no multi-minute ITensor build
@@ -270,10 +270,10 @@ settled for print-only output with such an axis already computed.
 **Examples are short and simple** (the author's rule since 2026-10-23): 40
 lines, 50 at most, written in plain English the way a condensed matter
 physicist who is not a programmer would write them, about the physics and the
-one capability shown, nothing else. The
-`new-example` skill has the full rules and the two approved models. The
-`new-example` skill (`.claude/skills/new-example/SKILL.md`) has the full
-rules, the path line, and how to run a script against this worktree.
+one capability shown, nothing else. The `new-example` skill
+(`.claude/skills/new-example/SKILL.md`) has the full rules, the two
+approved models, the path line, and how to run a script against this
+worktree.
 
 **Worktree/symlink pitfall**: `site-packages/dmrgpy` is typically a symlink
 into one specific checkout's `src/dmrgpy/` (usually the primary working
@@ -341,7 +341,8 @@ energy density and `<Sz>` under both `gs_method="idmrg"` and
 `<Sz>=0`. The catalogue of what is covered is `benchmarks/calctk.py`'s
 `CALCS` list; adding a capability is one entry there plus a label in
 `reporttk.CALC_LABELS`. Calculations only some backends implement (the
-sector, the infinite chain, both `itensor_version=3` and `"python"` only)
+sector, METTS, the non-Hermitian ground state, SECTOR and TASK, on v3,
+`"python"` and `"julia_live"`; the infinite chain, on v3 and `"python"`)
 are restricted to those backends and show up as blank-by-construction
 rather than as failures in the coverage table. The sector section tabulates
 the sector-against-dense ratio per size (block sparsity scales, its
@@ -388,7 +389,10 @@ since that one, hunted by read-only agents with every repro run by the
 lead, all fixed on 2026-11-21; three only in part: finding 1 on DMRG is a
 guard rather than a closing stage, finding 3's DMRG half warns, and
 finding 4 warns on DMRG and keeps the free-spin band on the Krylov
-routes). Four things to
+routes). One more record is not a hunt:
+`docs/audit_2026_11_15_hole_hunt.md` holds four defects found by the
+2026-11-15 backend benchmark, one fixed at the size it was found at and
+three open (see "Left open" below). Four things to
 read before changing the kind of code they cover:
 
 - **`docs/numerical_changes.md`** before comparing any number against
@@ -1029,11 +1033,12 @@ rules, with the reasoning and the measurements in
 
 ## Documentation
 
-`docs/development.md` is the development document: the architecture
-(backends, dispatch, directory layout); the user guide covers the physics-facing API (what
-calculation each method performs, with the formula behind it), kept brief
-and physics-first, with no history in it; `docs/numerical_changes.md` is
-the ledger of what raises and what changed numbers.
+There are three documents. `docs/development.md` is the development
+document: the architecture (backends, dispatch, directory layout). The
+user guide covers the physics-facing API (what calculation each method
+performs, with the formula behind it), kept brief and physics-first, with
+no history in it. `docs/numerical_changes.md` is the ledger of what raises
+and what changed numbers.
 
 **The user guide is a website.** Its only source is `docs/guide/*.md`, one
 page per topic, built with MkDocs Material from `mkdocs.yml` (repo root,
