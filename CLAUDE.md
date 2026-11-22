@@ -12,6 +12,9 @@ edited:
 - `infinite-chain.md`: iDMRG and VUMPS on both backends.
 - `kondo.md`: `kondospectrumtk/`, YSR, the NRG routes and ESR-STM.
 - `multioperator.md`: the canonical form and the Hermiticity proof.
+- `session.md`, `thresholds.md`, `dynamics.md`, `non-hermitian.md`,
+  `thermal.md`, `mps-algebra.md`: the bodies of the durable rules of the
+  audits, by the part of the code each one guards.
 - `install.md`, `packaging.md`, `benchmarks.md`: `install.py` and
   `installtk/`, the PyPI wheel, and `benchmarks/`.
 
@@ -285,250 +288,137 @@ read before changing the kind of code they cover:
   running or extending an audit; the record shape and the evidence standard
   are fixed there.
 
-The durable rules the hunts left, each with the test or file that pins it.
-Do not undo one without reading its finding first.
+The durable rules the hunts left, one line each with the test that pins it.
+The body of a rule, with the mechanism and the numbers, is in the rule file
+named above its group. Open that file and the finding before undoing one,
+by hand if the session reads with `cat` or `sed`.
 
-- **`restart()` is a cold start on every backend.** It calls the session's
-  `clear_wavefunction()` (v2, v3, `"python"`), so `set_hamiltonian(H)`
-  solves from a fresh random MPS, and only `restart=False` or an explicit
-  start keeps a warm one. A v3 warm start cannot leave the total-Sz sector
-  of its state when H conserves Sz, and a field sweep on one chain stayed
-  in an old sector (`test_restart_drops_session_state.py`).
-- **A state becomes the chain's normalized.** `groundstate.unit_copy` is
-  applied in `mark_injected`, in the `wf0=` copies and in `set_gs`'s ED
-  branch, and a zero state raises; an explicit `wf=` to
-  `evolve_and_measure`/`evolution_ABA` is still evolved as given
-  (`test_audit_2026_09_25b_session.py`).
-- **Every correlator starts from `ground_state_on_session`**, with
-  `groundstate.mark_injected` marking a state the caller supplied, so that
-  a DMRG correlator after `set_gs()`, `set_initial_wf` or
-  `set_initial_wf_guess` measures that state and not the session's own
-  solved one (on `julia_live` too, since 2026-09-25); the mark's third field,
-  `supplied`, read through `groundstate.state_supplied()`, is what SECTOR
-  uses to refuse a set state that is not its reference sector's ground
-  state (`test_audit_2026_09_24b_groundstate.py`,
+Ground state, session, dispatch and static observables
+(`.claude/rules/session.md`):
+
+- `restart()` is a cold start on every backend; only `restart=False` or an
+  explicit start keeps a warm state (`test_restart_drops_session_state.py`).
+- A state becomes the chain's normalized (`groundstate.unit_copy`), and a
+  zero state raises (`test_audit_2026_09_25b_session.py`).
+- Every correlator starts from `ground_state_on_session`, so it measures a
+  state the caller set (`groundstate.mark_injected`) and not the session's
+  own (`test_audit_2026_09_24b_groundstate.py`,
   `test_audit_2026_09_24c_session.py`).
-- **`groundstate.stored_answer_holds` is the one condition** under which
-  `gs_energy`/`get_gs` return a stored answer; a keyword the stored answer
-  would ignore (`maxde=`, `reconverge=True`, `wf0=`) raises or re-solves.
-  After `gs_energy_generalized`, `e0` is the state's own energy `<wg|H|wg>`
-  (biorthogonal on the NH route) and lambda is kept as `lam_generalized`
+- `groundstate.stored_answer_holds` is the one condition under which
+  `gs_energy`/`get_gs` return a stored answer
   (`test_audit_2026_09_25b_session.py`).
-- **The session's lower band edge, `minimum_energy()`, never sweeps a state
-  the session holds without its energy**: it solves from a fresh start and
-  puts the state back (`test_audit_2026_09_24c_session.py`).
-- **`vev.energy_variance` is how an energy variance is computed**,
-  `||(H-<H>)|psi>||^2` with the `maxm` cap lifted. `<H^2>-<H>^2` through
-  `vev(npow=2)` is a small difference of two numbers of order E0^2 whose
-  error is set by the truncation of H|psi>, and H^2 as an MPO is O(L^3) on
-  `"python"` (`test_audit_2026_09_24c_fluctuation.py`).
-- **Every threshold is relative to a scale of the problem it acts on.**
-  Where a rule exists it is: multiply by the power of two that brings a
-  largest coefficient below 1 into [1,2), and leave everything
-  byte-identical at 1 or more. It covers v2/v3's `to_mpo_unit`/
-  `solver_hamiltonian` (`hscale_up_`, read from the merged AutoMPO),
-  `pyitensor`'s `to_mpo`, the NH-DMRG entry in `nhdmrg.py` (once, for all
-  three session backends, so do NOT also scale inside `Chain::nhdmrg`) and
-  ED's deflated eigensolver. The others: `multioperator.clean_threshold` is
-  1e-12 relative to the largest coefficient (in `canonical_dict`, to the
-  larger of that and the summed signature magnitudes); CVM stops relative
-  to `||b||` and its early exits read the CG functional; NH-DMRG's Ritz tie
-  window is `1e-6*(max Re - min Re) + 100*eps*max|ev|` with `<=`,
-  identically in `pyitensor/nhdmrg.py`, in both `arnoldi_select_kbest`
-  and `nh_ritz_order`, and in `nhlevels._tie_window` over the Ritz values
-  of the imaginary-time projection; the VUMPS Lanczos reference is capped
-  by the Hamiltonian's unit; the KPM same-vector shortcut and ROOTN's
-  Lanczos breakdown compare against the vectors' own norms
-  (`test_audit_2026_09_25_scale.py`,
-  `test_audit_2026_09_25b_{cvm,nh,cpp,ednum,mpobuilder}.py`). The NRG
-  tail of `nrgmps` has the same number of sites at every band D
-  (`max_sites`, `OMEGA_MIN` relative to D), and its hand-over check is
-  1e-12 of the largest hopping of the head (`test_audit_2026_11_21_nrg.py`).
-  A weak term is covered by a cutoff of the MPO build that is one per bond
-  (`mo_terms.h`'s `bond_cutoff_args` on v2/v3, `mpobuilder._bond_cutoff_factor`
-  on `"python"`). The cutoff is lowered by m^2, floored at (1e-14)^2. m is
-  the smaller of two ratios to the largest coefficient: the strongest
-  coefficient crossing the weakest bond, and the weakest multi-site
-  coefficient below 1e-5. A term's span starts after the Jordan-Wigner
-  strings that cancel in pairs, and an operator with m = 1 is built
-  exactly as before. Do NOT edit the vendored svdMPO for this
-  (`test_audit_2026_09_25_scale.py`, `test_audit_2026_11_21_mpo_cutoff.py`).
-- **A chain constructor keyword is a setting assigned after `initialize()`**,
-  exactly as an assignment afterwards, `mode` included (`sites.check_settings`,
-  the explicit allowlist `sites.SETTINGS`); anything else, a Hamiltonian
-  accumulator such as `hubbard=` included, raises
+- `minimum_energy()` never sweeps a state the session holds without its
+  energy (`test_audit_2026_09_24c_session.py`).
+- An energy variance is `vev.energy_variance`, never `<H^2>-<H>^2` through
+  `vev(npow=2)` (`test_audit_2026_09_24c_fluctuation.py`).
+- A chain constructor keyword is a setting of the allowlist
+  `sites.SETTINGS`, assigned after `initialize()`; anything else raises
   (`test_audit_2026_09_25_construction.py`,
   `test_audit_2026_09_25b_construction.py`).
-- **`mode.resolve_mode` lets only a chain pinned to `"ED"` override a call's
-  `mode=`**; a `"DMRG"` pin is the same as None, and both names are
-  validated before any fallback can return (`test_audit_2026_09_25b_session.py`).
-- **KPM broadening is calibrated.** Every KPM route goes through
-  `algebra/kpm.py::polynomials_for_broadening`, which solves the Jackson
-  kernel's resolution relation so that `delta` is the broadening it is
-  everywhere else (FWHM `2*delta` at the band centre); the DMRG routes
-  reconstruct from exactly those n moments, the ED route uses the DMRG
-  rescaling so the two share the same `x` at the same physical energy (on
-  the bandwidth-centred window only: under `kpm_energy_truncate`,
-  `mode="ED"` raises), `kpm_n_scale` defaults to 1 and must be a positive
-  integer, and
-  every backend raises once a moment exceeds 1.5 times the exact bound
-  `||vi|| ||vj||`. Two residuals are documented rather than removed: the
-  width tightens as `sqrt(1-x^2)` away from the band centre (0.70 of the
-  requested width for an intensive excitation of a long chain), and the
-  Jackson line peaks about 1.5x higher than a Lorentzian of equal FWHM.
-  `get_distribution()`'s own KPM path is deliberately not on the
-  calibration (`test_audit_2026_09_24_kpm.py`, `test_audit_2026_09_24b_kpm.py`).
-- **`submode="TD"`/`"TDZ"` return the two-sided transform** written in
-  terms of forward runs only, `(F[(A,B)] + conj(F[(B^dagger,A^dagger)]))/2`
-  (`timedependent.lehmann_density_from_one_sided`), collapsing to `Re F`
-  exactly when `canonical.is_dagger_pair` proves `A = B^dagger`; it refuses
-  rather than guesses for a name with no known adjoint. Taking `np.real`
-  instead measured worse than leaving the transform whole. The Fourier sum
-  is evaluated at each requested frequency, not interpolated off an FFT
-  grid; `sxt_to_skomega`, the infinite-chain `S(k,omega)` reduction, and
-  the two short-window direct callers stay on the FFT stage, and
-  `sxt_to_skomega` on the raw transform, since it never sees the pair
-  (`test_audit_2026_09_24_realtime.py`).
-- **Real-time evolution on `"python"`** (`tdvp._lanczos_expm_multiply`)
-  stops on `|coeff|*beta_k*|c_k| < 1e-10` relative to the vector, with
-  sub-stepping when `niter` runs out; the host loop and the device path
-  share one test, `_krylov_verdict`, and return their basis rather than a
-  vector, so the sub-stepping above them cannot drift between the two. Keep
-  it that way if either changes. Every `evolve_and_measure_*` loop on every
-  backend restores the input norm `norm0` after each step, and
-  `gse.global_subspace_expand` normalizes each Krylov vector
-  (`test_pyitensor_time_evolution_review.py`). A non-Hermitian MPO takes
-  `tdvp._arnoldi_expm_multiply` instead, chosen in `tdvp_step` by
-  `mpsalgebra.mpo_is_hermitian(H)` and never by `dt` (METTS and TDZ pass an
-  imaginary `dt` with a Hermitian H); the Lanczos route was 3.6e-3 off on a
-  non-Hermitian H, since it drops `Im<q|A|q>` and the projections its
-  reorthogonalization removes (`test_nh_time_evolution.py`). `TDVP_GSE` stops growing the
-  bond dimension after `tdvp_gse_sweeps` steps, so a growing-entanglement
-  quench saturates; recorded, not changed.
-- **`mode="ED"` real-time routes are `expm_multiply`**, start from the
-  cached ground state when called without `wf=`, and
-  `evolve_and_measure`/`evolution_ABA` raise on an unknown keyword on DMRG,
-  take `h=` on ED and default to `nt=1000` on both
+- `mode.resolve_mode` lets only a chain pinned to `"ED"` override a call's
+  `mode=` (`test_audit_2026_09_25b_session.py`).
+- The DMRG `vev` has no `**kwargs`: an unknown keyword raises, and so does
+  `T>0` (`test_audit_2026_10_23.py`).
+- `gs_energy_generalized` refuses a metric it cannot use, by a Python
+  exception on every backend, and the entropy of a site or a pair is that
+  of the normalized state (`test_audit_2026_10_23_leads.py`).
+- `julia_live` starts every DMRG solve from a random MPS, so its solves
+  vary run to run by solver noise (`test_audit_2026_09_25b_julia.py`).
+- One predicate, `correlationentropy._full_applies`, picks the default
+  `dmmode` in a sector and outside; do NOT add a condition to one branch
+  only (`test_audit_2026_11_21_corrmat.py`).
+
+Thresholds (`.claude/rules/thresholds.md`):
+
+- Every threshold is relative to a scale of the problem it acts on. An
+  operator whose largest coefficient is below 1 is brought into [1,2) by a
+  power of two and is left byte-identical at 1 or more; do NOT also scale
+  inside `Chain::nhdmrg` (`test_audit_2026_09_25_scale.py`,
+  `test_audit_2026_09_25b_{cvm,nh,cpp,ednum,mpobuilder}.py`).
+- A weak term is covered by a cutoff of the MPO build that is one per
+  bond; do NOT edit the vendored svdMPO for this
+  (`test_audit_2026_11_21_mpo_cutoff.py`).
+
+Dynamical correlators and real-time evolution
+(`.claude/rules/dynamics.md`):
+
+- KPM broadening is calibrated: every KPM route goes through
+  `algebra/kpm.py::polynomials_for_broadening`, so `delta` is the
+  broadening it is everywhere else; `get_distribution()` is deliberately
+  not on it (`test_audit_2026_09_24_kpm.py`, `test_audit_2026_09_24b_kpm.py`).
+- `submode="TD"`/`"TDZ"` return the two-sided transform from forward runs
+  only (`timedependent.lehmann_density_from_one_sided`); do not take
+  `np.real` instead (`test_audit_2026_09_24_realtime.py`).
+- Real-time evolution on `"python"` has one stopping test,
+  `_krylov_verdict`, shared by the host loop and the device path; every
+  `evolve_and_measure_*` loop restores the input norm; a non-Hermitian MPO
+  takes the Arnoldi route, chosen by `mpsalgebra.mpo_is_hermitian(H)` and
+  never by `dt` (`test_pyitensor_time_evolution_review.py`,
+  `test_nh_time_evolution.py`).
+- `mode="ED"` real-time routes are `expm_multiply` and start from the
+  cached ground state when called without `wf=`
   (`test_audit_2026_09_24c_realtime.py`).
-- **`julia_live` starts every DMRG solve from a random MPS** of link
-  dimension min(maxm,10), with the chain's noise on the first half of the
-  sweeps, so its solves vary run to run by solver noise and a warm 16-site
-  solve is about 40% slower than before; the KPM window there trusts `e0`
-  as the lower band edge only when `groundstate.mark_lower_edge` says a
-  plain solve produced it (`test_audit_2026_09_25b_julia.py`).
-- **`Thermal_Spin_Chain.anneal()` is order-8 Taylor steps** of
-  `exp(-dtau(H-E_mid))` at `dtau*W <= 2`, about `2*beta*W` factor
-  applications (`test_audit_2026_09_25b_thermal.py`).
-- **`Thermal_Spin_Chain.get_gs()` returns its stored state only under the
-  key it was purified under** (`thermal.purification_key`: T, the
-  `anneal_*` settings, `mode`, the backend and `groundstate.solver_key`),
-  read before any solve. Do NOT go back to a short circuit on `computed_gs`
-  alone, or to a setter on T alone (`test_audit_2026_11_21_thermal.py`).
-- **TASK's error bar is two numbers, not one.** The two-site variance of
-  a pole does not see the part of `B|GS>` outside the one-site tangent
-  space, which is dropped before the recursion starts: zero for a sum of
-  one-site operators and for a fermion operator on a state of definite
-  parity, up to all of the weight for `C_i` on a parity mixture (a
-  degenerate Majorana pair) at truncated `maxm`. `taskdmrg.get_poles`
-  returns it as `missing_weight` and warns above 1e-6 of the weight
+- TASK's error bar is two numbers: the two-site variance of a pole and
+  `missing_weight`, the part of `B|GS>` outside the one-site tangent space
   (`test_audit_2026_10_task.py`).
-- **A collapse basis METTS cannot sample with is refused** by both calls on
-  every backend (`mettsvev._check_basis`): a non-Hermitian name, or names
-  all commuting on each site with a charge or parity H conserves, which
-  refuses every fermion chain (the author's pick). Do NOT go back to a list
-  of diagonal names (`test_audit_2026_10_23*.py`, `test_audit_2026_11_21_metts.py`).
-- **`"python"` DMRG mixes noise into its Lanczos starts.**
-  `pyitensor/dmrg.py`'s `_noisy_start` adds a random vector of relative
-  weight `noise`, from its own generator reseeded per `dmrg()` call, on the
-  first sweep of a fresh start only; without it a state that falls into one sector of an exact
-  symmetry at its first local solve stays there (two equivalent spins,
-  -4.470573 for -5.917370). Do NOT remove it on the grounds that the random
-  MPS start is enough, and do NOT widen it to more sweeps, warm starts or
-  the global random stream without reading finding 11's Status
-  (`test_audit_2026_10_23_leads.py`).
-- **`gs_energy_generalized` refuses a metric it cannot use**: `ValueError`
-  for a non-Hermitian A, `RuntimeError` once `<psi|A|psi>` is not positive,
-  on v3 through a C++ throw, never ITensor's aborting `Error()`; an NH-DMRG
-  state that did not converge warns again on every reuse
-  (`groundstate.warn_unconverged`). Entropies of a site or a pair are those
-  of the normalized state, with a relative eigenvalue floor
-  (`test_audit_2026_10_23_leads.py`).
-- **A BiCGSTAB solve checks its answer.** After BiCGSTAB, `applyinverse`
-  on DMRG measures ||Ax-b||/||b|| once with the maxm cap lifted
-  (`mpsalgebra.check_bicgstab`), warns above 10 delta and raises above 1;
-  before, v3 returned a vector 3e64 times the right-hand side on 10 sites
-  at maxm=12, silently. Do NOT loosen it to quiet a test; the divergence
-  of the recurrence itself is still open
-  (`test_bicgstab_residual_check.py`). On `"python"`, v3 without a
-  conserved sector and `julia_live` the check forms A x and A x - b with
-  nothing truncated (`residual_norm`, `mps_residual_norm`); the default
-  density-matrix routes overstate a converged residual next to a level up
-  to 2e6 times. A sum whose coefficients cancel passes
-  `sum_mps_weighted(method="exact")`, as `nhlevels._combine` does; do NOT
-  make it the default, the ESR Krylov route sums hundreds of states
-  (`test_audit_2026_11_21_exact-arith.py`). The recurrence itself applies
-  and sums exactly, truncating once per step, on `"python"` and on v3
-  without a sector (the author's pick for v3): next to a level it converges
-  where the density-matrix routes stopped at 0.62, and where `maxm` limits
-  the solve it costs 2 to 4 times more and diverges in the same cases, so
-  the divergence is not from the route of the apply.
-- **NH-DMRG sweeps the transposed left state.** Inside every v2, v3 and
-  `"python"` sweep the left state is ITensorNHDMRG.jl's own,
-  H^T|wl> = E|wl>, solved against the conjugate of the adjoint MPO and
-  conjugated into dmrgpy's adjoint psil on the way out, and each bond is
-  solved by a Krylov-Schur restart that keeps 3/5 of the Ritz vectors;
-  `restarts` counts thick restarts. With the adjoint left state the
-  shared isometry has to hold r and conj(r) of a complex-symmetric H, and
-  on the 10-site PT-symmetric XX chain every attempt stopped at a
-  non-eigenpair, Re E up to 0.03 below the spectrum
+
+Non-Hermitian Hamiltonians (`.claude/rules/non-hermitian.md`):
+
+- NH-DMRG sweeps the transposed left state, H^T|wl> = E|wl>, on v2, v3 and
+  `"python"`; do not go back to the adjoint left state
   (`test_audit_2026_11_15_nh.py`).
-- **A non-Hermitian `gs_energy()` on DMRG is imaginary time first.**
-  `nh_gs_method` (a setting, in `method_key`) defaults to
-  `"imaginary_time"`: `nhlevels.py` on v3 and `"python"` without a
-  sector, its pair checked by `nhdmrg()`'s own certificate and stored by
-  `nhdmrg.store_nh_pair`; a failed check runs `nhdmrg()` and keeps the
-  pair of smaller residual, a raised route and every other backend go to
-  `gs_energy_nhdmrg`; `mode="ED"` is untouched. The pair taken is the
-  smallest real part among the accepted Ritz pairs below the certificate's
-  tolerance, and only a tie inside the Ritz tie window goes by residual
-  (`test_audit_2026_11_21_nh.py`). Its
-  grid is in units of the largest coefficient off the identity, since an
-  offset as the unit leaves nothing projected. `get_nh_levels()` returns
-  the accepted Ritz pairs (`test_nh_levels.py`).
-- **ED orders a non-Hermitian spectrum by real part first**:
-  `algebra.eigen_order`, behind `sorteigen`, groups real parts at 1e-10 of
-  the largest |E| and orders by Im only inside a group;
-  `biorthogonal_ground_state` takes its left state by its eigenvalue, never
-  by a sort of `dagger(h)` (`test_audit_2026_11_21_nh.py`).
-- **The DMRG `vev` has no `**kwargs`**: an unknown keyword raises, and
-  `T>0` raises naming `mode="ED"` and `metts_vev()`
-  (`test_audit_2026_10_23.py`).
-- **The ESR Krylov basis is closed under the Korringa operators on ED**:
-  every eigenstate below the window and a closing block Krylov stage from
-  S^a_k|n> and V|n>. Both Krylov routes end with a guard that raises naming
-  `submode=None`, on DMRG only when H conserves a charge that S^+_k changes
+- A non-Hermitian `gs_energy()` on DMRG is imaginary time first
+  (`nh_gs_method`, `nhlevels.py`), with its pair checked by the certificate
+  of `nhdmrg()` (`test_audit_2026_11_21_nh.py`, `test_nh_levels.py`).
+- ED orders a non-Hermitian spectrum by real part first
+  (`algebra.eigen_order`), and takes the left state by its eigenvalue
+  (`test_audit_2026_11_21_nh.py`).
+
+Finite temperature (`.claude/rules/thermal.md`):
+
+- `Thermal_Spin_Chain.anneal()` is order-8 Taylor steps at `dtau*W <= 2`
+  (`test_audit_2026_09_25b_thermal.py`).
+- `Thermal_Spin_Chain.get_gs()` returns its stored state only under
+  `thermal.purification_key`; do NOT go back to a short circuit on
+  `computed_gs` alone (`test_audit_2026_11_21_thermal.py`).
+- A collapse basis METTS cannot sample with is refused
+  (`mettsvev._check_basis`), which refuses every fermion chain (the
+  author's pick); do NOT go back to a list of diagonal names
+  (`test_audit_2026_10_23*.py`, `test_audit_2026_11_21_metts.py`).
+
+MPS algebra (`.claude/rules/mps-algebra.md`):
+
+- A BiCGSTAB solve checks its answer (`mpsalgebra.check_bicgstab`): it
+  warns above 10 delta and raises above 1. Do NOT loosen it to quiet a
+  test, and do NOT make `sum_mps_weighted(method="exact")` the default
+  (`test_bicgstab_residual_check.py`, `test_audit_2026_11_21_exact-arith.py`).
+
+Pure-Python backend (`.claude/rules/pyitensor.md`):
+
+- `"python"` DMRG mixes noise into its Lanczos starts (`_noisy_start`), on
+  the first sweep of a fresh start only; do NOT remove it and do NOT widen
+  it (`test_audit_2026_10_23_leads.py`).
+
+Kondo, NRG and ESR-STM (`.claude/rules/kondo.md`):
+
+- The NRG tail of `nrgmps` has the same number of sites at every band D,
+  and its hand-over check is relative to the largest hopping of the head
+  (`test_audit_2026_11_21_nrg.py`).
+- The ESR Krylov basis is closed under the Korringa operators on ED, and
+  both Krylov routes end with a guard that raises naming `submode=None`
   (`test_audit_2026_11_21_esr_krylov.py`).
-- **The ESR band follows the drive on ED**: the states kept reach
-  WINDOW_MARGIN power-broadened widths above the window from the highest
-  state the drive or the temperature populates (`esrstm._ed_band`); DMRG
-  warns instead, Krylov keeps the free-spin band, and T1, T2 are the tip
-  spin's whatever `site_weights` is (`test_audit_2026_11_21_esr_window.py`).
-- **One predicate, `correlationentropy._full_applies`, picks the default
-  `dmmode`** in a sector and outside: `"full"` only for the chain's own C
-  on spinless sites with a one-sweep session, else `"explicit"` in a sector
-  and `"fast"` outside. Do NOT add a condition to one branch of
-  `_default_dmmode` only (`test_audit_2026_11_21_corrmat.py`).
-- **The Krylov Kondo stop reads residual intervals**: with `tol=`,
-  `krylovkondo.block_krylov` counts every Ritz state with theta - r <= top
-  in the window, since a Ritz value lies above the eigenvalue it approaches,
-  and with S^z_tot conserved the start is put on its sector, so the space
-  stops once it is spanned (`test_audit_2026_11_21_kondo_krylov.py`).
-- **Out of scope by construction** for every hunt: the vendored ITensor and
-  TDVP folders, the three legacy quirks `.claude/rules/cpp-backend.md` lists
-  as deliberately reproduced (`evoloperator()`'s z^3/6 term on `H2`, the
-  `"moise"` key, the unreachable `"tevol_fit_td"` branch), the open
-  `docs/known_issue_*.md` items, and what `ROADMAP.md` marks as absent by
-  design.
+- The ESR band follows the drive on ED (`esrstm._ed_band`); DMRG warns
+  instead, and the Krylov routes keep the free-spin band
+  (`test_audit_2026_11_21_esr_window.py`).
+- The Krylov Kondo stop reads residual intervals: a Ritz state is in the
+  window when theta - r <= top (`test_audit_2026_11_21_kondo_krylov.py`).
+
+**Out of scope by construction** for every hunt: the vendored ITensor and
+TDVP folders, the three legacy quirks `.claude/rules/cpp-backend.md` lists
+as deliberately reproduced (`evoloperator()`'s z^3/6 term on `H2`, the
+`"moise"` key, the unreachable `"tevol_fit_td"` branch), the open
+`docs/known_issue_*.md` items, and what `ROADMAP.md` marks as absent by
+design.
 
 Left open and recorded as such, in the records' "Left open" and "New leads"
 sections: three of the four findings of
@@ -749,8 +639,8 @@ the Kernel Polynomial Method (`kpmdmrg.py`, `Chain::kpm_dynamical_correlator`/
 `Chain::general_kpm` in `mpscpp2/chain_session.h`/`mpscpp3/chain_session.h`
 on the C++ DMRG side, `algebra/kpm.py` on the ED side) rather than direct
 spectral decomposition, since exact diagonalization of the full spectrum is
-infeasible for large chains. The convention and the calibration are in the
-rules above.
+infeasible for large chains. The convention is in the module docstring of
+`dynamics.py`, and the calibration in `.claude/rules/dynamics.md`.
 
 `submode="SECTOR"` (`sectordc.py`) is the exception to that shape, and the
 only submode that does not compute a spectrum on the chain it is called on:

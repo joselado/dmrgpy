@@ -1111,3 +1111,24 @@ weight 0 T1 refers to a site of weight 1. The author's pick of
 2026-11-21, finding 5 of that hunt
 (`tests/test_audit_2026_11_21_esr_window.py`).
 `tests/test_esr_stm.py`.
+
+## The durable rules of the 2026-11-21 hunt, as CLAUDE.md stated them
+
+CLAUDE.md keeps one line for each of these three rules. This is the full
+statement it used to carry; the sections above have the measurements.
+
+- **The ESR Krylov basis is closed under the Korringa operators on ED**:
+  every eigenstate below the window and a closing block Krylov stage from
+  S^a_k|n> and V|n>. Both Krylov routes end with a guard that raises naming
+  `submode=None`, on DMRG only when H conserves a charge that S^+_k changes
+  (`test_audit_2026_11_21_esr_krylov.py`).
+- **The ESR band follows the drive on ED**: the states kept reach
+  WINDOW_MARGIN power-broadened widths above the window from the highest
+  state the drive or the temperature populates (`esrstm._ed_band`); DMRG
+  warns instead, Krylov keeps the free-spin band, and T1, T2 are the tip
+  spin's whatever `site_weights` is (`test_audit_2026_11_21_esr_window.py`).
+- **The Krylov Kondo stop reads residual intervals**: with `tol=`,
+  `krylovkondo.block_krylov` counts every Ritz state with theta - r <= top
+  in the window, since a Ritz value lies above the eigenvalue it approaches,
+  and with S^z_tot conserved the start is put on its sector, so the space
+  stops once it is spanned (`test_audit_2026_11_21_kondo_krylov.py`).

@@ -253,7 +253,10 @@ lens table and a `**Status**` line per finding. `docs/numerical_changes.md` gets
 `CLAUDE.md`'s "The audits, and what to know before touching the code" gets
 the hunt added to its list of records and, for each durable rule the fixes
 left (a threshold made relative, a dispatch moved, an invariant a later
-change must respect), one bullet naming the test that pins it; it does not
+change must respect), one line naming the test that pins it, under the
+rule file of its group. The body of the rule, with the mechanism and the
+numbers, goes into that rule file under `.claude/rules/`, whose `paths:`
+must list the source files and the test of the rule. CLAUDE.md does not
 get the ledger, the measurements or the story of the hunt, which live in the
 record. An open item stays in the record with what is
 known about it, the way the `kpm_energy_truncate` window problem and the

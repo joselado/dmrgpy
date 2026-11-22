@@ -48,3 +48,15 @@ so their coefficients must sum while their shared structure must not be
 written twice). The old construction is kept as `_sum_of_term_mpos`, the
 reference the machine is tested against in
 `tests/test_mpo_automaton_builder.py`.
+
+## DMRG mixes noise into its Lanczos starts
+
+This is a durable rule of the hole hunts; CLAUDE.md keeps one line of it.
+`pyitensor/dmrg.py`'s `_noisy_start` adds a random vector of relative
+weight `noise`, from its own generator reseeded per `dmrg()` call, on the
+first sweep of a fresh start only; without it a state that falls into one sector of an exact
+symmetry at its first local solve stays there (two equivalent spins,
+-4.470573 for -5.917370). Do NOT remove it on the grounds that the random
+MPS start is enough, and do NOT widen it to more sweeps, warm starts or
+the global random stream without reading finding 11's Status
+(`test_audit_2026_10_23_leads.py`).
