@@ -166,5 +166,7 @@ from this workstation (GCC 13.3, system LAPACK/BLAS, conda Python 3.14).
   that read the variable (`topological/transverse_2d_ising_model`) adds
   its path like the others, and lines already in a user's rc file stay.
   Do NOT make the installer edit a shell rc file by default again.
-  `install_julia.py` is still a separate script; folding it into
-  `install.py` is the author's decision.
+  `install_julia.py` stays a separate script: the two backends need
+  different things, and a user who wants only Julia does not go through
+  the compiler checks. Folding it into `install.py` as `--julia`, and a
+  Julia self-test in the doctor, were offered and not taken.
