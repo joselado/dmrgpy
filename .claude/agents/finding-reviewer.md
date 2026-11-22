@@ -24,7 +24,11 @@ findings have actually failed here:
   reproduced rather than fixed, `docs/known_issue_*.md` holds the
   known-open ones, `ROADMAP.md` marks what is absent by design, and a
   `NotImplementedError` naming its own restriction is a documented boundary, not
-  a hole.
+  a hole. `CLAUDE.md` has one line per durable rule; the full text, with the
+  residuals that are documented rather than removed, is in the rule file of
+  its group under `.claude/rules/`. A rule file loads only when the Read tool
+  opens a file it covers, so open the one for the code of the finding by
+  hand (`ls .claude/rules/`).
 - Is the probe itself wrong? A stale `.so`, an unconverged sweep schedule that
   was inherited rather than pinned, an unseeded random start, a tolerance
   tighter than the method's own error, a comparison between two quantities that

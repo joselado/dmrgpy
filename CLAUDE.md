@@ -87,8 +87,9 @@ Three of its rules matter outside those files:
 
 - `numba` is a core dependency, not an extra: `algebra/kpmextrapolate.py`
   imports it at module level, on the import path of every chain.
-- Every module in the wheel must byte-compile, and new code in the Python
-  layer does not shell out, since the wheel says `OS Independent`.
+- Every module in the wheel must byte-compile, and the wheel says
+  `OS Independent`: the ED and `"python"` backends run on Windows, so a
+  shell command in their code path breaks that.
 - `.gitignore` has an unanchored `julia*` pattern, so a new file or folder
   whose name starts with `julia` is ignored unless it is un-ignored, as
   `src/dmrgpy/juliapkg.json` is.

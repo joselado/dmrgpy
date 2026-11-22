@@ -16,8 +16,9 @@ paths:
 These are durable rules the hole hunts left, with the mechanism and the
 numbers; CLAUDE.md keeps one line per rule. Each rule names the test that
 pins it. Do not undo one without reading its finding in `docs/audit_*.md`
-first. The file loads when `nhdmrg.py`, `nhlevels.py`, `pyitensor/nhdmrg.py` or a file under
-`nonhermitian/` is read or edited. The Ritz tie window is in `.claude/rules/thresholds.md`.
+first. The file loads when `nhdmrg.py`, `nhlevels.py`, `pyitensor/nhdmrg.py`
+or a file under `nonhermitian/` is read or edited. The Ritz tie window is in
+`.claude/rules/thresholds.md`.
 
 - **NH-DMRG sweeps the transposed left state.** Inside every v2, v3 and
   `"python"` sweep the left state is ITensorNHDMRG.jl's own,

@@ -19,7 +19,11 @@ statement of that last family and is worth reading before a dispatch lens.
 
 ## How to work
 
-Read the code first and form a specific hypothesis, then build the smallest
+Before the code, open the rule file of your lens under `.claude/rules/` by
+hand (`ls .claude/rules/`, its `paths:` say what it covers): it holds the
+durable rules of the earlier hunts and the residuals that are documented
+rather than removed, and it does not load by itself when a file is read
+through the shell. Read the code first and form a specific hypothesis, then build the smallest
 system that can discriminate it. A hypothesis that cannot be wrong is not worth
 a repro.
 

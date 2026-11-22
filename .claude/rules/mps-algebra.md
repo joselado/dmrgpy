@@ -15,7 +15,8 @@ paths:
 These are durable rules the hole hunts left, with the mechanism and the
 numbers; CLAUDE.md keeps one line per rule. Each rule names the test that
 pins it. Do not undo one without reading its finding in `docs/audit_*.md`
-first. The file loads when `mpsalgebra.py` or a file under `mpsalgebratk/` is read or edited.
+first. The file loads when `mpsalgebra.py` or a file under `mpsalgebratk/`
+is read or edited.
 
 - **A BiCGSTAB solve checks its answer.** After BiCGSTAB, `applyinverse`
   on DMRG measures ||Ax-b||/||b|| once with the maxm cap lifted

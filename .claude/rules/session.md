@@ -25,8 +25,8 @@ paths:
 These are durable rules the hole hunts left, with the mechanism and the
 numbers; CLAUDE.md keeps one line per rule. Each rule names the test that
 pins it. Do not undo one without reading its finding in `docs/audit_*.md`
-first. The file loads when `manybodychain.py`, `groundstate.py`, `mode.py`, `sites.py`, `vev.py` or a file
-under `entropytk/` is read or edited.
+first. The file loads when `manybodychain.py`, `groundstate.py`, `mode.py`,
+`sites.py`, `vev.py` or a file under `entropytk/` is read or edited.
 
 - **`restart()` is a cold start on every backend.** It calls the session's
   `clear_wavefunction()` (v2, v3, `"python"`), so `set_hamiltonian(H)`

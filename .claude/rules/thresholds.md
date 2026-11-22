@@ -30,7 +30,8 @@ paths:
 These are durable rules the hole hunts left, with the mechanism and the
 numbers; CLAUDE.md keeps one line per rule. Each rule names the test that
 pins it. Do not undo one without reading its finding in `docs/audit_*.md`
-first. The file loads when a file that holds one of these thresholds is read or edited.
+first. The file loads when a file that holds one of these thresholds is read
+or edited.
 
 - **Every threshold is relative to a scale of the problem it acts on.**
   Where a rule exists it is: multiply by the power of two that brings a

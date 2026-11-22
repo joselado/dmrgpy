@@ -30,11 +30,11 @@ paths:
 These are durable rules the hole hunts left, with the mechanism and the
 numbers; CLAUDE.md keeps one line per rule. Each rule names the test that
 pins it. Do not undo one without reading its finding in `docs/audit_*.md`
-first. The file loads when `dynamics.py`, `kpmdmrg.py`, `timedependent.py`, `taskdmrg.py`,
-`pyitensor/tdvp.py` or a file under `dynamicstk/` is read or edited. The convention every
-submode returns is in the module docstring of `src/dmrgpy/dynamics.py`, and
-the rule that every correlator starts from `ground_state_on_session` is in
-`.claude/rules/session.md`.
+first. The file loads when `dynamics.py`, `kpmdmrg.py`, `timedependent.py`,
+`taskdmrg.py`, `pyitensor/tdvp.py` or a file under `dynamicstk/` is read or
+edited. The convention every submode returns is in the module docstring of
+`src/dmrgpy/dynamics.py`, and the rule that every correlator starts from
+`ground_state_on_session` is in `.claude/rules/session.md`.
 
 - **KPM broadening is calibrated.** Every KPM route goes through
   `algebra/kpm.py::polynomials_for_broadening`, which solves the Jackson

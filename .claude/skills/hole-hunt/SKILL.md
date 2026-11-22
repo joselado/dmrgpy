@@ -106,7 +106,11 @@ the page rather than in someone's head: vendored ITensor (`mpscpp2/ITensor/`,
 deliberately reproduced (`evoloperator`'s z^3/6 term on `H2`, the `"moise"` key, the
 unreachable `"tevol_fit_td"` branch); the open `docs/known_issue_*.md` items;
 anything already in an earlier audit record; and gaps `ROADMAP.md` already marks as
-absent. Decide explicitly whether `itensor_version="julia_live"` is in scope,
+absent. The durable rules of the earlier hunts are one line each in `CLAUDE.md`
+and in full in the rule files under `.claude/rules/`, which load only when the
+Read tool opens a file they cover: name the rule file of each lens in the
+brief of its hunter and of its reviewers, and read it yourself before ranking
+a finding. Decide explicitly whether `itensor_version="julia_live"` is in scope,
 since its juliacall JIT cost dominates any lens that touches it, and say so.
 
 ## 3. Hunt, then refute
