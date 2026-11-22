@@ -66,10 +66,11 @@ LAPACK/BLAS candidates (conda's own libs, system `-lblas -llapack`,
 OpenBLAS, and a Debian/Ubuntu-multiarch workaround that asks the system
 compiler where it actually finds `libblas.so`/`liblapack.so`) and picks the
 first one that actually links. Finally, `install.py` links the repo's
-`src/dmrgpy` into the interpreter's site-packages and adds `DMRGROOT` to
-the user's shell rc file (`installtk/addpythonpath.py`,
-`installtk/addsystem.py`, both idempotent across reruns). There is no lint
-config, and the only CI is the build of the user guide.
+`src/dmrgpy` into the interpreter's site-packages
+(`installtk/addpythonpath.py`) and, only with `--shellrc`, adds `DMRGROOT`
+to the user's shell rc file (`installtk/addsystem.py`); both are idempotent
+across reruns. There is no lint config, and the only CI is the build of
+the user guide.
 
 Both `mpscppN/Makefile`s list the headers of the backend among the
 extension's prerequisites: without that, editing `chain_session.h`, where
@@ -152,13 +153,18 @@ from this workstation (GCC 13.3, system LAPACK/BLAS, conda Python 3.14).
   interpreter knows. `install.py` returns 1 when it fails and leaves the
   build in place.
 - **Testing the installer.** Never run a plain `python install.py` in the
-  primary checkout to test a change: it rebuilds the working `.so`, links
-  site-packages to that checkout and appends to the shell rc file. Use a
+  primary checkout to test a change: it rebuilds the working `.so` and
+  links site-packages to that checkout. Use a
   worktree and `--build-only`. When a test moves the extension file by
   hand, quote the path: `ls` is aliased to mark executables with `*` here,
   and an unquoted `$(ls ...)` renamed the file.
-- **Left as it was, on purpose:** the symlink into site-packages and the
-  `DMRGROOT` line in the shell rc file are still the default (`--no-link`,
-  `--no-shellrc` and `--build-only` skip them), and `install_julia.py` is
-  still a separate script. Changing any of the three is the author's
-  decision.
+- **The author's picks of 2026-11-22.** The symlink into site-packages
+  stays; a `.pth` file and `pip install -e .` were offered and not taken
+  (the second was never tested against the `pyproject.toml` that leaves
+  the C++ folders out). The `DMRGROOT` line in the shell rc file is no
+  longer written by default: `--shellrc` asks for it, the one example
+  that read the variable (`topological/transverse_2d_ising_model`) adds
+  its path like the others, and lines already in a user's rc file stay.
+  Do NOT make the installer edit a shell rc file by default again.
+  `install_julia.py` is still a separate script; folding it into
+  `install.py` is the author's decision.

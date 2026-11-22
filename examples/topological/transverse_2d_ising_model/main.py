@@ -1,5 +1,5 @@
 # Add the root path of the dmrgpy library
-import os ; import sys ; sys.path.append(os.environ["DMRGROOT"])
+import os ; import sys ; sys.path.append(os.getcwd()+'/../../../src')
 import os ; import sys ; sys.path.append(os.environ["PYQULAROOT"])
 
 # Transverse-field Ising model on an L x L square lattice (periodic),

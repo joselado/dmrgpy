@@ -91,6 +91,7 @@ python install.py --jobs 2           # parallel compile jobs (default: up to 4)
 python install.py --force            # compile ITensor again
 python install.py --extension-only   # after you edit the C++ code of dmrgpy
 python install.py --build-only       # change nothing outside this folder
+python install.py --shellrc          # also add DMRGROOT to your shell rc file
 ```
 
 The full output of the compilation is in `install_v3.log` (or
@@ -113,9 +114,8 @@ python install_julia.py
 ```
 
 Both scripts link dmrgpy into the `site-packages` folder of the Python
-you used, and `install.py` also adds the variable `DMRGROOT` to your shell
-rc file. Use `--no-link` and `--no-shellrc` if you do not want this. After
-that you can import dmrgpy, for example
+you used. Use `--no-link` if you do not want this. After that you can
+import dmrgpy, for example
 
 ```python
 from dmrgpy import spinchain

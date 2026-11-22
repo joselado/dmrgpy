@@ -191,5 +191,9 @@ def test_command_line_keeps_the_old_spellings():
     assert (args.openblas_libdir, args.openblas_includedir) == ("/a", "/b")
     assert args.check_gpp is False
     args = parser.parse_args([])
-    assert args.link and args.shellrc and args.selftest and not args.force
+    assert args.link and args.selftest and not args.force
+    # the shell rc file is edited only on request
+    assert args.shellrc is False
+    assert parser.parse_args(["--shellrc"]).shellrc is True
+    assert parser.parse_args(["--no-shellrc"]).shellrc is False
     assert args.itensor_version == "3" and args.jobs is None

@@ -82,8 +82,8 @@ A C++ change is not tested until the `.so` has been rebuilt
 (`python install.py --extension-only`); dmrgpy warns at import when the
 `.so` is older than its sources, and when one is there and does not load.
 To test the installer itself, use a worktree and `--build-only`: a plain
-`python install.py` rebuilds the working `.so`, links into site-packages
-and edits the shell rc file.
+`python install.py` rebuilds the working `.so` and links into
+site-packages.
 
 ## Packaging / PyPI
 

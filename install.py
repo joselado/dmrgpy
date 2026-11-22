@@ -8,8 +8,8 @@ flags of the build itself; a conda-provided compiler is preferred when the
 interpreter is a conda one. Only then does the compilation start. After
 it, the extension is imported in a fresh process and a small chain is
 solved against exact diagonalization. Last, dmrgpy is linked into the
-interpreter's site-packages and DMRGROOT is added to the shell rc file
-(--no-link and --no-shellrc skip these two, --build-only skips both).
+interpreter's site-packages (--no-link or --build-only skip this). The
+shell rc file is edited only when --shellrc asks for the DMRGROOT line.
 
     python install.py                    # build the default backend (v3)
     python install.py --doctor           # only the requirement checks
@@ -97,13 +97,16 @@ def build_parser():
             action=argparse.BooleanOptionalAction,
             help="Link dmrgpy into the site-packages of this interpreter "
                  "(default: on).")
-    after.add_argument("--shellrc", default=True,
+    after.add_argument("--shellrc", default=False,
             action=argparse.BooleanOptionalAction,
-            help="Add DMRGROOT to the shell rc file (default: on).")
+            help="Add an export of DMRGROOT, the path of src, to the shell "
+                 "rc file, for scripts of your own that read it (default: "
+                 "off; nothing in dmrgpy needs it).")
     after.add_argument("--build-only", "--build_only", dest="build_only",
             action="store_true", default=False,
-            help="Build and test only: the same as --no-link --no-shellrc. "
-                 "Nothing outside this folder is changed.")
+            help="Build and test only: the same as --no-link, and "
+                 "--shellrc is ignored. Nothing outside this folder is "
+                 "changed.")
     return parser
 
 

@@ -8,8 +8,8 @@ def _shellrc_path():
     elif "zsh" in shell: shellrc = ".zshrc"
     else:
         print("Unrecognised shell '"+shell+"', not editing any shell rc "
-              "file. Set DMRGROOT manually if you need it (see "
-              "examples/transverse_2d_ising_model).")
+              "file. Set DMRGROOT by hand if your scripts read it: "
+              "export DMRGROOT=<this repository>/src")
         return None
 
     if platform.system() == "Linux":
@@ -25,8 +25,8 @@ def _shellrc_path():
 
 def addrc():
     """Add (idempotently) a DMRGROOT export to the user's shell rc file.
-    A handful of examples (e.g. transverse_2d_ising_model) read this
-    environment variable directly."""
+    Nothing in dmrgpy reads the variable; install.py calls this only with
+    --shellrc, for scripts outside the repository that do."""
     shellrc = _shellrc_path()
     if shellrc is None:
         return
