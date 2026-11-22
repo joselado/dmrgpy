@@ -893,6 +893,10 @@ class Many_Body_Chain():
           self._n_gs_manifold = None
       self.hamiltonian = MO
       self.use_ampo_hamiltonian = True # use ampo Hamiltonian
+      # the chain no longer knows a single-particle basis of its modes;
+      # Fermionic_Chain.set_gaussian_basis sets one after this call
+      self.gaussian_basis = None
+      self.site_hamiltonian = None
   def get_heff(self,**kwargs):
       """Return the couplings of an effective Hamiltonian, one per operator
       in `operators=`, fitted in the `n` lowest eigenstates.

@@ -196,8 +196,40 @@ def wilson_chain(n, Lambda=2.0, band=(-1.0, 1.0), dos=None, nint=None, z=0.0,
     return eps, t
 
 
+BASES = ("site", "gaussian")
+
+
+def _filled(h):
+    """<c_i^dag c_j> of the levels of h below the Fermi level 0, with
+    occupation 1/2 for a level at 0."""
+    e, u = np.linalg.eigh(h)
+    tol = 1e-12*max(np.max(np.abs(e)), 1e-300)
+    f = np.where(e < -tol, 1.0, np.where(e > tol, 0.0, 0.5))
+    return (u.conj()*f) @ u.T
+
+
+def _reference_correlation(n, levels, tDs, eps, t, imp, channels, B):
+    """Correlation matrix on the modes of the chain (up 2i, down 2i+1) of
+    the ground state without U, with impurity levels levels[l]."""
+    norb = len(imp)*(n+1)
+    cm = np.zeros((2*norb, 2*norb), dtype=complex)
+    for s, sign in enumerate((1.0, -1.0)): # up, down
+        h = np.zeros((norb, norb))
+        for l, i in enumerate(imp):
+            c = channels[l]
+            h[i, i] = levels[l] + sign*B/2.0 # B Sz on the impurity
+            h[i, c[0]] = h[c[0], i] = tDs[l]
+            for k in range(n):
+                h[c[k], c[k]] = eps[k] + sign*B
+            for k in range(n-1):
+                h[c[k], c[k+1]] = h[c[k+1], c[k]] = t[k]
+        cm[s::2, s::2] = _filled(h)
+    return cm
+
+
 def anderson_chain(n, ed=-0.5, U=1.0, tD=0.2, Lambda=2.0, D=1.0, B=0.0,
-                   dos=None, kind="standard", **kwargs):
+                   dos=None, kind="standard", basis="site",
+                   reference_level=None, **kwargs):
     """Anderson impurity with one or two levels, each coupled by its own
     tD to the first site of its own Wilson chain of n sites, as a
     Spinful_Fermionic_Chain.
@@ -235,10 +267,35 @@ def anderson_chain(n, ed=-0.5, U=1.0, tD=0.2, Lambda=2.0, D=1.0, B=0.0,
     chain construction (see open_wilson_chain), built with the factor
     Lambda^1/2 per site so that site n has the energy D Lambda^-n/2 on every
     kind. For a band symmetric around the Fermi level the three are the
-    same chain, since every shift vanishes."""
+    same chain, since every shift vanishes.
+
+    basis="gaussian" writes the Hamiltonian in the Gaussian basis of the
+    ground state without U (gaussianbasis.py, arXiv:2212.09798): each
+    Wilson chain is rotated, the impurity is not, and the chain keeps the
+    basis as fc.gaussian_basis and the site-basis Hamiltonian as
+    fc.site_hamiltonian (Fermionic_Chain.set_gaussian_basis). The
+    reference has the impurity level reference_level (a number, or one
+    per level), by default the Hartree level of a half-filled impurity,
+    ed + U (2L-1)/2, which is the Fermi level at ed = -U(2L-1)/2. Any
+    reference gives the same spectrum; it only decides how weakly
+    entangled the ground state is in the new basis. fc.channels still
+    lists the Wilson sites, which are now rotated orbitals, and
+    get_kondo_screening measures the original ones through the basis."""
     eds, tDs = np.atleast_1d(ed), np.atleast_1d(tD)
     if len(eds) != len(tDs) or len(eds) not in (1, 2):
         raise ValueError("ed and tD must both be numbers or both lists of two")
+    if basis not in BASES:
+        raise ValueError("basis must be one of %s, got %r"
+                         % (", ".join('"%s"' % b for b in BASES), basis))
+    if reference_level is not None:
+        if basis != "gaussian":
+            raise ValueError("reference_level is the impurity level of the "
+                             "reference of the Gaussian basis; it needs "
+                             "basis=\"gaussian\"")
+        levels = np.broadcast_to(np.atleast_1d(np.array(reference_level,
+                                 dtype=float)), eds.shape)
+    else:
+        levels = eds + U*(2*len(eds)-1)/2.0
     if n % 2 == 0:
         warnings.warn("n = %d chain sites is even: the ground state then has "
             "an odd number of electrons and is degenerate, and DMRG returns "
@@ -271,7 +328,11 @@ def anderson_chain(n, ed=-0.5, U=1.0, tD=0.2, Lambda=2.0, D=1.0, B=0.0,
     for a in range(len(modes)): # repulsion between every pair of spin-orbitals
         for b in range(a+1, len(modes)):
             h = h + U*modes[a]*modes[b]
-    fc.set_hamiltonian(h)
+    if basis == "site":
+        fc.set_hamiltonian(h)
+    else:
+        cm = _reference_correlation(n, levels, tDs, eps, t, imp, channels, B)
+        fc.set_gaussian_basis(fc.get_gaussian_basis(cm=cm, fixed=imp), h)
     fc.impurity = imp
     fc.channels = channels
     return fc

@@ -20,6 +20,23 @@ becomes a sum over all pairs of new modes, so the rotated Hamiltonian
 has longer-range hoppings and a larger MPO; the gain is a ground state
 that needs a much smaller bond dimension.
 
+GaussianBasis.natural_basis takes the reference from a solved state
+instead: the correlation matrix of the ground state of the rotated chain,
+taken back to the original modes, so that the circuit is that of the
+natural orbitals of the interacting state. The paper leaves this open.
+Measured on a 32-orbital Anderson impurity (v3, 12 sweeps, source state
+at maxm=32, docs/gaussian_basis_comparison/README.md), against the
+reference without U at the level ed+U/2: with eigval_cutoff=1e-5 the
+error at maxm=8 is smaller in all four cases (uniform bath and Wilson
+chain, at and away from particle-hole symmetry), by 1.4 to 6, and at
+maxm=16 in three of the four; at maxm=32 it is about 2 times larger on
+the uniform bath. The MPO is 26 to 46 against 26 to 34. With the 1e-8 of
+a pure reference the uniform bath gains more (6 to 9 at maxm=8), but the
+Wilson chain away from particle-hole symmetry loses 2.4 at maxm=8 (with
+30 sweeps; 5 with 12, which do not converge that basis), with an MPO of
+66. A second step gives nothing more. So it is a method to call,
+not a default of any route.
+
 On a Spinful_Fermionic_Chain, h, cm and fixed are given per orbital (an
 n x n matrix is taken for both spins, as in get_gaussian_state, and
 fixed lists orbitals, as fc.impurity does), and when the reference does
@@ -32,6 +49,12 @@ from .gaussianmpstk import basis as gbasis
 
 # Distance to [0, 1] above which an eigenvalue is not an occupation.
 OCCUPATION_TOLERANCE = 1e-8
+
+# eigval_cutoff of natural_basis: a measured state is not Gaussian, and
+# with the 1e-8 of a pure reference the blocks of the circuit grow over
+# the correlated part of the bath, which doubled the MPO of a Wilson chain
+# and lost accuracy there (module docstring).
+NATURAL_EIGVAL_CUTOFF = 1e-5
 
 
 def _check_chain(chain):
@@ -112,14 +135,21 @@ class GaussianBasis:
         from 0 and 1 are the ones that carry the entanglement.
     info: one dict per rotated run of modes (and spin): the modes, the
         number of gates, and the largest distance to 0 or 1 of a
-        decoupled occupation."""
+        decoupled occupation.
+    spin_mixing: for a basis from natural_basis, the largest element of
+        the spin-mixing block of the measured correlation matrix that was
+        dropped to keep the spins apart (0 otherwise)."""
 
-    def __init__(self, chain, V, fixed, fixed_modes, reference, info):
+    def __init__(self, chain, V, fixed, fixed_modes, reference, info,
+                 eigval_cutoff=1e-8, maxblocksize=None):
         self.chain = chain
         self.V = V
         self.fixed = fixed
         self.fixed_modes = fixed_modes
         self.info = info
+        self.eigval_cutoff = eigval_cutoff
+        self.maxblocksize = maxblocksize
+        self.spin_mixing = 0.0
         self._reference = reference
         self._rotated = [i for i in range(chain.ns) if i not in
                          set(fixed_modes)]
@@ -132,6 +162,57 @@ class GaussianBasis:
     @property
     def occupations(self):
         return np.real(np.diag(self.correlation_matrix()))
+
+    def mixes_spins(self):
+        """Whether V mixes the two spins of a spinful chain."""
+        from .gaussianmps import _is_spinful
+        if not _is_spinful(self.chain):
+            return False
+        return bool(np.any(self.V[0::2, 1::2] != 0) or
+                    np.any(self.V[1::2, 0::2] != 0))
+
+    def original_correlation_matrix(self, wf=None, **kwargs):
+        """<c_i^dag c_j> on the original modes of a state of the chain
+        written in this basis (by default its ground state): with
+        Lambda'[r,s] = <f_r^dag f_s> measured on the chain, it is
+        V^dagger Lambda' V. Extra keywords go to get_correlation_matrix
+        (mode="ED", for instance)."""
+        cm = np.array(self.chain.get_correlation_matrix(wf=wf, **kwargs),
+                      dtype=complex)
+        return self.V.conj().T @ cm @ self.V
+
+    def natural_basis(self, wf=None, eigval_cutoff=None, maxblocksize=None,
+                      **kwargs):
+        """The Gaussian basis of the correlation matrix of a state of the
+        chain written in this basis (by default its ground state), with
+        the same fixed orbitals: the circuit of the natural orbitals of
+        the interacting state instead of those of the reference. The new
+        basis is relative to the original modes, so it rotates the
+        original Hamiltonian, as this one does.
+
+        When this basis keeps the spins apart, the spin-mixing block of
+        the measured matrix is dropped, so that the new one keeps them
+        apart too (its largest element is kept as spin_mixing).
+        eigval_cutoff defaults to NATURAL_EIGVAL_CUTOFF and maxblocksize
+        to that of this basis; extra keywords go to
+        get_correlation_matrix."""
+        cm = self.original_correlation_matrix(wf=wf, **kwargs)
+        cm = 0.5*(cm+cm.conj().T)
+        dropped = 0.0
+        if _is_spinful_chain(self.chain) and not self.mixes_spins():
+            dropped = float(max(np.max(np.abs(cm[0::2, 1::2])),
+                                np.max(np.abs(cm[1::2, 0::2]))))
+            cm[0::2, 1::2] = 0.0
+            cm[1::2, 0::2] = 0.0
+        if eigval_cutoff is None:
+            eigval_cutoff = NATURAL_EIGVAL_CUTOFF
+        if maxblocksize is None:
+            maxblocksize = self.maxblocksize
+        b = gaussian_basis(self.chain, cm=cm, fixed=self.fixed,
+                           eigval_cutoff=eigval_cutoff,
+                           maxblocksize=maxblocksize)
+        b.spin_mixing = dropped
+        return b
 
     def rotate(self, op):
         """The operator op of the original modes, written in the new ones:
@@ -169,4 +250,11 @@ def gaussian_basis(chain, h=None, nf=None, cm=None, fixed=None,
     L = _reference(chain, h, nf, cm)
     V, info = _rotation(chain, L, fixed, fixed_modes, eigval_cutoff,
                         maxblocksize)
-    return GaussianBasis(chain, V, fixed, fixed_modes, L, info)
+    return GaussianBasis(chain, V, fixed, fixed_modes, L, info,
+                         eigval_cutoff=eigval_cutoff,
+                         maxblocksize=maxblocksize)
+
+
+def _is_spinful_chain(chain):
+    from .gaussianmps import _is_spinful
+    return _is_spinful(chain)

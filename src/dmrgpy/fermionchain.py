@@ -50,6 +50,28 @@ class Fermionic_Chain(Many_Body_Chain):
         from . import gaussianbasis
         return gaussianbasis.gaussian_basis(self,h=h,nf=nf,cm=cm,fixed=fixed,
                                             **kwargs)
+    def set_gaussian_basis(self,basis,H=None,**kwargs):
+        """Set the Hamiltonian H of the original modes, rotated to the
+        Gaussian basis `basis` (from get_gaussian_basis or natural_basis),
+        and keep both on the chain as fc.gaussian_basis and
+        fc.site_hamiltonian, so that get_kondo_screening measures the
+        original bath. Without H the Hamiltonian kept by the last call is
+        used, so fc.set_gaussian_basis(fc.gaussian_basis.natural_basis())
+        moves the chain to the natural orbitals of its ground state. A
+        later set_hamiltonian drops both. Extra keywords go to
+        set_hamiltonian."""
+        if H is None:
+            H = getattr(self,"site_hamiltonian",None)
+            if H is None:
+                raise ValueError("set_gaussian_basis: no H given, and the "
+                        "chain keeps no Hamiltonian of the original modes")
+        if basis.V.shape[0]!=self.ns:
+            raise ValueError("set_gaussian_basis: the basis has %d modes "
+                    "and the chain %d" % (basis.V.shape[0],self.ns))
+        basis.chain = self # its natural_basis measures this chain
+        self.set_hamiltonian(basis.rotate(H),**kwargs)
+        self.gaussian_basis = basis
+        self.site_hamiltonian = H
     def get_charge_gap(self,**kwargs):
         """Return the charge gap"""
         return gap.sector_gap(self,sum(self.N),**kwargs)

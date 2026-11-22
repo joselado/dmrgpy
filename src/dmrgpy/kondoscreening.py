@@ -30,6 +30,11 @@ For several levels, M_imp and M_n are given per level l, with Sz_l in
 place of Sz_imp, and M_env per level and per channel when the bath is
 given as a list of channels.
 
+On a chain written in a Gaussian basis (Fermionic_Chain.set_gaussian_basis,
+anderson_chain(basis="gaussian")), the impurity must be a fixed orbital of
+the basis, and Sz_n of the original bath orbitals goes through the
+rotation, so every number is the one of the site basis.
+
 All of them are expectation values, so they work on every backend and
 with mode="ED" for a cross-check. On DMRG, a bond dimension that is too
 small gives a state that breaks spin symmetry; in zero field this shows up
@@ -64,13 +69,23 @@ def kondo_screening(self, imp=None, bath=None, mode="DMRG"):
     channels = bath if np.ndim(bath[0]) > 0 else None
     sites = [i for c in bath for i in c] if channels is not None else list(bath)
     vev = lambda op: self.vev(op, mode=mode)
+    basis = getattr(self, "gaussian_basis", None)
+    if basis is not None: # a chain in a Gaussian basis measures the
+        # original bath orbitals, through the rotation
+        if any(i not in basis.fixed for i in imps):
+            raise ValueError("get_kondo_screening: the impurity orbitals %s "
+                             "must be fixed orbitals of the chain's "
+                             "Gaussian basis (%s)" % (imps, basis.fixed))
+        szs = [basis.rotate(self.Sz[j]) for j in sites]
+    else:
+        szs = [self.Sz[j] for j in sites]
     mimp, mn = [], []
     for i in imps:
         pup = self.Nup[i] - self.Nup[i]*self.Ndn[i] # P^up
         pdn = self.Ndn[i] - self.Nup[i]*self.Ndn[i] # P^dn
         mimp.append(np.real(vev(pup) + vev(pdn)))
-        mn.append(np.array([2.0*np.real(vev((pup - pdn)*self.Sz[j]))
-                            for j in sites]))
+        mn.append(np.array([2.0*np.real(vev((pup - pdn)*sz))
+                            for sz in szs]))
     if channels is None:
         menv = [np.sum(m) for m in mn]
     else:

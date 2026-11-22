@@ -434,6 +434,19 @@ an SU(4) Kondo singlet, with four values $1/2$. Unequal couplings split
 them in two pairs, and the splitting grows with the chain length, toward
 the SU(2) singlet of the level with the larger coupling.
 
+With `basis="gaussian"` the chain is written in the Gaussian basis of
+[A basis for impurity models](solver.md#a-basis-for-impurity-models):
+each Wilson chain is rotated by the circuit of the ground state without
+$U$, and the impurity is not. That reference has the impurity level
+`reference_level`, by default $\epsilon_d + U(2L-1)/2$ for $L$ levels, the
+Hartree level of a half-filled impurity, which is the Fermi level at
+particle-hole symmetry. Any level gives the same spectrum, and it only
+decides how weakly entangled the ground state is; away from particle-hole
+symmetry this default did better than the bare $\epsilon_d$ and than the
+self-consistent Hartree level. `get_kondo_screening` measures the original
+Wilson sites through the rotation, so its numbers are those of the site
+basis.
+
 ### The Kondo cloud along a real-space lead
 
 How far from the impurity does the screening happen? A Wilson chain does
@@ -537,6 +550,14 @@ $\xi_a(L)/\xi_a$ against $L/\xi_a$, are fits on these numbers. See
   looks like an unscreened moment: $M_{\text{env}} \neq -M_{\text{imp}}$
   and unequal Schmidt coefficients in zero field. Check against a larger
   `maxm`.
+- `basis`: `"site"` (default) or `"gaussian"`, the Wilson chains rotated
+  by the circuit of the ground state without $U$. On a Wilson chain the
+  gain is small: about a factor 2 in `maxm` at $\Lambda=2$, and none at
+  $\Lambda=4$ on 21 sites, with an MPO several times larger. The site
+  basis stays the better choice there; the Gaussian basis pays off on a
+  uniform bath (see [A basis for impurity models](solver.md#a-basis-for-impurity-models)).
+- `reference_level`: the impurity level of that reference, one number or
+  one per level; only with `basis="gaussian"`.
 
 The diagnostics are expectation values, so `mode="ED"` gives the exact
 values on a short chain, and `get_kondo_screening(imp=..., bath=...)`

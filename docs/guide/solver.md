@@ -259,7 +259,7 @@ H = sum(h[i,j]*(fc.Cdagup[i]*fc.Cup[j] + fc.Cdagdn[i]*fc.Cdn[j])
         for i in range(n) for j in range(n) if h[i,j] != 0)
 H = H + 4.0*(fc.Nup[0]-0.5)*(fc.Ndn[0]-0.5)               # U=4 on the impurity
 basis = fc.get_gaussian_basis(h=h, nf=n, fixed=[0])       # circuit of the U=0 state
-fc.set_hamiltonian(basis.rotate(H))
+fc.set_gaussian_basis(basis, H)             # sets the rotated H, keeps the basis
 e0 = fc.gs_energy()
 d = fc.vev(fc.Nup[0]*fc.Ndn[0])             # the impurity is not rotated
 n5 = fc.vev(basis.rotate(fc.Ntot[5]))       # site 5 of the original bath
@@ -275,13 +275,15 @@ becomes a sum over all pairs of rotated orbitals: its bond dimension is
 length of the bath. On a Wilson chain ($\Lambda=2$, $U=0.5$, 32
 orbitals) the gain we measured is smaller, about a factor 2 in `maxm` at
 equal accuracy. An operator on the impurity is measured as it is, and an
-operator of the original bath goes through `basis.rotate`. For the same
-reason `get_kondo_screening` gives the same `M_imp`, `M_env` and Schmidt
-values in both bases, while its `M_n` is per rotated orbital: there the
-screening sits almost all on the partner orbital of the impurity.
-`basis.occupations` are the occupations of the rotated orbitals in the
-reference: the ones far from 0 and 1 carry the entanglement. The
-keywords are:
+operator of the original bath goes through `basis.rotate`. The chain
+keeps the basis as `fc.gaussian_basis` and the Hamiltonian of the
+original orbitals as `fc.site_hamiltonian`, so `get_kondo_screening`
+measures the original bath through the rotation and gives the numbers of
+the site basis; a later `set_hamiltonian` drops both. `basis.occupations`
+are the occupations of the rotated orbitals in the reference: the ones
+far from 0 and 1 carry the entanglement. On a Wilson chain,
+`wilsonchain.anderson_chain(..., basis="gaussian")` does all of this (see
+[Kondo screening](kondo.md#kondo-screening-on-a-wilson-chain)). The keywords are:
 
 - `h=`, `nf=`: the reference, the Slater determinant of `nf` fermions of
   `h`. Any `h` gives an exact rotation; it only decides how weakly
@@ -301,8 +303,32 @@ keywords are:
   and a reference that is less disentangled; at `maxblocksize=4` the
   entanglement in the rotated basis grows again with the bath.
 
+Can the interacting state give a better basis than the state without
+$U$? Its correlation matrix $\langle c^\dagger_ic_j\rangle$ is diagonal
+in the natural orbitals, and `natural_basis()` builds the circuit of it,
+with the same fixed orbitals. It measures the matrix on the ground state
+of the chain, takes it back to the original orbitals, and gives a basis of
+the original orbitals, so it rotates the original Hamiltonian:
+
+```python
+fc.set_gaussian_basis(fc.gaussian_basis.natural_basis())   # H kept by the chain
+e1 = fc.gs_energy()
+```
+
+The interacting state is not Gaussian, so a few natural orbitals keep
+occupations far from 0 and 1, and the circuit leaves them next to the
+impurity. On the chain above, with the state at `maxm=32` as the source,
+the error at `maxm=8` goes from 5e-3 to 8e-4, with an MPO of 26 instead
+of 34, while at `maxm=32` the two bases are within a factor 2. On a
+Wilson chain the gain at `maxm=8` and 16 is a factor 1.4 to 4.5. A second
+step from the new state gives nothing more. `natural_basis` takes
+`eigval_cutoff` (default 1e-5): the 1e-8 of a pure state gives a larger
+MPO, a better basis on the uniform bath and a worse one on a Wilson chain.
+
 The example `examples/kondo/gaussian_basis_anderson` compares the
-ground-state energy against `maxm` in the two bases.
+ground-state energy against `maxm` in the two bases, and
+`examples/kondo/gaussian_basis_natural_orbitals` the circuit of the state
+without $U$ against the natural orbitals.
 
 ## Several chains
 
