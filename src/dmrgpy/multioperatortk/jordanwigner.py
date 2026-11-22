@@ -2,38 +2,44 @@ from .. import multioperator
 
 def obj2MO(a): return multioperator.obj2MO([a])
 
+
+def _term(c, factors):
+    """The one-term MultiOperator c*factors[0]*factors[1]*..., built in
+    one step. Building a string by one product per F factor, as this
+    module used to, copies the growing term at every step, so a term of
+    span s cost O(s^2); a rotated hopping of a Gaussian basis spans the
+    chain, and its expansion dominated the build of the Hamiltonian. The
+    terms are the same as those products give, coefficient and factor
+    order included (tests/test_jordan_wigner_strings.py)."""
+    mo = multioperator.MultiOperator(name="multioperator", term=False)
+    mo.op = [[c]+[[name, k] for (name, k) in factors]]
+    mo.i = 0
+    return mo
+
+
+def _string(i, j):
+    """The F factors strictly between sites i < j."""
+    return [("F", k) for k in range(i+1, j)]
+
+
 def CdagC(i,j):
-    if i==j: return obj2MO(["Adag",i])*obj2MO(["A",j])
-    elif i<j:
-        m = obj2MO(["Adag",i])
-        for k in range(i,j-1):
-            m = m*obj2MO(["F",k+1])
-        return m*obj2MO(["A",j])
-    elif j<i: return -1*CCdag(j,i)
+    if i==j: return _term(1.0, [("Adag",i), ("A",j)])
+    elif i<j: return _term(1.0, [("Adag",i)]+_string(i,j)+[("A",j)])
+    else: return _term(1.0, [("A",j)]+_string(j,i)+[("Adag",i)])
 
 
 def CCdag(i,j):
-    if i==j: return obj2MO(["A",i])*obj2MO(["Adag",j])
-    elif i<j:
-        m = -1*obj2MO(["A",i])
-        for k in range(i,j-1):
-            m = m*obj2MO(["F",k+1])
-        return m*obj2MO(["Adag",j])
-    elif j<i: return -CdagC(j,i)
+    if i==j: return _term(1.0, [("A",i), ("Adag",j)])
+    elif i<j: return _term(-1.0, [("A",i)]+_string(i,j)+[("Adag",j)])
+    else: return _term(-1.0, [("Adag",j)]+_string(j,i)+[("A",i)])
 
 
 def C(i):
-    m = 1.0
-    for k in range(i):
-        m = obj2MO(["F",k])*m
-    return m*obj2MO(["A",i])
+    return _term(1.0, [("F",k) for k in range(i-1,-1,-1)]+[("A",i)])
 
 
 def Cdag(i):
-    m = obj2MO(["Adag",i])
-    for k in range(i):
-        m = obj2MO(["F",k])*m
-    return m
+    return _term(1.0, [("F",k) for k in range(i-1,-1,-1)]+[("Adag",i)])
 
 
 def CC(i,j):
@@ -44,13 +50,9 @@ def CC(i,j):
     # on all three DMRG backends for a perfectly legitimate vev(C[i]*C[i])
     # (mode="ED" answered 0j). The product below is the same form the
     # Cdag path already produces, and every backend evaluates it to 0.
-    if i==j: return obj2MO(["A",i])*obj2MO(["A",i])
-    elif i<j:
-        m = -1*obj2MO(["A",i])
-        for k in range(i,j-1):
-            m = m*obj2MO(["F",k+1])
-        return m*obj2MO(["A",j])
-    elif j<i: return -1*CC(j,i)
+    if i==j: return _term(1.0, [("A",i), ("A",i)])
+    elif i<j: return _term(-1.0, [("A",i)]+_string(i,j)+[("A",j)])
+    else: return _term(1.0, [("A",j)]+_string(j,i)+[("A",i)])
 
 
 def CdagCdag(i,j):
