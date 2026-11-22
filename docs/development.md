@@ -8731,6 +8731,7 @@ flow) and the tables of the thermal kernel stay on the host.
 | `src/dmrgpy/pyitensor/` | pure-Python ITensor-v3-subset reimplementation |
 | `src/dmrgpy/mpsjulialive/`, `mpsjulia/` | Julia/ITensors.jl backend modules |
 | `src/dmrgpy/edtk/`, `pyfermion/`, `pyspin/`, `pyboson/`, `pyzn/` | exact-diagonalization backend |
+| `src/dmrgpy/gaussianmps.py`, `gaussianmpstk/` | Gaussian states as MPS (`get_gaussian_state`, Slater determinants and BdG ground states): the Fishman-White circuit of Givens and Bogoliubov rotations from the (generalized) correlation matrix (arXiv:1504.07701, after ITensorGaussianMPS.jl), applied as two-site gates on the site arrays, which go in and out of v3, `"python"` and `julia_live` through the bridge of `mpsalgebratk/hadamard.py`; ED builds a Slater determinant directly and a BdG state as the ground state of its parent Hamiltonian |
 | `src/dmrgpy/kpmdmrg.py` | Kernel Polynomial Method dynamical correlators |
 | `src/dmrgpy/nonhermitian/kpm.py` | non-Hermitian KPM dynamical correlator (NHKPM.jl port, ED + itensor_version=3) |
 | `src/dmrgpy/tdz.py` | complex-time-evolution dynamical correlator ("TDZ", arXiv:2311.10909) |

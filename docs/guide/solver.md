@@ -133,6 +133,101 @@ begins. `sc.get_gs(best=True, n=3)` solves `n` times from independent
 random starts and keeps the lowest energy, for a frustrated or disordered
 chain where a single solve can end in an excited state.
 
+## Free-fermion states
+
+For a fermion chain, a natural start is the ground state without the
+interaction. This is a Slater determinant: the $N_f$ lowest orbitals of
+the single-particle Hamiltonian $H_0=\sum_{ij}h_{ij}c^\dagger_ic_j$ are
+filled. A Slater determinant is fixed by its correlation matrix
+$\Lambda_{ij}=\langle c^\dagger_ic_j\rangle$, and `get_gaussian_state`
+writes it as an MPS. Here we start the Hubbard chain at half filling
+from its Fermi sea:
+
+```python
+import numpy as np
+from dmrgpy import fermionchain
+n = 8
+fc = fermionchain.Spinful_Fermionic_Chain(n)
+fc.maxm = 60                                # bond dimension
+h = np.zeros((n,n))
+for i in range(n-1): h[i,i+1] = h[i+1,i] = -1.0          # hopping, the same for both spins
+H = sum(h[i,j]*(fc.Cdagup[i]*fc.Cup[j] + fc.Cdagdn[i]*fc.Cdn[j])
+        for i in range(n) for j in range(n) if h[i,j] != 0)
+H = H + 4.0*sum((fc.Nup[i]-0.5)*(fc.Ndn[i]-0.5) for i in range(n))   # U=4
+fc.set_hamiltonian(H)
+wf = fc.get_gaussian_state(h=h, nf=n)       # the U=0 Fermi sea, n electrons
+fc.set_initial_wf_guess(wf)
+e0 = fc.gs_energy()
+```
+
+The start does not fix the particle number: when another filling has a
+lower energy, DMRG leaves the start and goes there. Here the
+particle-hole symmetric form of $U$ keeps the ground state at half
+filling; otherwise we fix the filling with a chemical potential or a
+penalty $\lambda(N-N_f)^2$ in $H$.
+
+The correlation matrix of the MPS, `fc.vev(fc.Cdag[i]*fc.C[j], wf=wf)`,
+is $\Lambda_{ij}$ of the filled orbitals, up to an error of roughly the
+square root of `eigval_cutoff`: on a 40-site chain at half filling it is
+2.6e-5 at the default 1e-8 and 1.4e-6 at 1e-10. The truncation at `maxm`
+adds to this. The check works at sizes far beyond exact
+diagonalization, so a free-fermion state is also a test of the MPS
+machinery on a large chain. With `gutzwiller=True` every doubly
+occupied orbital is projected out, $\prod_i(1-n_{i\uparrow}n_{i\downarrow})$,
+which gives the Gutzwiller wave function of strong coupling:
+`fc.vev(fc.Nup[i]*fc.Ndn[i], wf=wf)` is then zero on every site.
+
+A superconductor without interactions has a Gaussian ground state too,
+with pairing. With a pairing matrix $\Delta_{ij}=-\Delta_{ji}$ the state
+is the ground state of the Bogoliubov-de Gennes (BdG) Hamiltonian
+$H_0=\sum_{ij}h_{ij}c^\dagger_ic_j+\frac12\sum_{ij}(\Delta_{ij}c^\dagger_ic^\dagger_j+\mathrm{h.c.})$,
+where all the quasiparticle states of negative energy are filled. The
+particle number is not fixed, so the chemical potential goes in the
+diagonal of `h` and there is no `nf`:
+
+```python
+fc = fermionchain.Fermionic_Chain(n)
+mu = 2.5
+h = -mu*np.eye(n)
+D = np.zeros((n,n))
+for i in range(n-1):
+    h[i,i+1] = h[i+1,i] = -1.0
+    D[i,i+1], D[i+1,i] = 1.0, -1.0       # p-wave pairing of the Kitaev chain
+wf = fc.get_gaussian_state(h=h, delta=D)
+```
+
+The anomalous correlations `fc.vev(fc.C[i]*fc.C[j], wf=wf)` are then
+those of the BdG matrix. On a spinful chain an $n\times n$ `delta` is the
+singlet pairing $\sum_{ij}\Delta_{ij}c^\dagger_{i\uparrow}c^\dagger_{j\downarrow}$,
+so `delta=D0*np.eye(n)` is an s-wave superconductor, and
+`gutzwiller=True` works with pairing too. In the topological phase of
+the Kitaev chain, with open ends, the two Majorana end modes give two
+ground states of almost the same energy; when they are degenerate a
+warning says so, and the state is one of the two, of definite parity. The keywords are:
+
+- `h=`, `nf=`: the hopping matrix and the number of fermions. On a
+  spinful chain an $n\times n$ matrix is used for both spins; a
+  $2n\times 2n$ matrix has mode $2i$ for spin up and $2i+1$ for spin down
+  of site $i$.
+- `delta=`: the pairing matrix, with `h` and without `nf`.
+- `cm=`: the correlation matrix $\Lambda$ instead of `h` and `nf`, or
+  the $2n\times 2n$ one $\langle\gamma^\dagger_a\gamma_b\rangle$ with
+  $\gamma=(c_0,c^\dagger_0,c_1,c^\dagger_1,\ldots)$ for a state with
+  pairing. Its eigenvalues must be 0 or 1, meaning that the state is pure.
+- `gutzwiller=True`: the Gutzwiller projection, on a spinful chain.
+- `eigval_cutoff` (default 1e-8): the accuracy of the circuit of
+  rotations that builds the state. A smaller value gives more gates and
+  a more accurate state; 1e-8 is enough for a DMRG start.
+- `maxblocksize`: a smaller value gives a smaller bond dimension and a
+  less accurate state.
+- `maxm=`, `cutoff=`: the truncation (default: the chain's). A warning
+  says when it changes the state.
+- `mode="ED"`: the same state as an exact vector.
+
+The examples `examples/fermion_models/gaussian_state` and
+`examples/fermion_models/gaussian_state_pairing` compare the correlations
+of a 40-site Fermi sea and of a 40-site Kitaev chain with the exact ones.
+
 ## Several chains
 
 `sc.copy()` returns an independent chain with the same Hamiltonian and

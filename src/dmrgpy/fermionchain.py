@@ -25,6 +25,19 @@ class Fermionic_Chain(Many_Body_Chain):
         Many_Body_Chain.__init__(self,[0 for i in range(n)],**kwargs)
         self.fermionic = True
         self.use_ampo_hamiltonian = True # use ampo
+    def get_gaussian_state(self,h=None,nf=None,cm=None,delta=None,**kwargs):
+        """The normalized Gaussian state of this chain, for instance a start
+        for DMRG: the Slater determinant that fills the nf lowest orbitals
+        of the hopping matrix h (H = sum_ij h[i,j] Cdag_i C_j), the ground
+        state of h with the pairing matrix delta (grand canonical, no nf),
+        or the state of correlation matrix cm (<Cdag_i C_j>, or the
+        generalized one on (C_0, Cdag_0, C_1, ...)). Built by the
+        Fishman-White circuit on the MPS backends and directly on ED; the
+        keywords (eigval_cutoff, maxblocksize, gutzwiller, maxm, cutoff,
+        mode) are those of gaussianmps.gaussian_state."""
+        from . import gaussianmps
+        return gaussianmps.gaussian_state(self,h=h,nf=nf,cm=cm,delta=delta,
+                                          **kwargs)
     def get_charge_gap(self,**kwargs):
         """Return the charge gap"""
         return gap.sector_gap(self,sum(self.N),**kwargs)
