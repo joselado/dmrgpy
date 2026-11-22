@@ -2558,3 +2558,20 @@ with short-range hopping; a dense complex hopping matrix on spinless
 sites crosses it from 33 sites. Parity-odd terms, four-fermion terms, every other operator and
 the real-time routes keep the explicit strings. ED, `"python"` and
 `julia_live` are untouched (`tests/test_native_fermion_strings.py`).
+
+## The 2026-11-22 installer rework: what is said at import
+
+No number moves: on x86-64 with GCC the compiler command, the flags and
+the order in which compilers and LAPACK/BLAS are tried are the same as
+before (`tests/test_installer.py` pins the command). What changes is what
+`import dmrgpy` says. A compiled extension that is there and does not
+load, because it was built for another interpreter or because a library
+of an environment module is missing, now gives a `RuntimeWarning` with the
+reason; before, it counted as "not compiled", and the chain ran on
+`"python"` or, with an explicit `itensor_version=3`, on ED, under that
+wrong label. An extension that is older than its C++ sources gives a
+`RuntimeWarning` that names `python install.py --extension-only`; it is
+decided by a hash that the build records, so an extension built before
+this date has no record and gives no warning until it is rebuilt. The
+message printed when an explicit C++ version falls back to ED carries the
+same reason (`tests/test_backend_status.py`).

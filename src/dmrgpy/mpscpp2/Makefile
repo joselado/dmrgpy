@@ -48,7 +48,17 @@ clean:
 # this problem in the first place.
 #################################################################
 
+# install.py writes build_config.mk with the interpreter and the compiler
+# that it validated (DMRGPY_PYTHON, DMRGPY_PYBIND_CCCOM), so that a later
+# "make pybind" by hand, the normal step after a C++ edit, builds with the
+# same ones. Without that file (a build that never went through install.py)
+# the detection below decides, as it always did.
+-include build_config.mk
+
 PYTHON=python3
+ifdef DMRGPY_PYTHON
+PYTHON=$(DMRGPY_PYTHON)
+endif
 PYBIND_INCLUDES=$(shell $(PYTHON) -m pybind11 --includes)
 # Ask the interpreter itself for the suffix (not $(PYTHON)-config):
 # conda ships python3-config but no python-config, so the -config
@@ -68,6 +78,9 @@ PYBIND_CCCOM=$(CONDA_GXX) -m64 -std=c++14 -fPIC
 # -lblas -llapack, which silently ignored that configuration.
 PYBIND_LIBFLAGS=-L$(ITENSOR_LIBDIR) -litensor $(BLAS_LAPACK_LIBFLAGS)
 endif
+ifdef DMRGPY_PYBIND_CCCOM
+PYBIND_CCCOM=$(DMRGPY_PYBIND_CCCOM)
+endif
 
 pybind: $(EXT_MODULE)
 
@@ -76,8 +89,11 @@ pybind: $(EXT_MODULE)
 # change to the actual DMRG implementation does NOT relink the extension and
 # `make pybind` reports "Nothing to be done" while the .so keeps the old code
 # -- a genuinely confusing way to test a change that was never compiled.
-LOCAL_HEADERS=$(wildcard *.h)
+LOCAL_HEADERS=$(wildcard *.h extra/*.h TDVP/*.h)
 
 $(EXT_MODULE): bindings.cc $(LOCAL_HEADERS) $(ITENSOR_LIBS)
 	$(PYBIND_CCCOM) -shared $(CCFLAGS) $(PYBIND_INCLUDES) bindings.cc -o $(EXT_MODULE) $(PYBIND_LIBFLAGS)
+	@# record which sources this extension was built from (build_info.json),
+	@# so that cppext.py can tell when it is older than them
+	-@$(PYTHON) ../buildinfo.py --stamp .
 

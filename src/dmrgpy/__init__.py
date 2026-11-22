@@ -2,7 +2,12 @@ import warnings as _warnings
 
 from . import cppext as _cppext
 
-if not _cppext.available(_cppext.DEFAULT_ITENSOR_VERSION):
+if (not _cppext.available(_cppext.DEFAULT_ITENSOR_VERSION)
+        and _cppext.status(_cppext.DEFAULT_ITENSOR_VERSION)["state"]
+        == _cppext.NOT_COMPILED):
+    # An extension that is compiled and does not load (another Python, a
+    # module that is not loaded) is a different case with a different
+    # fix; cppext has already warned about it with its real reason.
     # Two very different audiences hit this notice, so it has to serve both.
     # From a git checkout, the fix is to compile the extension with
     # install.py. From a PyPI install there *is* no install.py -- the wheel

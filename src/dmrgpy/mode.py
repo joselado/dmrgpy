@@ -97,9 +97,8 @@ def resolve_mode(self,mode="DMRG"):
             # (), which is what makes a pip install do real DMRG rather
             # than ED). So this is a caller who asked for version 2 or 3 by
             # name on a machine where that extension isn't built.
-            print("ITensor v%s extension not compiled, using default ED "
-                  "routines (itensor_version=\"python\" would run DMRG "
-                  "here without needing a compiler)"%self.itensor_version)
+            print(cppext.explain(self.itensor_version)
+                  +" Using the ED routines instead.")
             return "ED" # use exact diagonalization
     # ITensor v3's dmrg() always does two-site updates (see chain_session.h's
     # dmrg_args()) and its sweep loop aborts the whole process (SIGABRT,

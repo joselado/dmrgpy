@@ -1,2 +1,5 @@
 mpscpp.x
 _dmrgcpp*.so
+build_config.mk
+build_info.json
+build_info.json.tmp
