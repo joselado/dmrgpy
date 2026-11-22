@@ -48,9 +48,34 @@ def test_kondo_screening_of_two_levels_per_channel():
     gauss = wilsonchain.anderson_chain(3, basis="gaussian", **kw)
     a = site.get_kondo_screening(mode="ED")
     b = gauss.get_kondo_screening(mode="ED")
-    for key in ("M_imp", "M_env", "schmidt"):
+    for key in ("M_imp", "M_env", "M_n", "schmidt"):
         assert np.allclose(np.array(a[key], dtype=float),
                            np.array(b[key], dtype=float), atol=1e-9), key
+
+
+def test_even_chain_with_a_level_at_zero():
+    """n even at particle-hole symmetry: the reference has a level at the
+    Fermi level, half occupied, and the rotation is still exact."""
+    kw = dict(ed=-0.5, U=1.0, tD=0.3, Lambda=3.0)
+    with pytest.warns(UserWarning, match="is even"):
+        site = wilsonchain.anderson_chain(4, **kw)
+    with pytest.warns(UserWarning, match="is even"):
+        gauss = wilsonchain.anderson_chain(4, basis="gaussian", **kw)
+    assert np.any(np.abs(gauss.gaussian_basis.occupations-0.5) < 1e-12)
+    assert np.allclose(site.get_excited(n=4, mode="ED"),
+                       gauss.get_excited(n=4, mode="ED"), atol=1e-9)
+
+
+@pytest.mark.parametrize("how", ["clone", "deepcopy"])
+def test_a_copy_keeps_its_own_basis(how):
+    import copy
+    fc = wilsonchain.anderson_chain(3, ed=-0.3, U=1.0, tD=0.3, Lambda=3.0,
+                                    basis="gaussian")
+    c = fc.clone() if how == "clone" else copy.deepcopy(fc)
+    assert c.gaussian_basis is not fc.gaussian_basis
+    assert c.gaussian_basis.chain is c
+    a, b = fc.get_kondo_screening(mode="ED"), c.get_kondo_screening(mode="ED")
+    assert np.allclose(a["M_n"], b["M_n"], atol=1e-12)
 
 
 @_cpp3()

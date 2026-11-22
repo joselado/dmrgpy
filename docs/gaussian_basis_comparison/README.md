@@ -101,13 +101,112 @@ the runs, the solves were pinned to one performance core with one BLAS
 thread, and the 128-orbital runs overlapped with short checks on another
 core.
 
+## The reference level and the natural orbitals
+
+`reference.py` asks which reference gives the best basis, with $U$ written
+as $Un_\uparrow n_\downarrow$, as `wilsonchain.anderson_chain` does. The
+bare level $\epsilon_d$ of the state without $U$, the level
+$\epsilon_d+U/2$ (the Hartree level of a half-filled impurity, the Fermi
+level at particle-hole symmetry), the restricted self-consistent Hartree
+level $\epsilon_d+U\bar n$, and the natural orbitals of the interacting
+state, which `GaussianBasis.natural_basis` builds from the correlation
+matrix of the state solved at `maxm=32` in the $\epsilon_d+U/2$ basis,
+at three values of `eigval_cutoff`. 32 orbitals, v3, 12 sweeps, cold
+start, the error against the lowest energy of all the runs of a case
+(`reference_table.py` prints the tables):
+
+```bash
+python3 reference.py uniform 32 4.0 -2.0 8,16,32    # particle-hole symmetric
+python3 reference.py uniform 32 4.0 -1.0 8,16,32
+python3 reference.py wilson 32 0.5 -0.25 8,16,32    # particle-hole symmetric
+python3 reference.py wilson 32 0.5 -0.1 8,16,32
+python3 reference.py wilson 32 0.5 -0.1 8,16,32 30  # 30 sweeps
+python3 reference_table.py
+```
+
+| case | basis | MPO | maxm=8 | maxm=16 | maxm=32 |
+|---|---|---|---|---|---|
+| uniform, $\epsilon_d=-U/2$ | bare | 34 | 8.2e-3 | 6.9e-4 | 1.1e-5 |
+| | $\epsilon_d+U/2$ (= Hartree) | 34 | 4.8e-3 | 1.2e-4 | 2.0e-6 |
+| | natural, cutoff 1e-8 | 38 | 5.2e-4 | 3.1e-5 | 6.3e-7 |
+| | natural, cutoff 1e-5 | 26 | 7.5e-4 | 8.9e-5 | 4.4e-6 |
+| | natural, cutoff 1e-3 | 22 | 5.8e-3 | 7.8e-4 | 7.2e-5 |
+| uniform, $\epsilon_d=-U/4$ | bare | 34 | 6.2e-3 | 4.6e-4 | 7.9e-6 |
+| | $\epsilon_d+U/2$ | 34 | 2.2e-3 | 6.5e-5 | 1.3e-6 |
+| | Hartree | 34 | 3.5e-3 | 7.2e-5 | 1.1e-6 |
+| | natural, cutoff 1e-8 | 38 | 3.8e-4 | 3.0e-5 | 4.5e-7 |
+| | natural, cutoff 1e-5 | 26 | 5.6e-4 | 8.2e-5 | 2.7e-6 |
+| | natural, cutoff 1e-3 | 22 | 5.5e-3 | 8.0e-4 | 5.6e-5 |
+| Wilson, $\epsilon_d=-U/2$ | bare | 26 | 2.2e-3 | 6.8e-4 | 7.3e-5 |
+| | $\epsilon_d+U/2$ (= Hartree) | 30 | 4.0e-3 | 2.5e-4 | 2.0e-5 |
+| | natural, cutoff 1e-8 | 66 | 1.5e-3 | 2.4e-4 | 2.3e-5 |
+| | natural, cutoff 1e-5 | 46 | 2.8e-3 | 1.7e-4 | 1.8e-5 |
+| | natural, cutoff 1e-3 | 26 | 1.5e-3 | 2.0e-4 | 4.4e-5 |
+| Wilson, $\epsilon_d=-U/5$ | bare | 26 | 3.0e-3 | 9.5e-4 | 1.0e-4 |
+| | $\epsilon_d+U/2$ | 26 | 1.5e-3 | 3.9e-4 | 2.2e-5 |
+| | Hartree | 30 | 2.7e-3 | 1.2e-4 | 0 |
+| | natural, cutoff 1e-8 | 66 | 8.2e-3 | 8.3e-4 | 7.7e-5 |
+| | natural, cutoff 1e-5 | 38 | 1.0e-3 | 8.5e-5 | 2.6e-6 |
+| | natural, cutoff 1e-3 | 22 | 8.0e-4 | 1.2e-4 | 1.5e-5 |
+
+The site basis is 4e-2 to 5e-1 off at `maxm=8` and 2e-3 to 4e-2 at
+`maxm=32` in every case, so every Gaussian basis is far ahead of it. On the uniform bath
+$\epsilon_d+U/2$ is the best reference at `maxm=8` and 16, and within
+20% of the self-consistent Hartree level at 32; the bare level is 1.7 to
+7 times worse. On the Wilson chain at particle-hole symmetry
+$\epsilon_d+U/2$ is the Hartree level, and the bare level is better at
+`maxm=8` and 2.7 to 3.7 times worse at 16 and 32. On the Wilson chain away
+from particle-hole symmetry the self-consistent Hartree level is better at
+`maxm=16` and 32 (1.2e-4 and 6.1e-6 with 30 sweeps, against 3.9e-4 and
+2.8e-5 for $\epsilon_d+U/2$), and $\epsilon_d+U/2$ only at `maxm=8`
+(1.5e-3 against 2.7e-3). So which level is best away from particle-hole
+symmetry is not settled, and a reference for two levels was not measured
+at all. $\epsilon_d+U(2L-1)/2$ is the default of
+`anderson_chain(basis="gaussian")` for now.
+
+The natural orbitals depend on the cutoff, since the interacting state is
+not Gaussian and the blocks of the circuit grow over its correlated part
+when the cutoff is that of a pure state. With 1e-8 the uniform bath gains
+6 to 9 at `maxm=8` and 2 to 4 at `maxm=16`, but the Wilson chain away
+from particle-hole symmetry loses 5 at `maxm=8` (2.4 with 30 sweeps, see
+below) and the MPO is 66. With
+1e-5, the default of `natural_basis`, the error at `maxm=8` is smaller
+than with $\epsilon_d+U/2$ in all four cases, by 1.4 to 6, and at
+`maxm=16` in three of them (by 1.3 to 4.6, and 1.3 times larger on the
+uniform bath away from particle-hole symmetry); at `maxm=32` it is about 2
+times larger on the uniform bath and 1.1 to 8 times smaller on the Wilson
+chain. A second step of natural orbitals, from the state of the first,
+gives nothing more (`natural2` in the data).
+
+Twelve sweeps are enough for the references, but not for the larger MPO
+of the natural orbitals at cutoff 1e-8 on the Wilson chain. With 30 sweeps
+(`python3 reference.py wilson 32 0.5 -0.1 8,16,32 30`) the references move
+by less than 1e-5, while that basis goes from 8.2e-3 to 3.6e-3 at
+`maxm=8` and from 8.3e-4 to 3.2e-4 at `maxm=16`. It still loses at
+`maxm=8`, by 2.4 against $\epsilon_d+U/2$, and cutoff 1e-5 stays the best:
+7.6e-4, 8.7e-5 and 7.8e-6 at `maxm=8`, 16 and 32, against 1.5e-3, 3.9e-4
+and 2.8e-5. The measured spin-mixing
+block that `natural_basis` drops was 2e-8 to 2e-4.
+
+## A deep Wilson chain
+
+With `anderson_chain(21, ed=-0.25, U=0.5, tD=0.2, Lambda=4.0)` (22
+orbitals, Wilson sites down to $4^{-10}$ of the band), the Gaussian basis
+gives no gain. On v3 with 40 sweeps, the site basis gives -1.9874176475
+at `maxm=64` and -1.9874188004 at 128, and the Gaussian basis
+-1.9873881894 at 32, -1.9874177381 at 64 and -1.9874187858 at 128. Its
+largest bond entropy is 1.13 against 2.08, but the energy at equal `maxm`
+is the same within 1e-7. At `maxm=128` the two bases agree to 1.5e-8, and
+`get_kondo_screening` gives the same $M_{\rm imp}=0.843145$ and Schmidt
+values $(0.70711, 0.70711)$, so the rotation loses no low-energy hopping.
+Measuring the screening takes 8 to 9 s in the Gaussian basis against 1 to
+2 s, since each bath $S^z_n$ becomes a sum over all pairs of rotated
+orbitals.
+
 ## What is not here
 
-The comparison is at particle-hole symmetry only, where the reference at
-$U=0$ is unambiguous. Away from it the reference level of the impurity
-(the bare level or a Hartree level) is a choice that was not measured.
-Neither the natural-orbital iteration (the basis of the correlation
-matrix of the interacting state, `cm=`) nor a bath with pairing was
-tried. The MPO build, 11 to 18 s on 128 orbitals now, could be cut further
+The first comparison is at particle-hole symmetry only; the reference
+level and the natural orbitals away from it are in the section above, on
+32 orbitals only. A bath with pairing was not tried. The MPO build, 11 to 18 s on 128 orbitals now, could be cut further
 by building the MPO of a quadratic Hamiltonian directly, which was not
 done.

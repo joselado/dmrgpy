@@ -441,11 +441,10 @@ $U$, and the impurity is not. That reference has the impurity level
 `reference_level`, by default $\epsilon_d + U(2L-1)/2$ for $L$ levels, the
 Hartree level of a half-filled impurity, which is the Fermi level at
 particle-hole symmetry. Any level gives the same spectrum, and it only
-decides how weakly entangled the ground state is; away from particle-hole
-symmetry this default did better than the bare $\epsilon_d$ and than the
-self-consistent Hartree level. `get_kondo_screening` measures the original
-Wilson sites through the rotation, so its numbers are those of the site
-basis.
+decides how weakly entangled the ground state is. Away from particle-hole
+symmetry, and for two levels, the best reference is not settled.
+`get_kondo_screening` measures the original Wilson sites through the
+rotation, so its numbers are those of the site basis.
 
 ### The Kondo cloud along a real-space lead
 
