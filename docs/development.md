@@ -55,6 +55,9 @@ python install.py --itensor-version=2     # compiles ITensor v2 (mpscpp2) instea
 python install.py --itensor-version=both  # compiles both v2 and v3 backends
 python install.py --gpp=g++-6             # use a specific compiler (needs g++ >= 6, LAPACK/BLAS)
 python install.py --doctor                # check build requirements only, skip the build
+python install.py --extension-only        # rebuild only the pybind11 extension (after a C++ edit)
+python install.py --build-only            # build and self-test, change nothing outside the checkout
+python -m dmrgpy.doctor                   # which backends load here, and how each was built
 python install_julia.py                   # alternative/additional: Julia backend
 ```
 
@@ -70,6 +73,40 @@ extension build fails, or the user only ran `install_julia.py`), DMRGPY
 still works: `itensor_version="python"` requires no compiled extension,
 and every call transparently falls back to ED when a requested compiled
 backend isn't present.
+
+What the installer leaves behind, and who reads it:
+
+- **`mpscppN/build_config.mk`** holds the interpreter and the compiler
+  command that `install.py` validated. The Makefile of the backend includes
+  it, so `make pybind` by hand, the step after a C++ edit, builds with the
+  same ones. Without the file the Makefile's own detection decides.
+- **`mpscppN/build_info.json`** is the record of the build: compiler, flags,
+  BLAS/LAPACK, interpreter, loaded environment modules, conda environment,
+  commit, and a hash of the C++ sources of the extension
+  (`src/dmrgpy/buildinfo.py`; the `pybind` target stamps the hash after
+  every link). It also holds the key of the ITensor library, a hash of the
+  vendored sources and of the configuration, which is how a second
+  `python install.py` knows that ITensor need not be compiled again.
+- **`install_v<N>.log`** is the full output of the last build.
+
+`cppext.py` uses the record at import. An extension that is there and does
+not load (it was compiled for another interpreter, or a library it needs
+is missing because a module is not loaded) gives a `RuntimeWarning` with
+the reason, where it used to count as "not compiled". An extension that is
+older than its sources gives a warning that names
+`python install.py --extension-only`. `cppext.status(version)` returns the
+state as a dict, `cppext.explain(version)` as a sentence, and
+`python -m dmrgpy.doctor` prints it for every backend; with `--selftest`
+it also solves a 6-site Heisenberg chain on each compiled backend against
+ED, which is the test `install.py` runs in a fresh process after a build.
+
+The compiler flags of both backends are in `installtk/buildflags.py`, and
+the requirement check compiles a small program with them, so a compiler
+that cannot build ITensor v3 fails in the check. On x86-64 with GCC the
+flags are the ones every earlier build used. Clang gets ITensor's own
+Clang flags (no `-fconcepts`) and other architectures get no `-m64`; these
+two paths are written from ITensor's `options.mk.sample` and have not been
+run on such a machine.
 
 No compiler or pybind11 is needed at all to use `itensor_version="python"`
 — only NumPy/SciPy/SymPy/`numba` (all four are core `pip install dmrgpy`

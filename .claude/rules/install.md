@@ -3,16 +3,24 @@ paths:
   - "install.py"
   - "install_julia.py"
   - "installtk/**"
-  - "addsystem.py"
+  - "src/dmrgpy/buildinfo.py"
+  - "src/dmrgpy/doctor.py"
+  - "src/dmrgpy/cppext.py"
+  - "tests/test_installer.py"
+  - "tests/test_backend_status.py"
 ---
 
 # Install and build (`install.py`, `installtk/`)
 
 These are the notes CLAUDE.md used to carry under "Install / build"; they
-load when `install.py` or a file under `installtk/` is read or edited. The
-commands themselves are still in CLAUDE.md.
+load when `install.py`, a file under `installtk/`, `cppext.py`,
+`buildinfo.py` or `doctor.py` is read or edited. The commands themselves
+are still in CLAUDE.md. The first part is the requirement check, the
+second what the 2026-11-22 rework added around it.
 
-`install.py` runs in two phases: `installtk/requirements.py` first checks
+## The requirement check
+
+`install.py` checks before it builds: `installtk/requirements.py` first checks
 every build requirement (OS, `make`, a C++ compiler, LAPACK/BLAS,
 `pybind11`), actually trial-compiling and trial-linking each one rather
 than checking a version string, and only once everything checks out does
@@ -57,14 +65,100 @@ on them being present again at import time.
 LAPACK/BLAS candidates (conda's own libs, system `-lblas -llapack`,
 OpenBLAS, and a Debian/Ubuntu-multiarch workaround that asks the system
 compiler where it actually finds `libblas.so`/`liblapack.so`) and picks the
-first one that actually links. Finally, `install.py` adds the repo's `src`
-to the Python path and to the user's shell rc file
-(`installtk/addpythonpath.py`, `installtk/addsystem.py`, both idempotent
-across reruns). There is no lint config, and the only CI is the build of
-the user guide.
+first one that actually links. Finally, `install.py` links the repo's
+`src/dmrgpy` into the interpreter's site-packages and adds `DMRGROOT` to
+the user's shell rc file (`installtk/addpythonpath.py`,
+`installtk/addsystem.py`, both idempotent across reruns). There is no lint
+config, and the only CI is the build of the user guide.
 
-Both `mpscppN/Makefile`s list `$(wildcard *.h)` among the extension's
-prerequisites: without that, editing `chain_session.h`, where the actual
-DMRG implementation lives, leaves `make pybind` reporting "Nothing to be
-done" while the `.so` keeps the old code. A C++ change is not tested until
-the `.so` has been rebuilt.
+Both `mpscppN/Makefile`s list the headers of the backend among the
+extension's prerequisites: without that, editing `chain_session.h`, where
+the actual DMRG implementation lives, leaves `make pybind` reporting
+"Nothing to be done" while the `.so` keeps the old code. A C++ change is
+not tested until the `.so` has been rebuilt.
+
+## What the 2026-11-22 rework added
+
+The check above was kept as it was. What changed is what happens after
+it, and what is left behind for a later session. The measurements are
+from this workstation (GCC 13.3, system LAPACK/BLAS, conda Python 3.14).
+
+- **The flags are in one module**, `installtk/buildflags.py`, read by the
+  check and by the build. On x86-64 with GCC the compiler command is the
+  one every earlier build used, `g++ -m64 -std=c++17 -fconcepts -fPIC` for
+  v3 and `-std=c++14` for v2, and `tests/test_installer.py` pins the
+  string. Do NOT add `-march=native` or change `-O2`: the repository has
+  bit-identical tests and a ledger, and a build made on a login node runs
+  on other nodes. The order of the compiler and BLAS candidates is pinned
+  by the same test file for the same reason.
+- **The check compiles with the real flags** of every backend asked for,
+  on a small program that needs its language standard
+  (`buildflags.TRIAL_SOURCE`). Before, it compiled with `-std=c++14`
+  whatever the backend, so a compiler that cannot build v3 passed.
+- **Clang and non-x86 are written, not tested.** Clang gets ITensor's own
+  flags from `options.mk.sample` (`-std=c++17 -Wno-gcc-compat`, no
+  `-fconcepts`), is not asked for a `cc1plus` (only GCC has one, so the
+  old check rejected every Clang), other architectures get no `-m64`, and
+  `cppversion.parse_version` reads the version after the word "version"
+  on a Clang line (the old parser read the build number in parentheses
+  and called an Apple Clang too old). No Clang and no ARM machine was at
+  hand, so say so if a user reports a failure there.
+- **ITensor is rebuilt only when it has to be.** `install2.itensor_key`
+  hashes the git tree of the vendored folder with the compiler command and
+  the BLAS configuration, and the key of the last build is in
+  `build_info.json`. Without git, or with local changes in the folder, the
+  key is None and ITensor is always rebuilt; `--force` rebuilds too. The
+  extension is cleaned only when its configuration changed, otherwise make
+  decides. A second `python install.py` takes 4 s instead of 183 s (v3; a first v2
+  build took 167 s).
+- **`--jobs`** runs the ITensor build in parallel, 4 at most by default
+  (`buildflags.default_jobs`): 76 s with four jobs, and each compiler
+  process stays below 1.7 GB. The extension is one translation unit,
+  100 to 160 s for v3 and 39 s for v2, and no flag makes it faster. Keep the default small: the build
+  often runs on a shared login node.
+- **One compiler choice.** `install.py` writes `mpscppN/build_config.mk`
+  (`DMRGPY_PYTHON`, `DMRGPY_PYBIND_CCCOM`) and both Makefiles include it,
+  so `make pybind` by hand uses the compiler of the install. The
+  `CONDA_GXX` detection of the Makefiles is still there for a folder with
+  no such file; do NOT remove it, it is the fix of the segfault described
+  in `mpscpp2/Makefile`. `--extension-only` is `make pybind` with that
+  file, for the step after a C++ edit. It also runs in a checkout built
+  before 2026-11-22, which has no such file, with a note; it needs only
+  the ITensor library, `options.mk` and `this_dir.mk`. The key of the
+  ITensor library and the test for cleaning the extension both hold the
+  compiler version, since a system compiler upgraded in place keeps its
+  path.
+- **The build record**, `mpscppN/build_info.json`, is written by
+  `src/dmrgpy/buildinfo.py`, which has no import from dmrgpy because the
+  Makefile runs it as a script (`--stamp`) after every link and
+  `install2.py` loads it from its file (importing the package there would
+  import the extension being built). Its `sources_hash` covers
+  `bindings.cc`, `*.h`, `extra/*.h` and `TDVP/*.h`, the same files the
+  `pybind` target lists as prerequisites. Staleness is decided by that
+  hash, never by file times, which a git checkout changes.
+- **`cppext.py` says why.** `_record_failure` sorts a failed import into
+  `not_compiled`, `other_python` (an extension for another interpreter is
+  in the folder) and `load_failed`, and warns once for the last two. It
+  sets `_backends[version] = None` before it writes the warning: `explain`
+  asks `get_backend`, and without that line the first real test recursed
+  without end (the unit tests had preset `_backends`, so only the real
+  extension showed it; `test_a_failed_first_import_does_not_import_again`
+  pins it now). `dmrgpy/__init__.py` keeps its own warning for the
+  not-compiled case only. Do NOT warn for `not_compiled` in `cppext`:
+  that is every pip install.
+- **The self-test** is `python -m dmrgpy.doctor --selftest`, run by
+  `install2.selftest` in a fresh process with this checkout's `src` first
+  on `PYTHONPATH`, so that it cannot test another copy of dmrgpy the
+  interpreter knows. `install.py` returns 1 when it fails and leaves the
+  build in place.
+- **Testing the installer.** Never run a plain `python install.py` in the
+  primary checkout to test a change: it rebuilds the working `.so`, links
+  site-packages to that checkout and appends to the shell rc file. Use a
+  worktree and `--build-only`. When a test moves the extension file by
+  hand, quote the path: `ls` is aliased to mark executables with `*` here,
+  and an unquoted `$(ls ...)` renamed the file.
+- **Left as it was, on purpose:** the symlink into site-packages and the
+  `DMRGROOT` line in the shell rc file are still the default (`--no-link`,
+  `--no-shellrc` and `--build-only` skip them), and `install_julia.py` is
+  still a separate script. Changing any of the three is the author's
+  decision.

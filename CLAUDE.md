@@ -60,6 +60,9 @@ python install.py --itensor-version=2    # compiles ITensor v2 (mpscpp2) instead
 python install.py --itensor-version=both # compiles both v2 and v3 backends
 python install.py --gpp=g++-6        # use a specific compiler (needs g++ >= 6, LAPACK/BLAS)
 python install.py --doctor           # only the requirement checks, no multi-minute ITensor build
+python install.py --extension-only   # after a C++ edit: rebuild only the extension, not ITensor
+python install.py --build-only       # build and self-test, change nothing outside this checkout
+python -m dmrgpy.doctor              # which backends load in this session, and how each was built
 python install_julia.py              # alternative: Julia backend instead of/alongside C++
 ```
 
@@ -69,11 +72,18 @@ ITensor and the `pybind` target of the backend that `--itensor-version`
 selects (`installtk/install2.py`). The compiler and the LAPACK/BLAS are
 each found by a cascade of candidates, a conda compiler first under a conda
 Python, and `pybind11` is installed with `pip` if it is missing. The
-details, with the reason for each choice, are in `.claude/rules/install.md`,
-which loads with `install.py` and `installtk/`. There is no lint config,
-and the only CI is the build of the user guide.
+build ends with a self-test in a fresh process, and ITensor is rebuilt
+only when its sources or the configuration changed (`--force`). The
+details are in `.claude/rules/install.md`, which loads with `install.py`,
+`installtk/`, `cppext.py`, `buildinfo.py` and `doctor.py`. There is no
+lint config, and the only CI is the build of the user guide.
 
-A C++ change is not tested until `make pybind` has rebuilt the `.so`.
+A C++ change is not tested until the `.so` has been rebuilt
+(`python install.py --extension-only`); dmrgpy warns at import when the
+`.so` is older than its sources, and when one is there and does not load.
+To test the installer itself, use a worktree and `--build-only`: a plain
+`python install.py` rebuilds the working `.so`, links into site-packages
+and edits the shell rc file.
 
 ## Packaging / PyPI
 

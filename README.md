@@ -51,7 +51,9 @@ python install.py
 It first checks that everything needed is present (a C++ compiler,
 LAPACK/BLAS, `pybind11`, `make`). It finds the right compiler for your
 Python, also the conda compiler if you use Anaconda or Miniconda. Then it
-compiles ITensor and the C++ extension.
+compiles ITensor and the C++ extension. At the end it tests the result:
+it imports the extension in a new Python process and compares the energy
+of a small chain with exact diagonalization.
 
 By default it compiles ITensor v3. ITensor v2 is still supported, and you
 can choose:
@@ -81,13 +83,38 @@ To only check the compiler and LAPACK/BLAS, without compiling ITensor
 python install.py --doctor
 ```
 
+If ITensor is already compiled with the same compiler and options, it is
+not compiled again. Some other options:
+
+```bash
+python install.py --jobs 2           # parallel compile jobs (default: up to 4)
+python install.py --force            # compile ITensor again
+python install.py --extension-only   # after you edit the C++ code of dmrgpy
+python install.py --build-only       # change nothing outside this folder
+```
+
+The full output of the compilation is in `install_v3.log` (or
+`install_v2.log`).
+
+To see which backends work in your session, and how each one was
+compiled, run
+
+```bash
+python -m dmrgpy.doctor
+```
+
+If the C++ extension is compiled but cannot be loaded, dmrgpy prints a
+warning with the reason when you import it.
+
 To use the Julia version instead, run
 
 ```bash
 python install_julia.py
 ```
 
-Both scripts add dmrgpy to the PYTHONPATH of the Python you used. After
+Both scripts link dmrgpy into the `site-packages` folder of the Python
+you used, and `install.py` also adds the variable `DMRGROOT` to your shell
+rc file. Use `--no-link` and `--no-shellrc` if you do not want this. After
 that you can import dmrgpy, for example
 
 ```python

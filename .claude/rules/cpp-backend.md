@@ -44,6 +44,14 @@ DMRG implementation lives, leaves `make pybind` reporting "Nothing to be
 done" while the `.so` keeps the old code, which is a confusing way to test a
 change that was never compiled. A C++ change is not tested until `make
 pybind` has rebuilt the `.so` and the test ran against the rebuilt one.
+`python install.py --extension-only` is that rebuild with the compiler of
+the last full install, and `make pybind` by hand reads the same compiler
+from `build_config.mk` (2026-11-22). The `pybind` target stamps
+`build_info.json` with a hash of `bindings.cc` and of the headers in the
+folder, `extra/` and `TDVP/`, and `cppext.py` warns at import when that hash
+is not the one of the sources (`.claude/rules/install.md`). The prerequisites
+of the target are the same set of files, so add a new header folder to both
+`LOCAL_HEADERS` and `buildinfo.SOURCE_GLOBS`.
 
 ## The session and its pieces
 
