@@ -15,6 +15,7 @@ from typing import Optional
 
 from . import cppversion
 from . import blaslapack
+from . import buildflags
 
 
 @dataclass
@@ -25,6 +26,11 @@ class BuildConfig:
     includeflags: str     # BLAS_LAPACK_INCLUDEFLAGS
     python_exe: str       # interpreter to build the extension against
     is_conda: bool
+    family: str = "gcc"   # "gcc" or "clang": decides the standard flags
+    compiler_version: Optional[tuple] = None
+    blas_description: str = ""
+    modules: tuple = ()   # environment modules loaded during the build
+    conda_prefix: Optional[str] = None
 
 
 def _fail(msg):
@@ -78,9 +84,11 @@ def _compiler_candidates(gpp_arg, is_conda, python_exe):
             break
 
 
-def _try_compiler(gpp, check_gpp):
+def _try_compiler(gpp, check_gpp, versions=(3,)):
     """Check a single compiler candidate without exiting on failure, so
-    the caller can cascade to the next one. Returns (ok, reason)."""
+    the caller can cascade to the next one. Returns (ok, reason). The
+    trial compile uses the flags and the language standard of every
+    backend in `versions`, the ones the build itself will use."""
     if not shutil.which(gpp) and not os.path.isfile(gpp):
         return False, "not found"
     if not check_gpp:
@@ -89,15 +97,24 @@ def _try_compiler(gpp, check_gpp):
     if version is None or not cppversion.correct_version(gpp):
         return False, ("could not be used or is too old (found version "
                 +str(version)+", need >= 6)")
-    if cppversion.backend_missing(gpp):
+    # only GCC has a cc1plus to look for: Clang compiles in its own driver
+    if (cppversion.compiler_family(gpp) != "clang"
+            and cppversion.backend_missing(gpp)):
         return False, ("the compiler driver can't locate its own cc1plus "
                 "backend -- a partial/broken toolchain, not a version or "
                 "PATH problem (common for module-provided Python "
                 "distributions that bundle a compiler wrapper without the "
                 "matching backend package)")
-    ok, out = cppversion.trial_compile(gpp)
-    if not ok:
-        return False, "failed to compile a trivial test program:\n"+out
+    family = cppversion.compiler_family(gpp)
+    for version in versions:
+        flags = (buildflags.arch_flags().split()
+                + buildflags.std_flags(version, family).split())
+        ok, out = cppversion.trial_compile(gpp, std_flags=flags,
+                source=buildflags.TRIAL_SOURCE[version])
+        if not ok:
+            return False, ("failed to compile a small test program with "
+                    "the flags of ITensor v"+str(version)+" ("
+                    +" ".join(flags)+"):\n"+out)
     return True, None
 
 
@@ -138,7 +155,8 @@ def _environment_hints(is_conda, python_exe):
     return "\n".join(hints)
 
 
-def _resolve_compiler(gpp_arg, check_gpp, is_conda, python_exe):
+def _resolve_compiler(gpp_arg, check_gpp, is_conda, python_exe,
+        versions=(3,)):
     candidates = list(_compiler_candidates(gpp_arg, is_conda, python_exe))
     if not candidates:
         _fail("No C++ compiler was found on PATH.\n"
@@ -147,7 +165,7 @@ def _resolve_compiler(gpp_arg, check_gpp, is_conda, python_exe):
 
     tried = []
     for label, gpp in candidates:
-        ok, reason = _try_compiler(gpp, check_gpp)
+        ok, reason = _try_compiler(gpp, check_gpp, versions)
         if ok:
             if tried:
                 print("Note: "+tried[-1][0]+" ("+tried[-1][1]+") did not "
@@ -242,9 +260,10 @@ def _check_pybind11(python_exe):
               "  Ubuntu/Debian: sudo apt-get install python3-dev")
 
 
-def check(args):
-    """Run all preflight checks and return a validated BuildConfig, or
-    exit(1) with an actionable message if the environment can't build."""
+def check(args, versions=(3,)):
+    """Run all preflight checks for the backends in `versions` and return
+    a validated BuildConfig, or exit(1) with an actionable message if the
+    environment can't build."""
     print("### Checking build requirements ###")
     _check_os()
     _check_make()
@@ -264,7 +283,8 @@ def check(args):
               "the interpreter running this script ("+python_exe+"). The "
               "extension will still be built against "+python_exe+".")
 
-    gpp = _resolve_compiler(args.gpp, args.check_gpp, is_conda, python_exe)
+    gpp = _resolve_compiler(args.gpp, args.check_gpp, is_conda, python_exe,
+            versions)
     print("C++ compiler: "+gpp+" (version "
           +str(cppversion.compiler_version(gpp))+")")
 
@@ -281,13 +301,20 @@ def check(args):
               "dmrgpy later (e.g. in job scripts) -- the compiled "
               "extension depends on them being present at import time too.")
     if is_conda:
-        print("Conda/mamba environment: "+(conda_prefix or python_exe))
+        print("Conda/mamba environment: "+(conda_prefix or os.path.dirname(
+                os.path.dirname(os.path.realpath(python_exe)))))
         print("Remember to activate this same environment whenever you "
               "use dmrgpy later.")
 
-    print("### All requirements satisfied, proceeding to compilation ###\n")
+    print("### All requirements satisfied ###\n")
 
     return BuildConfig(gpp=gpp, platform=blas_cfg["platform"],
             libflags=blas_cfg["libflags"],
             includeflags=blas_cfg["includeflags"],
-            python_exe=python_exe, is_conda=is_conda)
+            python_exe=python_exe, is_conda=is_conda,
+            family=cppversion.compiler_family(gpp),
+            compiler_version=cppversion.compiler_version(gpp),
+            blas_description=blas_cfg["description"],
+            modules=tuple(loaded) if lmod_present else (),
+            conda_prefix=(conda_prefix or (os.path.dirname(os.path.dirname(
+                    os.path.realpath(python_exe))) if is_conda else None)))

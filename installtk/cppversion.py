@@ -1,30 +1,60 @@
 import glob
 import os
+import re
 import subprocess
 import sys
 import tempfile
 
 
-def compiler_version(gpp="g++"):
-    """Return the (major, minor, ...) version tuple of a C++ compiler,
-    or None if it cannot be run at all."""
+def parse_version(first_line):
+    """The version tuple in the first line of a compiler's --version
+    output, or None. GCC prints it after an optional distribution note in
+    parentheses ("g++ (Ubuntu 13.2.0-23ubuntu4) 13.2.0"); Clang prints it
+    after the word "version" and puts a build number in parentheses after
+    it ("Apple clang version 15.0.0 (clang-1500.3.9.4)"), which must not
+    be read as the version."""
+    m = re.search(r"version\s+(\d+(?:\.\d+)*)", first_line)
+    if m is None:
+        outside = re.sub(r"\([^)]*\)", " ", first_line)
+        m = (re.search(r"(\d+(?:\.\d+)+)", outside)
+                or re.search(r"(\d+(?:\.\d+)+)", first_line))
+    if m is None:
+        return None
+    return tuple(int(n) for n in m.group(1).split("."))
+
+
+def _version_output(gpp):
     try:
-        out = subprocess.run([gpp, "--version"], capture_output=True,
+        return subprocess.run([gpp, "--version"], capture_output=True,
                 text=True, timeout=15).stdout
     except (OSError, subprocess.SubprocessError):
         return None
-    firstline = out.split("\n")[0].split()
-    if not firstline: return None
-    token = firstline[-1] # last token of the first line, e.g. "13.2.0"
-    try:
-        return tuple(int(n) for n in token.split(".") if n.isdigit())
-    except ValueError:
+
+
+def compiler_version(gpp="g++"):
+    """Return the (major, minor, ...) version tuple of a C++ compiler,
+    or None if it cannot be run at all."""
+    out = _version_output(gpp)
+    if not out:
         return None
+    return parse_version(out.split("\n")[0])
+
+
+def compiler_family(gpp="g++"):
+    """"clang" or "gcc", from the compiler's own --version output (on a
+    Mac, g++ is Clang). Anything that does not say clang counts as gcc,
+    which leaves the flags as they have always been."""
+    out = _version_output(gpp) or ""
+    return "clang" if "clang" in out.lower() else "gcc"
 
 
 def correct_version(gpp="g++", minimum=6):
+    """Whether a GCC is recent enough. Clang numbers its versions
+    differently, so for Clang only "it runs" is asked here, and the trial
+    compile with the real flags of the backend decides."""
     v = compiler_version(gpp=gpp)
     if v is None: return False
+    if compiler_family(gpp) == "clang": return True
     return v[0] >= minimum
 
 
@@ -114,9 +144,11 @@ def lmod_state():
     return present, loaded
 
 
-def trial_compile(gpp, extra_flags=(), link_flags=(), source=None):
+def trial_compile(gpp, extra_flags=(), link_flags=(), source=None,
+        std_flags=("-std=c++14",)):
     """Try to compile (and link) a small C++ program with `gpp`, using
-    `extra_flags` for compilation and `link_flags` for linking. Returns
+    `std_flags` for the language standard, `extra_flags` for compilation
+    and `link_flags` for linking. Returns
     (success, output) where `output` is combined stdout/stderr, useful for
     diagnostics on failure. Runs entirely inside a throwaway temporary
     directory (never a fixed /tmp path, so parallel installs don't race).
@@ -128,7 +160,7 @@ def trial_compile(gpp, extra_flags=(), link_flags=(), source=None):
         binfile = os.path.join(tmp, "trial.out")
         with open(srcfile, "w") as f:
             f.write(source)
-        cmd = [gpp, "-std=c++14", "-fPIC"] + list(extra_flags) + \
+        cmd = [gpp] + list(std_flags) + ["-fPIC"] + list(extra_flags) + \
                 [srcfile, "-o", binfile] + list(link_flags)
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True,
