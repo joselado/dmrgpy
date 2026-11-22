@@ -236,8 +236,11 @@ class EDchain():
             (es,ws) = algebra.lowest_states(self.get_hamiltonian(),n=1)
             self._lowest_energy = float(np.real(es[0]))
         return self._lowest_energy
-    def vev(self,op,T=0.,npow=1,**kwargs):
-        """Return a vacuum expectation value <GS|op^npow|GS>
+    def vev(self,op,T=0.,npow=1,wf=None,**kwargs):
+        """Return a vacuum expectation value <GS|op^npow|GS>, or
+        <wf|op^npow|wf> for an explicit state wf, unnormalized as on DMRG
+        (vev.py::multi_vev). wf used to fall into **kwargs and be dropped,
+        so vev(op,wf=x,mode="ED") answered for the ground state.
 
         npow is a real parameter here rather than something swallowed by
         **kwargs: Many_Body_Chain.vev(MO,npow=n,mode="ED") forwards it
@@ -254,7 +257,10 @@ class EDchain():
             raise ValueError("npow must be >= 0, got "+repr(npow))
         if T==0.: # zero temperature
             if npow==0: return 1.0 # <GS|1|GS>, same as vev.py::multi_vev
-            wf0 = self.get_gs_array()
+            if wf is None: wf0 = self.get_gs_array()
+            elif isinstance(wf,(State,np.ndarray)): wf0 = State(wf,self).v
+            else: raise TypeError("vev(mode=\"ED\"): wf must be an ED "
+                                  "state, got %s" % type(wf).__name__)
             op = self.MO2matrix(op) # return operator
             # apply the operator npow times to the state rather than
             # forming op^npow: the matrix is (sector) Hilbert-space sized
@@ -263,6 +269,8 @@ class EDchain():
             for i in range(npow-1): wf = op@wf
             return algebra.braket_wAw(wf,op,wi=wf0)
         else: # finite temperature
+            if wf is not None:
+                raise ValueError("vev: wf= and T>0 exclude each other")
             if npow!=1:
                 # thermal_vev_ex builds Tr[rho Op] out of the assembled
                 # operator and has no notion of a power; raise rather

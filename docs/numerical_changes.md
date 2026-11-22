@@ -2532,3 +2532,13 @@ findings.
   it is about 2 times tighter than the old absolute 1e-12 (largest hopping
   about 0.58 at Lambda = 4); two chains of one mesh agree to about
   1e-16 D.
+
+## The 2026-11-21 explicit state of the ED `vev`
+
+`vev(op, wf=x, mode="ED")` now returns $\langle x|op|x\rangle$, unnormalized,
+as `vev(op, wf=x)` does on DMRG. At T=0 the ED route dropped `wf=` and
+returned the ground-state value of `op` without a warning, so every such
+call before this date measured the ground state of the chain, not `x`. On
+a 4-site chain with H the total number, $\langle N\rangle$ of a two-fermion
+state came out as 0 (the vacuum), and is now 2. `wf=` at T>0 raises, and a
+`wf` that is not an ED state raises `TypeError` (`tests/test_gaussian_mps.py`).
