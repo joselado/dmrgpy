@@ -314,7 +314,8 @@ almost at once. With 4 Wilson sites per chain (10 sites) the ground
 state is degenerate between charges, as `anderson_chain` warns for an
 even chain, and no single reference state exists. Which route is right
 on the long chain, where they differ, is what the variational
-references on 44 sites answer.
+references on 44 sites were meant to answer; they failed (section 5,
+after the convergence table).
 
 Chains with every spin on its own metal (`runs/chain.py`,
 `runs/chain_linear.py`; Js = 0.3, rho J = 0.15, 15 Wilson sites per chain,
@@ -346,7 +347,8 @@ them, the weight it leaves out. This is what Fable's decision rests on.
 It does not fix the lines: the expansion still moves the peak of the
 linear curve by 10% with nothing missing, through higher moments, and
 the variational references on Triton (`runs/reference.py`) had not
-finished by the end of the night.
+finished by the end of the night (they did not give a reference, see
+below).
 
 Convergence in the bond dimension, the dimer at Js = 0.3, Lorentzian of
 0.02 (both bias signs counted in each window):
@@ -368,6 +370,22 @@ sides at 256 than sides at 128 is). The peak heights and line positions
 up there are not converged by either route at these bond dimensions,
 and the differences of 6% to 46% between the routes in the Js sweep
 are in those lines.
+
+The variational references did not give a reference. Of the 21 tasks of
+Triton array 21688905, the 7 chunks of sides at maxm 128 and 2 chunks of
+linear at maxm 128 finished, in 17 to 34 h each, and the 12 others hit
+the 36 h limit (all of sides at maxm 256). The finished curves are not
+a spectral function: dI/dV is negative at 8 of the 21 biases of sides,
+-7.4e-5 at zero bias against 0.0097 from both TASK routes, and its
+largest value is 0.0042. The two DDMRG calls at each bias (the
+electron and the hole part) are each negative, of order 1e-6 to 1e-4,
+so the variational functional was not minimized at 44 sites and maxm
+128, while on 8 sites it is 5.8e-9 off ED (section 3). As a result
+Fable's condition (iii) cannot be tested with these runs, and the
+warning on the linear tip-first route stays. What is left as a
+reference on 44 sites is the moments above, which both routes satisfy
+to the weight they keep. `compare_ref.py` on Triton reads the outputs
+in `$WRKDIR/calculations/chains_on_metal/out`.
 
 ## 6. A chain between two leads, normal or superconducting
 
