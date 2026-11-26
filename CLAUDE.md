@@ -468,6 +468,17 @@ measured; and v3's exact `bicstab` recurrence costs 2 to 4 times more
 where `maxm` limits the solve, with the divergence under truncation still
 open.
 
+## Hard problems go to Fable
+
+When a task feels too hard for Opus, say so and suggest giving it to a
+Fable agent (the Agent tool with `model: "fable"`), rather than pushing on
+or settling for a weaker answer (the author, 2026-11-26: "if something
+feel too hard for opus, suggest giving it to fable"). Typical cases are a
+derivation that decides a threshold or a bound, a numerical failure with
+no clear mechanism, and the design of a new algorithm. The suggestion
+names the task and its cost; the author decides. Such an agent keeps the
+usual cap of at most three Python processes at once across all agents.
+
 ## Architecture
 
 ### Entry point classes
