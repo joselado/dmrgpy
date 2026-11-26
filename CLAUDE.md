@@ -455,10 +455,10 @@ width; the MPO-set Hamiltonian and
 small-unit real-time evolution; v3's Krylov exponentiator's absolute error
 goal (`applyExp`) and v3's run-to-run `emax` noise, which is the whole of
 the ED-against-v3 KPM residual; `kpm_finite`'s `window_chain_kwargs` check;
-`edtk/edchain.py`'s silent `None` on an unknown operator; the reason for
+the reason for
 `julia_live`'s slowdown and its KPM guard raising `juliacall.JuliaError`
-rather than `RuntimeError`; `ShiftInv`'s `applyinverse(delta=)`; the lower-level route's pair `name=` next to
-`i=`/`j=`; and the short `nt` defaults of `td_dynamical_correlator`.
+rather than `RuntimeError`; `ShiftInv`'s `applyinverse(delta=)`; and the
+short `nt` defaults of `td_dynamical_correlator`.
 The fixes of `docs/audit_2026_11_21_hole_hunt.md` left open: the ESR
 DMRG guard runs only when H conserves a charge that S^+_k changes; the
 ESR Krylov routes keep the free-spin band and neither grow nor warn; the

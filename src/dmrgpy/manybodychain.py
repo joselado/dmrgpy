@@ -1194,6 +1194,14 @@ class Many_Body_Chain():
       return entanglement.get_correlated_density(self,**kwargs)
   def get_dynamical_correlator_MB(self,**kwargs):
       """Return a dynamical correlator, computed with DMRG"""
+      # The submodes take i=0, j=0 as defaults and cannot tell "not
+      # passed" from "passed 0", so i=/j= next to a pair are refused here,
+      # where the keywords are still visible, as on the public route. With
+      # no name= a submode takes its own string default ("XX" on CVM), on
+      # which i=/j= do act, so only a pair that was passed is checked
+      if kwargs.get("name") is not None:
+          _refuse_sites_next_to_a_pair(kwargs["name"],kwargs.get("i"),
+                                       kwargs.get("j"))
       return dynamics.get_dynamical_correlator(self,**kwargs)
   def get_dynamical_correlator(self,mode="DMRG",name=None,i=None,j=None,
                                **kwargs):
@@ -1212,23 +1220,7 @@ class Many_Body_Chain():
       # crashed on it several frames deep. This chain object is also the
       # only thing that *can* resolve it: an EDchain has no Sx/Sz/C
       # attributes of its own.
-      if not isinstance(name,str) and (i is not None or j is not None):
-          # i/j mean something only next to a string name. They used to
-          # default to 0, which cannot tell "not passed" from "passed 0",
-          # so next to a pair they were dropped silently, on every solver
-          # and submode; a wrapper that builds its own pair and forwards
-          # **kwargs (get_kondo_spectrum(mode="DMRG", i=1, j=1)) returned
-          # the site-0 spectrum bit for bit (2026-09-24b audit, finding 16)
-          raise TypeError(
-              "get_dynamical_correlator: i=/j= select the sites of a "
-              "string name= (\"ZZ\", \"cdc\", ...), and name= is %s here, "
-              "so i=%r, j=%r would be ignored. Build the pair on the sites "
-              "you want, or pass a string name. If this call came through "
-              "a wrapper that builds its own operator pair (the Kondo "
-              "spectrum, for instance), use that wrapper's own site "
-              "argument." % ("not given" if name is None else "an "
-                             "operator pair, which names its own sites",
-                             i, j))
+      _refuse_sites_next_to_a_pair(name,i,j)
       if name is not None:
           name = operatornames.str2MO(self,name,i=0 if i is None else i,
                                       j=0 if j is None else j)
@@ -1653,6 +1645,27 @@ class Many_Body_Chain():
 
 
 
+
+
+def _refuse_sites_next_to_a_pair(name,i,j):
+    """i/j mean something only next to a string name ("ZZ", "cdc", ...).
+    They used to default to 0, which cannot tell "not passed" from "passed
+    0", so next to a pair they were dropped silently, on every solver and
+    submode; a wrapper that builds its own pair and forwards **kwargs
+    (get_kondo_spectrum(mode="DMRG", i=1, j=1)) returned the site-0
+    spectrum bit for bit (2026-09-24b audit, finding 16). Shared by
+    get_dynamical_correlator and get_dynamical_correlator_MB."""
+    if isinstance(name,str) or (i is None and j is None): return
+    raise TypeError(
+        "get_dynamical_correlator: i=/j= select the sites of a "
+        "string name= (\"ZZ\", \"cdc\", ...), and name= is %s here, "
+        "so i=%r, j=%r would be ignored. Build the pair on the sites "
+        "you want, or pass a string name. If this call came through "
+        "a wrapper that builds its own operator pair (the Kondo "
+        "spectrum, for instance), use that wrapper's own site "
+        "argument." % ("not given" if name is None else "an "
+                       "operator pair, which names its own sites",
+                       i, j))
 
 
 def setup_sweep(self,mode="default"):

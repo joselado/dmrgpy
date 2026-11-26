@@ -185,7 +185,9 @@ class EDchain():
         elif type(name)==EDOperator:
             return name.SO
         else: # unrecognized type
-            print("Unrecognized operator in EDchain",type(name))
+            raise TypeError("the ED backend cannot build an operator from "
+                    "%r (%s): expected a MultiOperator, an EDOperator or a "
+                    "single-site name" % (name,type(name).__name__))
     def get_hamiltonian(self):
         """Return the Hamiltonian"""
         if self.EDHamiltonian is None:

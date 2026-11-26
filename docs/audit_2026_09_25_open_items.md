@@ -3687,7 +3687,9 @@ reviewers' own reports follow verbatim, since several carry repros.
   supplied state.
 - On the lower-level `get_dynamical_correlator_MB` route a pair `name=` next to
   `i=`/`j=` is still dropped silently, on ROOTN and CVM alike, where the public
-  route raises (second pass finding 16).
+  route raises (second pass finding 16). (fixed on 2026-11-26: the route
+  raises the public route's TypeError when a pair is passed, see
+  tests/test_audit_2026_11_26_leads.py)
 - `set_initial_wf_guess(x)` on a non-Hermitian chain still drops x and re-solves
   from random, as the existing comment says; raising would be the consistent
   choice.
