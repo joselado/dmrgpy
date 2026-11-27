@@ -125,7 +125,7 @@ def _deflated(ops, psi, d):
 
 def _step_accepted(ops, meter, old, new, lognorm):
     """clik._step_accepted on the session."""
-    if not np.isfinite(lognorm) or lognorm > _clik._GROWTH_TOL:
+    if not np.isfinite(lognorm):
         return False
     if meter is None:
         return True
@@ -136,22 +136,35 @@ def _step_accepted(ops, meter, old, new, lognorm):
 
 
 def _branch_attempt(ops, G, psi0, z, nk, niter, deflate, substeps, meter,
-                    gated):
+                    gated, bound=None, grown=None):
     """clik._branch_attempt: the snapshots, or None at the first rejected
     step, so that the branch restarts with more sub-steps."""
     psi = ops.normalized(psi0)
     states = [psi]
+    total = 0.0   # log-norm gained since the start of the branch
     for m in range(nk - 1):
         if m < _clik._GSE_STEPS:
             psi = ops.expand(G, psi)
+        verdict = None
         try:
             new, lognorm = _step(ops, psi, G, z, niter, substeps)
+            if gated:
+                verdict = _clik._growth(lognorm, total, bound)
+            if verdict == "redo":   # see the comment above clik._GROWTH_TOL
+                new, again = _step(ops, psi, G, z, niter, 2 * substeps)
+                if not abs(again - lognorm) <= _clik._GROWTH_REPEAT * lognorm:
+                    verdict = "reject"
+                lognorm = again
         except (RuntimeError, ValueError, FloatingPointError):
             if not gated:
                 raise
             return None   # overflowed inside the sweep
-        if gated and not _step_accepted(ops, meter, psi, new, lognorm):
+        if gated and (verdict == "reject" or not _step_accepted(
+                ops, meter, psi, new, lognorm)):
             return None
+        if verdict == "redo" and grown is not None:
+            grown.append(lognorm)
+        total += lognorm
         psi = new
         if deflate is not None:
             psi = ops.normalized(_deflated(ops, psi, deflate))
@@ -160,13 +173,17 @@ def _branch_attempt(ops, G, psi0, z, nk, niter, deflate, substeps, meter,
 
 
 def evolve_branch(ops, G, psi0, z, nk, niter=50, deflate=None, substeps=1,
-                  meter=None, bounded=False):
+                  meter=None, bounded=False, growth_bound=None):
     """clik.evolve_branch on the session: (states, substeps)."""
     gated = meter is not None or bounded
+    if np.imag(z) != 0:
+        growth_bound = None
     while True:
+        grown = []
         states = _branch_attempt(ops, G, psi0, z, nk, niter, deflate,
-                                 substeps, meter, gated)
+                                 substeps, meter, gated, growth_bound, grown)
         if states is not None:
+            _clik._warn_takeover(grown, z)
             return states, substeps
         if substeps >= _clik._MAX_SUBSTEPS:
             raise RuntimeError(
@@ -305,9 +322,12 @@ def krylov_spectrum(chain, Gop, hermitian, nk=20, dt=0.5, alpha=None,
     if deflate is not None and abs(ops.inner(deflate, psi_p)) > 1e-8 * (
             ops.norm(deflate) * ops.norm(psi_p)):
         meter = deflate
+    bound = (None if deflate is None
+             else 0.5 * np.log(abs(ops.inner(deflate, deflate))))
     states, substeps = evolve_branch(ops, G, psi_p, dt, nk, niter,
                                      substeps=substeps, meter=meter,
-                                     bounded=deflate is not None)
+                                     bounded=deflate is not None,
+                                     growth_bound=bound)
     for psi in states:
         km.add(psi)
     if alpha is None and hermitian:
@@ -318,7 +338,8 @@ def krylov_spectrum(chain, Gop, hermitian, nk=20, dt=0.5, alpha=None,
                                        substeps=substeps)
     states, _ = evolve_branch(ops, G, psi_u, dt * np.exp(-1j * alpha), nk,
                               niter, deflate, substeps=substeps,
-                              bounded=deflate is not None)
+                              bounded=deflate is not None,
+                              growth_bound=bound)
     for psi in states:
         km.add(psi)
     lam, C, ndim = _clik.project(km.M, km.Gm, gram_tol)

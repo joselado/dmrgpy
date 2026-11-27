@@ -639,7 +639,8 @@ a strict xfail that now passes.
    the norm of a normalized density matrix can grow by up to
    $\tfrac12\ln D$ as it purifies (2.1 at D=70). A fast-purifying
    Lindbladian at a long dt could then be doubled up to 64 sub-steps and
-   end in "reduce dt" for nothing. No case tonight hit it.
+   end in "reduce dt" for nothing. No case tonight hit it. (Closed on
+   2026-11-27, see "The growth gate" below.)
 4. The contour angle: on 3 and 4 sites a fixed 0.2 gave the slowest pair
    2.9e-6 and 9.5e-6 off ED, against 2.6e-4 and 3.5e-4 at the probed 0.39.
    Two data points, not acted on.
@@ -650,3 +651,44 @@ a strict xfail that now passes.
    and the Hermiticity projection of the steady state.
 
 One-site TDVP is settled: it is dropped.
+
+## The growth gate
+
+On 2026-11-27 item 3 of the open list above was settled, with the
+derivation by a second model (Fable) and the checks on 3 and 4 sites.
+The gate measures ln(||exp(zL)X|| / ||X||) in the Frobenius norm, step by
+step. On the real axis exp(Lt) is a quantum channel, so it contracts the
+trace norm of any X, traceless and non-Hermitian X included. As a result
+||exp(Lt)X||_2 <= ||X||_1 <= sqrt(D) ||X||_2, meaning that a normalized
+vector gains at most (1/2) ln D, in one step and in all steps together,
+with D = <<1|1>> (D_q in a sector). The bound is reached: on ED the
+largest singular value of the flow gives exactly (1/2) ln 16 = 1.386 on
+4 spins. On the complex contour exp(zL) is not a channel, and a driven
+4-site XXZ chain at dt=2, alpha=0.8 gains 2.70 against 1.39.
+
+So the gate is now two tests. On the real axis a step, or the sum over
+the branch, above (1/2) ln D is rejected. Anywhere, a step above
+`_GROWTH_TOL` = 1 is redone at twice the sub-steps and kept only when the
+two growths agree to `_GROWTH_REPEAT` = 10%, because the growth of the
+exact flow does not depend on the count and the unstable backward step of
+TDVP does (48.4, 5.4 and 0.27 at 1, 2 and 4 sub-steps on the stiff 3-site
+case at kappa=10, against 2.74282 at 4 and 8 on the legitimate one).
+
+The old gate ended in "reduce dt" for nothing in three cases: the
+identity of 4 spins decaying at gamma=4, dt=0.5 (growth 1.117 at every
+count from 1 to 64); the public route on 6 damped spins at gamma=1,
+dt=1.1 (1.103, on `"python"` and v3); and the seeded 3-site
+Bose-Hubbard at the default dt=2, where the coherence between the
+2-boson ket and the full bra, an eigenmode outside the sector with
+Re(lambda z) = 3.98305, fills snapshots 7 to 19 of the complex branch.
+All three finish now. The last one warns (`_warn_takeover`, three or more
+accepted steps above e^1 on a complex branch), since its fifth level is
+0.25 off ED. The stiff case settles at the same count as before.
+
+Not verified: the 5-site check, `julia_live`, the 10% tolerance between
+agreement to 2e-8 and a factor of 9 (nothing fell in between), the summed
+clause near its bound under truncation, and the cost of the redone steps
+(13 in the dt=2 run). `stiff.py off` of the night of 2026-10-30 no longer
+turns the growth test off. Truncated XXZ at maxm=4 still raises "reduce
+dt", from the trace test, under both gates. Pinned by
+`tests/test_clik_growth_gate.py`.

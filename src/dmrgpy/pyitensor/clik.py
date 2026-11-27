@@ -147,7 +147,7 @@ _GSE_ORDER = 3
 
 def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
                   one_site=False, deflate=None, substeps=1, meter=None,
-                  bounded=False):
+                  bounded=False, growth_bound=None):
     """(states, substeps): nk normalized snapshots exp(G z m)|psi0>,
     m = 0..nk-1, with a global subspace expansion before each of the first
     _GSE_STEPS steps (before every step for one_site=True), and the number
@@ -157,21 +157,29 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
     the exact evolution keeps <d|psi> where it started, and TDVP does not
     (see krylov_spectrum). `meter`, another such left zero mode with
     <meter|psi0> != 0, makes the step adaptive: the exact flow conserves
-    <meter|psi>, so a step that changes it grossly, or grows the norm by
-    more than e^_GROWTH_TOL, is rejected, and the branch starts over with
-    twice the sub-steps (see _step_accepted and _branch_attempt). bounded=True, for a G whose spectrum has Re <= 0
+    <meter|psi>, so a step that changes it grossly, or grows the norm in
+    a way the exact flow cannot, is rejected, and the branch starts over
+    with twice the sub-steps (see _growth, _step_accepted and
+    _branch_attempt). bounded=True, for a G whose spectrum has Re <= 0
     (a Lindbladian, where a left steady state exists), applies the norm
     growth and overflow tests without a meter, as on the traceless
     branch. A step that overflows inside the sweep (a LinAlgError or a
-    floating-point overflow) counts as rejected."""
+    floating-point overflow) counts as rejected. `growth_bound` is the
+    largest log-norm the exact flow can gain, (1/2) ln D for a Lindbladian
+    on a Hilbert space of dimension D; it holds for real z only and is
+    ignored otherwise."""
     if hermitian is None:
         hermitian = mpo_is_hermitian(G)
     gated = meter is not None or bounded
+    if np.imag(z) != 0:
+        growth_bound = None
     while True:
+        grown = []
         states = _branch_attempt(G, psi0, z, nk, cutoff, maxdim, niter,
                                  hermitian, one_site, deflate, substeps,
-                                 meter, gated)
+                                 meter, gated, growth_bound, grown)
         if states is not None:
+            _warn_takeover(grown, z)
             return states, substeps
         if substeps >= _MAX_SUBSTEPS:
             raise RuntimeError(
@@ -181,7 +189,8 @@ def evolve_branch(G, psi0, z, nk, cutoff, maxdim, niter=50, hermitian=None,
 
 
 def _branch_attempt(G, psi0, z, nk, cutoff, maxdim, niter, hermitian,
-                    one_site, deflate, substeps, meter, gated):
+                    one_site, deflate, substeps, meter, gated, bound=None,
+                    grown=None):
     """One run of evolve_branch at a fixed sub-step count: the
     snapshots, or None at the first rejected step. A rejection restarts
     the whole branch, so that no snapshot taken at a count found unstable
@@ -193,6 +202,7 @@ def _branch_attempt(G, psi0, z, nk, cutoff, maxdim, niter, hermitian,
     psi = psi0.copy()
     psi.normalize()
     states = [psi]
+    total = 0.0   # log-norm gained since the start of the branch
     for m in range(nk - 1):
         if m < _GSE_STEPS and not one_site:
             with bk.pad_bonds_suspended():
@@ -206,10 +216,21 @@ def _branch_attempt(G, psi0, z, nk, cutoff, maxdim, niter, hermitian,
                 with np.errstate(over="raise", invalid="raise"):
                     new, lognorm = _step(psi, G, z, cutoff, maxdim, niter,
                                          hermitian, one_site, substeps)
+                    verdict = _growth(lognorm, total, bound)
+                    if verdict == "redo":
+                        new, again = _step(psi, G, z, cutoff, maxdim, niter,
+                                           hermitian, one_site, 2 * substeps)
+                        if not abs(again - lognorm) <= _GROWTH_REPEAT * lognorm:
+                            verdict = "reject"
+                        lognorm = again
             except (np.linalg.LinAlgError, FloatingPointError):
                 return None   # overflowed inside the sweep
-            if not _step_accepted(meter, psi, new, lognorm):
+            if verdict == "reject" or not _step_accepted(meter, psi, new,
+                                                         lognorm):
                 return None
+            if verdict == "redo" and grown is not None:
+                grown.append(lognorm)
+            total += lognorm
             psi = new
         if deflate is not None:
             psi = _deflated(psi, deflate, cutoff, maxdim)
@@ -218,28 +239,93 @@ def _branch_attempt(G, psi0, z, nk, cutoff, maxdim, niter, hermitian,
     return states
 
 
-# The adaptive step of evolve_branch. A step is rejected when it grows
-# the norm by more than e^_GROWTH_TOL, overflows, or moves <meter|psi> by
+# The adaptive step of evolve_branch. A step is rejected when its norm
+# growth is not that of the exact flow (see _growth), when it overflows,
+# or when it moves <meter|psi> by
 # more than _METER_TOL times ||meter||, the component of the normalized
 # state along the unit vector of the meter. Measured on the seeded 5-site
 # Bose-Hubbard Lindbladian at dt=0.5: one step of 0.5 grew the log-norm by
 # 16.8 at the second snapshot, while five steps of 0.1 kept it below 0.2
-# and moved the trace by at most 1.3e-3 of ||1_q||. The norm of a
-# normalized density matrix can grow legitimately as the state purifies,
-# by at most (1/2) ln D in all. The trace test is a gross-error test, in
+# and moved the trace by at most 1.3e-3 of ||1_q||.
+#
+# The growth test. exp(L t) is trace preserving and completely positive
+# for every t > 0, so it contracts the trace norm of any X, Hermitian or
+# not, traceless or not, and ||exp(L t) X||_2 <= ||exp(L t) X||_1 <=
+# ||X||_1 <= sqrt(D) ||X||_2. The log-norm of a normalized vector then
+# gains at most (1/2) ln D, in one step and in all steps together, with
+# D = <<1|1>> the dimension of the Hilbert space (of the sector, for a
+# start in it). The bound is reached: the identity under strong decay to
+# a pure state gains exactly that. A step or a branch above it is wrong
+# for certain. On the complex contour none of this holds: exp(L z) is not
+# a quantum channel, a mode with Im(lambda) tan(alpha) > -Re(lambda)
+# grows at every step, and the only bound is |z| times the largest
+# eigenvalue of the Hermitian part of exp(-i alpha) L (the driven 4-site
+# XXZ chain at dt=2, alpha=0.8 gains 2.70 against (1/2) ln 16 = 1.39).
+# There, and below the bound, a growth above e^_GROWTH_TOL is redone at
+# twice the sub-steps: the growth of the exact flow does not depend on
+# the count, and the unstable backward step of TDVP does (48.4, 5.4 and
+# 0.27 at 1, 2 and 4 sub-steps on the stiff 3-site Bose-Hubbard case,
+# against 2.74282 at 4 and at 8 on the seeded 3-site case at dt=2,
+# alpha=pi/8, where the coherence between the 2-boson ket and the full
+# bra, an eigenmode with Re(lambda z) = 3.98305, takes over the complex
+# branch). It is rejected unless the two agree to _GROWTH_REPEAT of it.
+# _GROWTH_TOL only decides when that check is paid for.
+#
+# The trace test is a gross-error test, in
 # units of the state norm, because truncation also moves the trace and no
 # sub-step removes that: measured against the trace itself, a random start
 # on a truncated 6-site XXZ chain was rejected at every count up to 64.
 _METER_TOL = 1e-2
 _GROWTH_TOL = 1.0
+_GROWTH_REPEAT = 0.1
 _MAX_SUBSTEPS = 64
+
+
+# A complex branch that accepts this many steps above e^_GROWTH_TOL is
+# taken over by one mode of G with Re(lambda z) > _GROWTH_TOL: it grows
+# by the same factor at every step and crowds every other direction out
+# of the later snapshots. On the seeded 3-site Bose-Hubbard Lindbladian
+# at dt=2 the coherence between the 2-boson ket and the full bra, an
+# eigenmode outside the sector with Re(lambda z) = 3.98305, filled
+# snapshots 7 to 19, and the fifth level came out 0.25 off ED.
+_TAKEOVER_STEPS = 3
+
+
+def _warn_takeover(grown, z):
+    """Warn when a complex branch was taken over by one growing mode
+    (see _TAKEOVER_STEPS); `grown` holds the log-norms of the accepted
+    steps above e^_GROWTH_TOL."""
+    if np.imag(z) == 0 or len(grown) < _TAKEOVER_STEPS:
+        return
+    import warnings
+    warnings.warn(
+        "krylov_spectrum: %d steps of the complex branch grew the norm by "
+        "more than e^%g each (up to e^%.3g): one mode of G with "
+        "Re(lambda z) > %g takes over its snapshots, so the levels found "
+        "after the first few can be off; a smaller dt or another alpha "
+        "keeps it out" % (len(grown), _GROWTH_TOL, max(grown), _GROWTH_TOL),
+        RuntimeWarning, stacklevel=3)
+
+
+def _growth(lognorm, total, bound):
+    """What the log-norm gained by one step asks for, `total` being what
+    the branch gained before it and `bound` the most the exact flow can
+    gain (None: unknown): "reject" above the bound, "redo" above
+    _GROWTH_TOL, None otherwise. The bound is given the slack of the
+    trace test."""
+    if not np.isfinite(lognorm):
+        return "reject"
+    if bound is not None and (max(lognorm, total + lognorm)
+                              > bound + np.log1p(_METER_TOL)):
+        return "reject"
+    return "redo" if lognorm > _GROWTH_TOL else None
 
 
 def _step_accepted(meter, old, new, lognorm):
     """Whether a step from `old` to `new` (both normalized, the norm of
-    the unnormalized result being e^lognorm) stayed bounded and, with a
-    meter, kept <meter|psi>."""
-    if not np.isfinite(lognorm) or lognorm > _GROWTH_TOL:
+    the unnormalized result being e^lognorm) stayed finite and, with a
+    meter, kept <meter|psi>. The norm growth is judged by _growth."""
+    if not np.isfinite(lognorm):
         return False
     if meter is None:
         return True
@@ -504,7 +590,9 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     `deflate`, the real branch is metered (evolve_branch's `meter`) and
     doubles `substeps` until its steps keep the trace; the complex branch
     and the angle probe then use the same count, returned as
-    KrylovSpectrum.substeps.
+    KrylovSpectrum.substeps. The norm growth of a real branch is tested
+    against (1/2) ln <d|d>, so `deflate` must be the identity itself, not
+    a multiple of it, of a space that contains both starts.
 
     The defaults are measured, on 6-site chains against ED with the
     hopping as the unit. A small dt makes consecutive imaginary-time
@@ -535,9 +623,13 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
             np.sqrt(abs(_scalar(inner(deflate, deflate))
                         * _scalar(inner(psi_p, psi_p))))):
         meter = deflate
+    # (1/2) ln D, D = <<1|1>>: see the comment above _GROWTH_TOL
+    bound = (None if deflate is None
+             else 0.5 * np.log(abs(_scalar(inner(deflate, deflate)))))
     states, substeps = evolve_branch(G, psi_p, dt, nk, cutoff, maxdim, niter,
                                      herm, one_site, substeps=substeps,
-                                     meter=meter, bounded=deflate is not None)
+                                     meter=meter, bounded=deflate is not None,
+                                     growth_bound=bound)
     for psi in states:
         km.add(psi)
     if alpha is None and herm:
@@ -553,7 +645,8 @@ def krylov_spectrum(G, sites, nk=20, dt=0.5, alpha=None, maxdim=64,
     states, _ = evolve_branch(G, psi_u, dt * np.exp(-1j * alpha), nk, cutoff,
                               maxdim, niter, herm, one_site, deflate,
                               substeps=substeps,
-                              bounded=deflate is not None)
+                              bounded=deflate is not None,
+                              growth_bound=bound)
     for psi in states:
         km.add(psi)
     lam, C, ndim = project(km.M, km.Gm, gram_tol)

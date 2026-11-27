@@ -2575,3 +2575,18 @@ decided by a hash that the build records, so an extension built before
 this date has no record and gives no warning until it is rebuilt. The
 message printed when an explicit C++ version falls back to ED carries the
 same reason (`tests/test_backend_status.py`).
+
+## The 2026-11-27 growth gate of CLIK-MPS
+
+A Lindblad spectrum (`Lindblad_Chain.get_spectrum`, `get_krylov_spectrum`
+with `traceless=True`) changes only where the old gate rejected a step
+whose norm grew by more than e^1. On the real branch a growth up to
+(1/2) ln D is now accepted, so a run that settled at more sub-steps, or
+ended in "reduce dt", now runs at fewer sub-steps or finishes. On the
+complex branch such a step is redone at twice the sub-steps and kept when
+both agree to 10%. A run whose steps all grew by less than e^1 is the
+same to the bit. On the seeded 3-site Bose-Hubbard at dt=2 the call that
+raised now returns, with a `RuntimeWarning` that one mode took over the
+complex branch; its fifth level is 0.25 off ED, the other five of the
+slowest six 2e-9 to 9e-3 (`tests/test_clik_growth_gate.py`, `docs/clik_mps_lindblad_plan.md`).
+
