@@ -51,6 +51,11 @@ class MPS():
         return MPS(self.jlmps,MBO=self.MBO)
     def write(self,name=None,path=None):
         return # dummy method
+    def save(self,name):
+        """Write this wavefunction to the file `name` (.npz is added when
+        missing), to be read back with chain.load_state(name)"""
+        from .. import statefile
+        return statefile.save_state(self,name)
     def get_site_entropy(self,i):
         if self.MBO is not None: return self.MBO.get_site_entropy(self,i)
         else: raise RuntimeError("get_site_entropy needs a chain attached to the MPS (MBO is None)") # not implemented

@@ -389,6 +389,13 @@ class State():
             self.v = v # store the vector
             self.MBO = MBO # store the many-body object
         self.mode = "ED" # exact diagonalization mode
+    def save(self,name):
+        """Write this vector to the file `name` (.npz is added when
+        missing), to be read back with chain.load_state(name). The state
+        does not know its chain, so the file has no site list;
+        chain.save_state(wf,name) writes one."""
+        from .. import statefile
+        return statefile.save_state(self,name)
     def __rmul__(self,a):
         """Multiply by something"""
         from ..algebra.algebra import ismatrix

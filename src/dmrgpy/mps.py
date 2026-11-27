@@ -107,6 +107,11 @@ class MPS():
         nothing to write to disk. Kept as a callable so existing call
         sites (e.g. self.execute(wf.write)) don't need special-casing."""
         pass
+    def save(self,name):
+        """Write this wavefunction to the file `name` (.npz is added when
+        missing), to be read back with chain.load_state(name)"""
+        from . import statefile
+        return statefile.save_state(self,name)
     def get_fermionic_parity(self,**kwargs):
         from .fermionicparity import get_fermionic_parity
         return get_fermionic_parity(self,**kwargs) # parity of the state

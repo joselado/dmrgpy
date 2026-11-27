@@ -133,6 +133,44 @@ begins. `sc.get_gs(best=True, n=3)` solves `n` times from independent
 random starts and keeps the lowest energy, for a frustrated or disordered
 chain where a single solve can end in an excited state.
 
+## Saving a state to a file
+
+A state can be written to a file and read back in a later run. This is
+useful on a cluster: one job solves the ground state, and other jobs
+measure it or evolve it in time without solving again.
+
+```python
+wf = sc.get_gs()
+wf.save("gs")                      # writes gs.npz
+
+# later, in a new run with the same chain and Hamiltonian
+wf = sc.load_state("gs")
+sc.set_gs(wf)                      # the chain now measures this state
+e = sc.gs_energy()                 # <wf|H|wf>, no sweep
+```
+
+The file holds the site tensors of the MPS and the list of sites of the
+chain. The state comes back as it was saved, with the same norm and the
+same bond dimensions. `load_state` only returns the state. After
+`sc.set_gs(wf)` every method of the chain measures it, and
+`sc.gs_energy(wf0=wf, reconverge=True)` sweeps from it instead. The KPM
+dynamical correlator is the exception to "without solving again": it
+does not assume that a state we set is the ground state, so it solves
+once more for the lower edge of the spectrum.
+
+- `wf.save(name)`: writes the state; `.npz` is added to the name.
+- `sc.save_state(wf, name)`: the same, called on the chain. Use it for a
+  `mode="ED"` state, so that the file also records the sites.
+- `sc.load_state(name)`: reads the state on a chain with the same sites.
+  A file from a chain with other sites raises an error.
+
+!!! note "Backends"
+    A file written on `itensor_version=3`, `"python"` or `"julia_live"`
+    loads on any of the three. A state solved in a conserved sector is
+    saved in its dense form, and loads on the chain with the sector
+    cleared. An ED state loads on a chain with the same conserved sector.
+    `itensor_version=2` cannot save or load a state.
+
 ## Free-fermion states
 
 For a fermion chain, a natural start is the ground state without the

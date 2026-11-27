@@ -1141,6 +1141,22 @@ class Many_Body_Chain():
       ops = [operators] if single else list(operators)
       taus,vals,_ = imaginarytime.evolve(self,wf,tau,operators=ops,**kwargs)
       return (taus,vals[:,0]) if single else (taus,vals)
+  def save_state(self,wf,name):
+      """Write the wavefunction wf of this chain to the file `name` (.npz
+      is added when missing) and return the file name. An MPS is written
+      as its site tensors and an ED state as its vector, with the norm
+      they have (statefile.py)."""
+      from . import statefile
+      return statefile.save_state(wf,name,chain=self)
+  def load_state(self,name):
+      """The wavefunction of the file `name`, written by save_state() or
+      wf.save(), as a state of this chain, norm included. Nothing on the
+      chain changes: set_gs(wf) or gs_energy(wf0=wf) make it the chain's
+      state. An MPS loads on any of itensor_version=3, "python" and
+      "julia_live", on a chain with the same sites and no conserved
+      sector (statefile.py)."""
+      from . import statefile
+      return statefile.load_state(self,name)
   def hadamard_product(self,*wfs,**kwargs):
       """Elementwise product of states in the computational basis
       (mpsalgebratk/hadamard.py)"""
