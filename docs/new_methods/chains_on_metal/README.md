@@ -380,7 +380,11 @@ a spectral function: dI/dV is negative at 8 of the 21 biases of sides,
 largest value is 0.0042. The two DDMRG calls at each bias (the
 electron and the hole part) are each negative, of order 1e-6 to 1e-4,
 so the variational functional was not minimized at 44 sites and maxm
-128, while on 8 sites it is 5.8e-9 off ED (section 3). As a result
+128, while on 8 sites it is 5.8e-9 off ED (section 3). The reason is the
+operator, not the sweep: the MPO of (H-E0-omega)^2 + eta^2, compressed
+at the DMRG cutoff, is not positive from 16 sites on, and on 44 sites
+<GS|M|GS> is -0.152 against +4.0e-4. The route now raises there
+(`docs/known_issue_ddmrg_compressed_operator.md`). As a result
 Fable's condition (iii) cannot be tested with these runs, and the
 warning on the linear tip-first route stays. What is left as a
 reference on 44 sites is the moments above, which both routes satisfy

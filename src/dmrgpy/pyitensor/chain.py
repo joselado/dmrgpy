@@ -1603,10 +1603,40 @@ class Chain:
         eta2 = to_mpo(ampo2, cutoff=_BUILD_CUTOFF, maxdim=self.mpomaxm)
         M = mps_sum(self._mult_mpo(Hsh, Hsh), eta2,
                     cutoff=self.cutoff, maxdim=self.mpomaxm)
+        self._check_ddmrg_operator(M, energy + omega, eta)
         b = self._apply_mpo(S2, self.wf0) * (-eta)
         x, W = ddmrg.correction_vector(M, b, maxdim, nsweeps, self.cutoff,
                                         x0=x0)
         return -W / (np.pi * eta), x
+
+    def _check_ddmrg_operator(self, M, c, eta):
+        """Raise when the compressed MPO M of (H-c)^2 + eta^2 is wrong on
+        the ground state. Its exact value there is ||H gs||^2 - 2c<H> +
+        c^2 + eta^2, from H applied without truncation. From about 16 sites
+        on a Kondo chain the product and the sums, compressed at the DMRG
+        cutoff, lose positivity (-0.152 against +4.0e-4 on 44 sites at
+        eta = 0.02, cutoff 1e-10), and the functional then has no minimum:
+        the sweep returned negative spectral weights. The tolerance is a
+        tenth of eta^2, the smallest eigenvalue of the exact M, plus 1e-10
+        of the terms that cancel."""
+        wf = self.wf0
+        n0 = float(np.real(inner(wf, wf)))
+        hw = applyMPO(self.H, wf, cutoff=0.0, maxdim=10**9, method="exact")
+        hw.noPrime("Site")
+        hh = float(np.real(inner(hw, hw))) / n0
+        e = float(np.real(inner(wf, hw))) / n0
+        exact = hh - 2.0*c*e + c*c + eta*eta
+        got = float(np.real(inner(wf, M, wf))) / n0
+        tol = 0.1*eta*eta + 1e-10*(hh + c*c)
+        if not abs(got - exact) <= tol:
+            raise RuntimeError(
+                "cvm_solver='variational': the MPO of (H-E0-omega)^2+eta^2, "
+                "compressed at cutoff %g, gives %.6g on the ground state "
+                "against an exact %.6g (%.3g eta^2 off), so the variational "
+                "functional has no minimum and the spectral weight would be "
+                "wrong, negative in practice. A smaller cutoff does not "
+                "remove it; use submode='TASK' or cvm_solver='cg'"
+                % (self.cutoff, got, exact, (got - exact)/(eta*eta)))
 
     def apply_inverse(self, terms, wf, tol, max_it):
         A = self._mpo(terms)

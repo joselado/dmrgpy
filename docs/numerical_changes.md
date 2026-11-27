@@ -2590,3 +2590,16 @@ raised now returns, with a `RuntimeWarning` that one mode took over the
 complex branch; its fifth level is 0.25 off ED, the other five of the
 slowest six 2e-9 to 9e-3 (`tests/test_clik_growth_gate.py`, `docs/clik_mps_lindblad_plan.md`).
 
+## The 2026-11-27 guard of the variational correction vector
+
+No returned number changes; a call that returned wrong numbers raises.
+`cvm_solver="variational"` on v3 and `"python"` raises a `RuntimeError`
+when its MPO of (H-E0-omega)^2+eta^2 is off its exact value on the ground
+state by more than a tenth of eta^2, and `cvm.py` raises on every backend
+when a weight is below -1e-6 of ||B|GS>||^2/(pi eta). On two spins on two
+Wilson chains at cutoff 1e-10 this is every call from 16 sites on, whose
+weights were negative or wrong (-7.4e-5 against 0.0097 at zero bias on
+44 sites). Below that, as on every chain of `tests/test_ddmrg_v3.py`,
+nothing changes (`docs/known_issue_ddmrg_compressed_operator.md`,
+`tests/test_ddmrg_operator_guard.py`).
+

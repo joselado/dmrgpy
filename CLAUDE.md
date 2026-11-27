@@ -458,7 +458,11 @@ the ED-against-v3 KPM residual; `kpm_finite`'s `window_chain_kwargs` check;
 the reason for
 `julia_live`'s slowdown and its KPM guard raising `juliacall.JuliaError`
 rather than `RuntimeError`; `ShiftInv`'s `applyinverse(delta=)`; and the
-short `nt` defaults of `td_dynamical_correlator`.
+short `nt` defaults of `td_dynamical_correlator`. The variational
+correction vector (`cvm_solver="variational"`) raises from about 16 sites
+on a Kondo chain, where its compressed MPO of (H-E0-omega)^2+eta^2 is not
+positive; the fix is open
+(`docs/known_issue_ddmrg_compressed_operator.md`).
 The fixes of `docs/audit_2026_11_21_hole_hunt.md` left open: the ESR
 DMRG guard runs only when H conserves a charge that S^+_k changes; the
 ESR Krylov routes keep the free-spin band and neither grow nor warn; the

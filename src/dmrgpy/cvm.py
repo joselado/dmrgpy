@@ -103,8 +103,10 @@ def dynamical_correlator_ddmrg(self,A,B,es=None,delta=1e-1):
         # route reads self.maxm (cvm_maxm, cutoff and mpomaxm go to
         # ddmrg.jl explicitly), so the state is taken once, here.
         from .mpsjulialive import ddmrg as ddmrgjl
-        return ddmrgjl.dynamical_correlator_ddmrg(self,A,B,es,delta,
-                                                  wf0=wf0,e0=self.e0)
+        es,out = ddmrgjl.dynamical_correlator_ddmrg(self,A,B,es,delta,
+                                                    wf0=wf0,e0=self.e0)
+        _check_ddmrg_values(B,wf0,delta,es,out)
+        return (es,out)
     out,x = [],None
     with _cvm_sweep_params(self):
         for e in es:
@@ -113,7 +115,28 @@ def dynamical_correlator_ddmrg(self,A,B,es=None,delta=1e-1):
                     int(self.cvm_maxm),int(self.cvm_nsweeps),x0=x)
             print("DDMRG in E = ",e," value = ",o)
             out.append(o)
+    _check_ddmrg_values(B,wf0,delta,es,np.array(out))
     return (es,np.array(out))
+
+
+def _check_ddmrg_values(B,wf0,delta,es,out):
+    """The variational route serves only an adjoint pair (B^dagger,B),
+    whose spectral density is not negative. A value below -1e-6 of the
+    peak scale ||B|GS>||^2/(pi*delta) means the sweep did not minimize
+    the functional: on a 44-site Kondo chain every value came back
+    negative while TASK gave 0.0097 (the MPO of (H-E0-w)^2+eta^2 had
+    lost positivity, which the backends now check as well)."""
+    bw = B*wf0
+    scale = abs(bw.dot(bw))/(np.pi*delta)
+    out = np.real(np.asarray(out))
+    bad = np.flatnonzero(out < -1e-6*scale)
+    if len(bad):
+        k = bad[0]
+        raise RuntimeError(
+            "cvm_solver='variational' returned a negative spectral weight, "
+            "%.3g at omega=%g (peak scale %.3g): the variational sweep did "
+            "not minimize its functional; use submode='TASK' or "
+            "cvm_solver='cg'" % (out[k],np.asarray(es)[k],scale))
 
 @contextlib.contextmanager
 def _cvm_sweep_params(self):

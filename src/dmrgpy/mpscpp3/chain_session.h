@@ -2718,6 +2718,33 @@ class Chain
         ampo2 += (s*eta)*(s*eta),"Id",1;
         auto eId = to_mpo_unit(ampo2);
         auto M = sum(mult_mpo(K,K),eId,margs);
+        // M is s^2 [(H-c)^2 + eta^2] with c = energy+omega. Its exact value
+        // on the ground state is s^2 (||H gs||^2 - 2c<H> + c^2 + eta^2),
+        // <H gs|H gs> by ITensor's exact innerC(A,x,B,y). From about 16
+        // sites on a Kondo chain the product and the sums, compressed at
+        // cutoff_, lose positivity (-0.152 against +4.0e-4 on 44 sites at
+        // eta 0.02, cutoff 1e-10), the functional has no minimum and the
+        // sweep returned negative weights. Tolerance: a tenth of eta^2,
+        // the smallest eigenvalue of the exact M, plus 1e-10 of the terms
+        // that cancel; the same check as pyitensor's _check_ddmrg_operator.
+            {
+            double c = energy+omega;
+            double n0 = innerC(wf0_,wf0_).real();
+            double hh = innerC(H_,wf0_,H_,wf0_).real()/n0;
+            double e = innerC(wf0_,H_,wf0_).real()/n0;
+            double exact = hh - 2.0*c*e + c*c + eta*eta;
+            double got = innerC(wf0_,M,wf0_).real()/(n0*s2);
+            double tol = 0.1*eta*eta + 1E-10*(hh + c*c);
+            if (!(std::abs(got-exact) <= tol))
+                throw std::runtime_error(tinyformat::format(
+                    "cvm_solver='variational': the MPO of (H-E0-omega)^2+eta^2, "
+                    "compressed at cutoff %g, gives %.6g on the ground state "
+                    "against an exact %.6g (%.3g eta^2 off), so the variational "
+                    "functional has no minimum and the spectral weight would be "
+                    "wrong, negative in practice. A smaller cutoff does not "
+                    "remove it; use submode='TASK' or cvm_solver='cg'",
+                    cutoff_,got,exact,(got-exact)/(eta*eta)));
+            }
         auto bargs = Args("Cutoff",cutoff_,"MaxDim",maxdim);
         MPS b = apply_mpo(S2,wf0_,bargs);
         b = (-eta*s2)*b;
